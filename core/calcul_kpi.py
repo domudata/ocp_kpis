@@ -101,7 +101,8 @@ def calc_kpis(df, av, now_ts, posts, av_total_per_poste=None):
         df,
         (df["Statut OT"] == "CRÉÉ") &
         (df["Statut utilisateur"].str.contains(r"\bCRPR\b", case=False, na=False)),
-        "ap", posts
+        "ap",
+        posts
     )
     for c in ["<1 mois", ">3 mois", "1 mois < <3 mois", "Inconnu"]:
         pr[c] = pr.get(c, 0)
@@ -118,7 +119,8 @@ def calc_kpis(df, av, now_ts, posts, av_total_per_poste=None):
         df,
         (df["Statut OT"] == "LANC") &
         (df["Statut utilisateur"].str.contains("ATPL", case=False, na=False)),
-        "alp", posts
+        "alp",
+        posts
     )
     for c in ["<1 mois", ">3 mois", "1 mois < <3 mois", "Inconnu"]:
         pl[c] = pl.get(c, 0)
@@ -134,7 +136,8 @@ def calc_kpis(df, av, now_ts, posts, av_total_per_poste=None):
     ex = cpiv(
         df,
         (df["Statut OT"] == "LANC") & (df["Contient SOPL"] == 1),
-        "aex", posts
+        "aex",
+        posts
     )
     for c in ["<1 mois", ">3 mois", "1 mois < <3 mois", "Inconnu"]:
         ex[c] = ex.get(c, 0)
@@ -159,10 +162,8 @@ def calc_kpis(df, av, now_ts, posts, av_total_per_poste=None):
     res['la'] = la
 
     # ══════════════════════════════════════════════════════════════
-    # ── RECONSTRUIT ── Suite à partir du point de troncature
-    # ══════════════════════════════════════════════════════════════
-
     # 6. Backlog préparation caractérisé
+    # ══════════════════════════════════════════════════════════════
     pc = pd.pivot_table(
         df[df["Statut OT"] == "CRÉÉ"],
         index="Poste travail princ.", columns="Backlog preparation",
@@ -174,7 +175,9 @@ def calc_kpis(df, av, now_ts, posts, av_total_per_poste=None):
     pc["Backlog préparation caractérisé"] = ckpi(pc["CARACTERISE"], pc["Total"])
     res['pc'] = pc
 
+    # ══════════════════════════════════════════════════════════════
     # 7. Backlog planification caractérisé
+    # ══════════════════════════════════════════════════════════════
     plc = pd.pivot_table(
         df[df["Statut OT"] == "CRÉÉ"],
         index="Poste travail princ.", columns="Backlog planification",
@@ -186,7 +189,9 @@ def calc_kpis(df, av, now_ts, posts, av_total_per_poste=None):
     plc["Backlog planification caractérisé"] = ckpi(plc["CARACTERISE"], plc["Total"])
     res['plc'] = plc
 
+    # ══════════════════════════════════════════════════════════════
     # 8. OT CONFIME
+    # ══════════════════════════════════════════════════════════════
     clot_df = df[df["Statut système"].str.contains("CLOT|TCLO", na=False)]
     conf = pd.pivot_table(
         clot_df, index="Poste travail princ.", columns="OT CONFIME",
@@ -198,7 +203,9 @@ def calc_kpis(df, av, now_ts, posts, av_total_per_poste=None):
     conf["OT CONFIME"] = ckpi(conf["OUI"], conf["Total"])
     res['conf'] = conf
 
+    # ══════════════════════════════════════════════════════════════
     # 9. OT_COR_EGAL
+    # ══════════════════════════════════════════════════════════════
     ce = pd.pivot_table(
         df, index="Poste travail princ.", columns="OT_COR_EGAL",
         values="Ordre", aggfunc="count", fill_value=0
@@ -209,7 +216,9 @@ def calc_kpis(df, av, now_ts, posts, av_total_per_poste=None):
     ce["OT_COR_EGAL"] = ckpi(ce["OUI"], ce["Total"])
     res['ce'] = ce
 
+    # ══════════════════════════════════════════════════════════════
     # 10. Taux d'approbation des Avis
+    # ══════════════════════════════════════════════════════════════
     taux_approb = pd.Series(100.0, index=posts)
     if av_total_per_poste is not None and not av_total_per_poste.empty:
         av_sans = av.groupby("Poste travail princ.").size() if "Poste travail princ." in av.columns else pd.Series(dtype=int)
@@ -220,12 +229,12 @@ def calc_kpis(df, av, now_ts, posts, av_total_per_poste=None):
                 taux_approb[poste] = round(((total_av - sans_ordre) / total_av) * 100, 2)
     res['taux_approb'] = taux_approb
 
-    # 11. OT Fiabilité — maintenu à 100% (vérification de complétude des champs)
+    # 11. OT Fiabilité
     ot_fiab = pd.Series(100.0, index=posts)
     res['ot_fiab'] = ot_fiab
 
-    # 12. Total Avis de Panne — maintenu à 100% (suivi exhaustif)
-    total_av panne = pd.Series(100.0, index=posts)
+    # 12. Total Avis de Panne
+    total_av_panne = pd.Series(100.0, index=posts)
     res['total_av_panne'] = total_av_panne
 
     # ══════════════════════════════════════════════════════════════
