@@ -298,7 +298,7 @@ def main() -> None:
             )
 
         with tabs[5]:
-            render_plan_action_tab(plan_actions_rows, sf1_rows, sf2_rows, anomaly_dfs)
+            render_plan_action_tab(plan_actions_rows, sf1_rows, sf2_rows, anomaly_dfs, fichier_date)
 
     except Exception as e:
         st.error("Erreur lors du chargement des donnees : %s" % str(e))
