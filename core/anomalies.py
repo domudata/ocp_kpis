@@ -39,16 +39,19 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
     ano_map["Performance Inspection"]     = dfp[perf_filt & (dfp["_tw_num"].isin([290, 300, 310])) & (dfp["Date de début planifiée"] <= now_ts)].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["Performance Systématiques"]  = dfp[perf_filt & (dfp["_tw_num"] == 360) & (dfp["Date de début planifiée"] <= now_ts)].groupby("Poste travail princ.")["Ordre"].count()
 
-    avf_tot  = avf.groupby("Poste travail princ.")["Avis"].count()
-    avf_aprv = avf[avf["Statut utilisateur"].isin(["APRV", "APRV AVAU"])].groupby("Poste travail princ.")["Avis"].count()
-    ano_map["Taux d'approbation des Avis"] = avf_tot.sub(avf_aprv, fill_value=0)
-
+    ano_map["Taux d'approbation des Avis"] = (
+    avf[avf["Statut utilisateur"].isin(["APRQ", "REJT"])]
+    .groupby("Poste travail princ.")["Avis"].count()
+)
     ano_map["OT LANC ESTIME"]                  = dfp[(dfp["Statut OT"] == "LANC") & (dfp["OT LANC ESTIME"] == "NON")].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["Backlog préparation caractérisé"]  = dfp[(dfp["Statut OT"] == "CRÉÉ") & (dfp["Backlog preparation"] == "NON CARACTERISE")].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["Backlog planification caractérisé"]= dfp[(dfp["Statut OT"] == "LANC") & (dfp["Contient SOPL"] == 0) & (dfp["Backlog planification"] == "NON CARACTERISE")].groupby("Poste travail princ.")["Ordre"].count()
-    ano_map["OT CONFIME"]  = dfp[(dfp["Statut OT"].isin(["CLOT", "TCLO"])) & (dfp["OT CONFIME"] == "NON")].groupby("Poste travail princ.")["Ordre"].count()
-    ano_map["OT_COR_EGAL"] = dfp[(dfp["Statut OT"].isin(["CLOT", "TCLO"])) & (dfp["OT_COR_EGAL"] == "OUI")].groupby("Poste travail princ.")["Ordre"].count()
-
+    ano_map["OT CONFIME"] = dfp[
+    (dfp["Statut OT"].isin(["CLOT", "TCLO"])) & (dfp["OT CONFIME"] == "NON")
+].groupby("Poste travail princ.")["Ordre"].count()
+    ano_map["OT_COR_EGAL"] = dfp[
+    (dfp["Statut OT"].isin(["CLOT", "TCLO"])) & (dfp["OT_COR_EGAL"] == "NON")
+].groupby("Poste travail princ.")["Ordre"].count()
     return ano_map
 
 
