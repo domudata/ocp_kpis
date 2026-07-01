@@ -379,8 +379,8 @@ def html_plan_actions_table(rows: list, title: str, accent_color: str,
                         df_anom = anomaly_dfs[kpi_name]
                         df_poste = df_anom[df_anom["Poste travail princ."] == poste_name] if "Poste travail princ." in df_anom.columns else df_anom
                         if not df_poste.empty:
-                            csv_data = df_poste.to_csv(index=False, sep=';')
-                            b64 = base64.b64encode(csv_data.encode('utf-8')).decode()
+                            csv_data = df_poste.to_csv(index=False, sep=';', encoding='utf-8-sig')
+                            b64 = base64.b64encode(csv_data.encode('utf-8-sig')).decode()
                             safe_fn = (f"{poste_name}_{kpi_name}"
                                        .replace("/", "-").replace("\\", "-")
                                        .replace(" ", "_").replace("<", "").replace(">", "")[:50])
