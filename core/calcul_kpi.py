@@ -185,6 +185,7 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list) -> di
         pv[cn] = ckpi(pv["OUI"], pv["Total"])
         res[kn.lower().replace(" ", "_")] = pv
 
+
     # ── Taux approbation avis ──
     avf = av.copy()
     res['avf'] = avf
