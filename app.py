@@ -296,9 +296,9 @@ def main() -> None:
                 hist_df, var_df, journal_df, top5_df, bot5_df,
                 synth_perf, synth_qual, vp,
             )
-
         with tabs[5]:
-            render_plan_action_tab(plan_actions_rows
+            render_plan_action_tab(plan_actions_rows, sf1_rows, sf2_rows, anomaly_dfs, fichier_date)
+        
     except Exception as e:
         st.error("Erreur lors du chargement des donnees : %s" % str(e))
         st.markdown('<div class="es">Veuillez verifier que les fichiers ot.xlsx et avis.xlsx sont presents dans le repertoire.</div>', unsafe_allow_html=True)
