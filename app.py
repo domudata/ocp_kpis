@@ -2,18 +2,30 @@
 import streamlit as st
 import pandas as pd
 import numpy as np
-import random, time, os
+import random, time, os, base64
 from components.styles import inject_custom_css
 from components.cards import get_previous_card_values, format_card_variation
-from core.prepare_data import prepare_data, get_date_from_file, get_logo_base64
+from core.prepare_data import prepare_data, get_date_from_file
 from core.calcul_kpi import calc_kpis
-from core.historique import load_historical_kpis, save_kpis_to_excel
+from core.historique import load_historical_kpis
+from core.export_excel import save_kpis_to_excel
 from core.constants import CONSIGNES_HSE
+
+# --- FONCTION LOGO DÉPLACÉE ICI POUR ÉVITER LES ERREURS D'IMPORT ---
+def get_logo_base64():
+    for path in ["log.png", "assets/log.png", "logo.png", "./logo.png", "../logo.png"]:
+        if os.path.exists(path):
+            try:
+                with open(path, "rb") as f: return base64.b64encode(f.read()).decode()
+            except Exception: pass
+    return None
+# ----------------------------------------------------------------
 
 st.set_page_config(layout="wide", page_title="Dashboard KPI", initial_sidebar_state="expanded")
 inject_custom_css()
 
 fichier_date = get_date_from_file()
+
 if "hse_affiche" not in st.session_state: st.session_state.hse_affiche = False
 if not st.session_state.hse_affiche:
     c = random.choice(CONSIGNES_HSE)
@@ -24,7 +36,7 @@ if not st.session_state.hse_affiche:
     <div style="background:linear-gradient(135deg,#f6e05e,#ed8936);padding:36px 48px;border-radius:20px;font-size:32px;font-weight:700;text-align:center;margin:40px 0;color:#1a202c;max-width:800px;box-shadow:0 20px 60px rgba(0,0,0,.3)">⚠️ %s</div>
     <h2 style="text-align:center;color:#48bb78;font-size:36px;font-weight:900">Aucun travail n'est plus urgent que la securite</h2>
     <div style="margin-top:40px;width:200px;height:4px;background:rgba(255,255,255,.1);border-radius:2px;overflow:hidden"><div style="width:100%%;height:100%%;background:linear-gradient(90deg,#48bb78,#38a169);border-radius:2px;animation:ld 5.5s ease-in-out forwards"></div></div>
-    <style>@keyframes ld{from{width:0}to{width:100%%}}</style></div>"""%c, unsafe_allow_html=True)
+    <style>@keyframes ld{from{width:0}to{width:100%%}</style></div>"""%c, unsafe_allow_html=True)
     time.sleep(6); st.session_state.hse_affiche = True; st.rerun(); st.stop()
 
 # --- SIDEBAR ---
@@ -42,7 +54,7 @@ with st.sidebar:
 
 # --- LECTURE AUTO ---
 if not os.path.exists("ot.xlsx") or not os.path.exists("avis.xlsx"):
-    st.error("Fichiers ot.xlsx et avis.xlsx introuvables."); st.stop()
+    st.error("Fichiers ot.xlsx et avis.xlsx introuvables dans le répertoire de l'application."); st.stop()
 
 with open("ot.xlsx", "rb") as f: ot_bytes = f.read()
 with open("avis.xlsx", "rb") as f: av_bytes = f.read()
@@ -77,6 +89,7 @@ save_kpis_to_excel(kpis["prows"], kpis["pcols"], kpis["qrows"], kpis["qcols"], k
 prev = get_previous_card_values(hist_df)
 logo_b64 = get_logo_base64()
 logo_html = f'<img class="logo" src="data:image/png;base64,{logo_b64}" alt="Logo">' if logo_b64 else ""
+
 sp = kpis["prows"]; sq = kpis["qrows"]
 cards = [
     (len(df_f), "OT Analysés", "c1", prev.get("OT Analysés")),
@@ -85,10 +98,12 @@ cards = [
     (len(kpis["ano_p_r"])+len(kpis["ano_q_r"]), "Anomalies Totales", "c4", prev.get("Anomalies Totales")),
 ]
 cards_html = "".join(f'<div class="cc {cls}"><div class="cv">{val}</div><div class="cl">{label}</div>{format_card_variation(val, p)}</div>' for val,label,cls,p in cards)
+
 st.markdown(f'<div class="mh">{logo_html}<h1>DASHBOARD KPI</h1><div class="db">{fichier_date}</div></div><div class="cr">{cards_html}</div>', unsafe_allow_html=True)
 
 # --- ONGLETS ---
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["🏠 Tableau de Bord","📈 Performance","✅ Qualite","📂 Backlog","📉 Suivi & Evolution","🎯 Plan d' action"])
+
 with tab1:
     from pages.dashboard import render as rd; rd(kpis)
 with tab2:
