@@ -1,14 +1,19 @@
 # -*- coding: utf-8 -*-
 import streamlit as st
+import pandas as pd
+import numpy as np
 import random
 import time
+import os
+import base64
+from datetime import datetime
+
 from components.styles import inject_custom_css
-from components.sidebar import render_sidebar
 from components.header import render_header
 from components.cards import get_previous_card_values
-from core.prepare_data import prepare_data, get_date_from_file
+from core.prepare_data import prepare_data, get_date_from_file, read_excel_safe
 from core.calcul_kpi import calc_kpis
-from core.historique import load_historical_kpis, calculate_variations
+from core.historique import load_historical_kpis
 from core.export_excel import save_kpis_to_excel
 from core.constants import CONSIGNES_HSE
 
@@ -21,7 +26,9 @@ st.set_page_config(
 
 inject_custom_css()
 
-# ── Écran HSE ──
+# ══════════════════════════════════════════════════════════════
+# ÉCRAN HSE
+# ══════════════════════════════════════════════════════════════
 if "hse_affiche" not in st.session_state:
     st.session_state.hse_affiche = False
 
@@ -40,124 +47,206 @@ if not st.session_state.hse_affiche:
     st.rerun()
     st.stop()
 
-# ── Sidebar ──
+# ══════════════════════════════════════════════════════════════
+# SIDEBAR — FILTRES
+# ══════════════════════════════════════════════════════════════
 fichier_date = get_date_from_file()
 
-# Première passe : lire les fichiers pour avoir la liste des postes
-ot_file = st.sidebar.file_uploader("Fichier OT (.xlsx/.xls)", type=["xlsx", "xls"], key="ot_up")
-av_file = st.sidebar.file_uploader("Fichier Avis (.xlsx/.xls)", type=["xlsx", "xls"], key="av_up")
+with st.sidebar:
+    st.markdown("### 📅 Période")
+    col_d1, col_d2 = st.columns(2)
+    with col_d1:
+        date_debut = st.date_input("Du", value=pd.to_datetime("2025-01-01"), key="date_debut")
+    with col_d2:
+        date_fin = st.date_input("Au", value=pd.Timestamp.today(), key="date_fin")
 
-# Postes par défaut (vide tant que pas de fichier)
-default_posts = st.session_state.get("posts_disponibles", [])
+    st.markdown("---")
+    st.markdown("### 🔧 Filtres")
 
-selected_posts = st.sidebar.multiselect(
-    "Postes de travail", options=default_posts, default=default_posts, key="poste_select"
-)
+    # Ces selectbox seront remplies après le chargement des données
+    poste_filter = st.multiselect("Poste de travail", [], key="poste_filter")
+    atelier_filter = st.multiselect("Atelier", [], key="atelier_filter")
+    division_filter = st.multiselect("Division", [], key="division_filter")
 
-st.sidebar.markdown("---")
-st.sidebar.markdown(f"📅 **Date** : {fichier_date}")
-st.sidebar.markdown("---")
-st.sidebar.markdown("""
-<div style="text-align:center;padding:10px;color:rgba(255,255,255,0.5);font-size:11px;">
-    Dashboard KPI v1.0<br>Maintenance Industrielle
-</div>
-""", unsafe_allow_html=True)
+    st.markdown("---")
+    st.markdown(f"📅 **Date données** : {fichier_date}")
+    st.markdown("---")
+    st.markdown("""
+    <div style="text-align:center;padding:10px;color:rgba(255,255,255,0.5);font-size:11px;">
+        Dashboard KPI v1.0<br>Maintenance Industrielle
+    </div>
+    """, unsafe_allow_html=True)
 
-# ── Traitement principal ──
-if ot_file and av_file:
-    try:
-        df, avf, apm, now_ts, av_total = prepare_data(ot_file.read(), av_file.read(), fichier_date)
+# ══════════════════════════════════════════════════════════════
+# CHARGEMENT AUTOMATIQUE DES DONNÉES LOCALES
+# ══════════════════════════════════════════════════════════════
+OT_PATH = "ot.xlsx"
+AV_PATH = "avis.xlsx"
 
-        # Mettre à jour les postes disponibles
-        if apm != st.session_state.get("posts_disponibles"):
-            st.session_state["posts_disponibles"] = apm
-            st.session_state["selected_posts"] = apm
-            selected_posts = apm
-
-        # Filtrer les postes sélectionnés
-        active_posts = [p for p in selected_posts if p in apm]
-        if not active_posts:
-            active_posts = apm
-
-        # Calcul KPI
-        kpi_data = calc_kpis(df, avf, now_ts, active_posts, av_total)
-
-        # Historique
-        hist_df = load_historical_kpis("data/historique.xlsx")
-
-        # Sauvegarder dans session state pour les autres pages
-        st.session_state["kpi_data"] = kpi_data
-        st.session_state["df"] = df
-        st.session_state["hist_df"] = hist_df
-        st.session_state["date_str"] = fichier_date
-        st.session_state["selected_posts"] = active_posts
-        st.session_state["posts_disponibles"] = apm
-
-        # Sauvegarde Excel historique
-        save_kpis_to_excel(
-            kpi_data["p_rows"], kpi_data["p_cols"],
-            kpi_data["q_rows"], kpi_data["q_cols"],
-            kpi_data["ano_p_r"], kpi_data["ano_p_c"],
-            kpi_data["ano_q_r"], kpi_data["ano_q_c"],
-            fichier_date
-        )
-
-        # ── Header sur la page d'accueil ──
-        prev = get_previous_card_values(hist_df)
-        render_header(fichier_date, kpi_data, prev)
-
-        # ── Résumé rapide ──
-        from components.tables import render_synthesis_table, render_anomaly_table
-        from components.charts import show_pie_pair
-
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown('<div class="stl">SCORE PERFORMANCE</div>', unsafe_allow_html=True)
-            for poste in active_posts:
-                sp = kpi_data["scores_perf"].get(poste, 0)
-                c = "#10b981" if sp >= 80 else ("#f59e0b" if sp >= 60 else "#ef4444")
-                st.markdown(f'''<div class="car">
-                    <div class="cal">{poste}</div>
-                    <div class="cab"><div class="caf" style="width:{min(sp,100)}%;background:{c}"></div></div>
-                    <div class="cav-out">{sp:.1f}%</div>
-                </div>''', unsafe_allow_html=True)
-
-        with col2:
-            st.markdown('<div class="stl">SCORE QUALITÉ</div>', unsafe_allow_html=True)
-            for poste in active_posts:
-                sq = kpi_data["scores_qual"].get(poste, 0)
-                c = "#3b82f6" if sq >= 80 else ("#f59e0b" if sq >= 60 else "#ef4444")
-                st.markdown(f'''<div class="car">
-                    <div class="cal">{poste}</div>
-                    <div class="cab"><div class="caf" style="width:{min(sq,100)}%;background:{c}"></div></div>
-                    <div class="cav-out">{sq:.1f}%</div>
-                </div>''', unsafe_allow_html=True)
-
-        # Anomalies résumé
-        nb_ano = kpi_data.get("nb_anomalies", 0)
-        if nb_ano > 0:
-            st.markdown(f'<div class="stl">⚠️ {nb_ano} ANOMALIE(S) DÉTECTÉE(S)</div>', unsafe_allow_html=True)
-            all_ano = kpi_data.get("ano_p_r", []) + kpi_data.get("ano_q_r", [])
-            render_anomaly_table(all_ano[:10], kpi_data.get("ano_p_c", []))
-            if len(all_ano) > 10:
-                st.info(f"… et {len(all_ano) - 10} autres. Voir la page Performance/Qualité pour le détail complet.")
-        else:
-            st.markdown('<div class="stl">✅ AUCUNE ANOMALIE</div>', unsafe_allow_html=True)
-            st.markdown('<div class="es">Tous les KPI sont conformes aux cibles.</div>', unsafe_allow_html=True)
-
-        st.markdown('<div class="footer">Dashboard KPI — Maintenance Industrielle</div>', unsafe_allow_html=True)
-
-    except Exception as e:
-        st.error(f"❌ Erreur lors du traitement : {e}")
-        import traceback
-        st.code(traceback.format_exc())
-else:
+if not os.path.exists(OT_PATH) or not os.path.exists(AV_PATH):
     st.markdown("""
     <div style="min-height:60vh;display:flex;flex-direction:column;align-items:center;justify-content:center;">
         <div style="font-size:80px;margin-bottom:20px;">📁</div>
-        <h2 style="color:#1e3a5f;font-weight:800;">Chargement des données</h2>
+        <h2 style="color:#1e3a5f;font-weight:800;">Fichiers de données introuvables</h2>
         <p style="color:#64748b;font-size:18px;margin-top:10px;">
-            Uploadez les fichiers OT et Avis dans la barre latérale pour démarrer.
+            Placez les fichiers <b>ot.xlsx</b> et <b>avis.xlsx</b> dans le répertoire de l'application.
         </p>
     </div>
     """, unsafe_allow_html=True)
+    st.stop()
+
+try:
+    with open(OT_PATH, "rb") as f:
+        ot_bytes = f.read()
+    with open(AV_PATH, "rb") as f:
+        av_bytes = f.read()
+
+    df, avf, apm, now_ts, av_total = prepare_data(ot_bytes, av_bytes, fichier_date)
+
+    # ── Détecter colonnes Atelier / Division ──
+    COL_ATELIER = None
+    COL_DIVISION = None
+    for c in df.columns:
+        cl = str(c).lower().strip()
+        if "atelier" in cl:
+            COL_ATELIER = c
+        if "division" in cl or "divis" in cl:
+            COL_DIVISION = c
+
+    ateliers_dispo = sorted(df[COL_ATELIER].dropna().unique().tolist()) if COL_ATELIER else []
+    divisions_dispo = sorted(df[COL_DIVISION].dropna().unique().tolist()) if COL_DIVISION else []
+
+    # ── Mettre à jour les filtres sidebar dynamiquement ──
+    if "filtres_inities" not in st.session_state:
+        st.session_state.filtres_inities = True
+        # Forcer le réaffichage pour peupler les multiselects
+        st.rerun()
+
+    # ── Appliquer les filtres ──
+    df_filtre = df.copy()
+
+    # Filtre période sur "Créé le"
+    if "Créé le" in df_filtre.columns:
+        dt_debut = pd.Timestamp(date_debut)
+        dt_fin = pd.Timestamp(date_fin).replace(hour=23, minute=59, second=59)
+        df_filtre = df_filtre[
+            (df_filtre["Créé le"] >= dt_debut) & (df_filtre["Créé le"] <= dt_fin)
+        ]
+
+    # Filtre poste
+    if poste_filter:
+        df_filtre = df_filtre[df_filtre["Poste travail princ."].isin(poste_filter)]
+
+    # Filtre atelier
+    if atelier_filter and COL_ATELIER:
+        df_filtre = df_filtre[df_filtre[COL_ATELIER].isin(atelier_filter)]
+
+    # Filtre division
+    if division_filter and COL_DIVISION:
+        df_filtre = df_filtre[df_filtre[COL_DIVISION].isin(division_filter)]
+
+    # Postes actifs après filtrage
+    active_posts = sorted(
+        df_filtre[df_filtre["Poste travail princ."].astype(str).str.startswith(("SF1", "SF2"), na=False)]
+        ["Poste travail princ."].dropna().unique().tolist()
+    )
+    if not active_posts:
+        active_posts = sorted(df_filtre["Poste travail princ."].dropna().unique().tolist())
+
+    # Avis filtrés
+    avf_filtre = avf.copy()
+    if poste_filter and "Poste travail princ." in avf_filtre.columns:
+        avf_filtre = avf_filtre[avf_filtre["Poste travail princ."].isin(poste_filter)]
+
+    # Recalcul av_total filtré
+    av_total_filtre = None
+    if av_total is not None:
+        av_total_filtre = av_total.copy()
+        if poste_filter:
+            av_total_filtre = av_total_filtre[av_total_filtre.index.isin(poste_filter)]
+
+    # ── Calcul KPI ──
+    kpi_data = calc_kpis(df_filtre, avf_filtre, now_ts, active_posts, av_total_filtre)
+
+    # ── Historique ──
+    hist_df = load_historical_kpis("data/historique.xlsx")
+
+    # ── Sauvegarde Excel ──
+    save_kpis_to_excel(
+        kpi_data["p_rows"], kpi_data["p_cols"],
+        kpi_data["q_rows"], kpi_data["q_cols"],
+        kpi_data["ano_p_r"], kpi_data["ano_p_c"],
+        kpi_data["ano_q_r"], kpi_data["ano_q_c"],
+        fichier_date
+    )
+
+except Exception as e:
+    st.error(f"❌ Erreur lors du traitement des données : {e}")
+    import traceback
+    st.code(traceback.format_exc())
+    st.stop()
+
+# ══════════════════════════════════════════════════════════════
+# HEADER AVEC LOGO
+# ══════════════════════════════════════════════════════════════
+prev = get_previous_card_values(hist_df)
+render_header(fichier_date, kpi_data, prev)
+
+# ══════════════════════════════════════════════════════════════
+# RÉSUMÉ FILTRES APPLIQUÉS
+# ══════════════════════════════════════════════════════════════
+nb_total = len(df)
+nb_filtre = len(df_filtre)
+filtres_actifs = []
+if date_debut != pd.to_datetime("2025-01-01") or date_fin != pd.Timestamp.today().normalize():
+    filtres_actifs.append(f"Période: {date_debut.strftime('%d/%m/%Y')} → {date_fin.strftime('%d/%m/%Y')}")
+if poste_filter:
+    filtres_actifs.append(f"Postes: {len(poste_filter)} sélectionné(s)")
+if atelier_filter:
+    filtres_actifs.append(f"Ateliers: {len(atelier_filter)} sélectionné(s)")
+if division_filter:
+    filtres_actifs.append(f"Divisions: {len(division_filter)} sélectionnée(s)")
+
+if filtres_actifs:
+    st.markdown(f'''
+    <div style="background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:8px 16px;
+                margin-bottom:8px;font-size:13px;color:#1e40af;">
+        🔍 Filtres actifs : {' | '.join(filtres_actifs)}
+        &nbsp;—&nbsp; <b>{nb_filtre}</b> OT affichés sur {nb_total}
+    </div>''', unsafe_allow_html=True)
+
+# ══════════════════════════════════════════════════════════════
+# ONGLETS (comme la capture d'écran)
+# ══════════════════════════════════════════════════════════════
+tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
+    "🏠 Tableau de Bord",
+    "📈 Performance",
+    "✅ Qualite",
+    "📂 Backlog",
+    "📉 Suivi & Evolution",
+    "🎯 Plan d' action"
+])
+
+with tab1:
+    from pages.dashboard import render as render_dashboard
+    render_dashboard(kpi_data, hist_df, active_posts)
+
+with tab2:
+    from pages.performance import render as render_perf
+    render_perf(kpi_data, hist_df, active_posts)
+
+with tab3:
+    from pages.qualite import render as render_qual
+    render_qual(kpi_data, hist_df, active_posts)
+
+with tab4:
+    from pages.backlog import render as render_backlog
+    render_backlog(kpi_data, df_filtre, active_posts)
+
+with tab5:
+    from pages.evolution import render as render_evo
+    render_evo(hist_df, kpi_data, active_posts)
+
+with tab6:
+    from pages.plan_action import render as render_plan
+    render_plan(kpi_data, active_posts)
