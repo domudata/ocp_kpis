@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Lecture, nettoyage et préparation des données brutes."""
+import streamlit as st  # ← DÉPLACÉ EN HAUT POUR LE DÉCORATEUR
 import pandas as pd
 import numpy as np
 import io
@@ -47,8 +48,6 @@ def excr(df):
 @st.cache_data(show_spinner=False)
 def read_excel_safe(bytes_data):
     """Lit un fichier Excel en détectant automatiquement le vrai format."""
-    import streamlit as st
-
     bio = io.BytesIO(bytes_data)
     header = bytes_data[:8]
 
@@ -86,8 +85,6 @@ def prepare_data(ot_bytes, av_bytes, date_str):
     Point d'entrée principal de préparation des données.
     Retourne (df, avf, apm, now_ts, av_total_per_poste).
     """
-    import streamlit as st
-
     raw_ot = read_excel_safe(ot_bytes)
     raw_av = read_excel_safe(av_bytes)
     raw_ot = excr(raw_ot)
@@ -153,9 +150,13 @@ def prepare_data(ot_bytes, av_bytes, date_str):
         & (raw_av["Type d'avis"].isin(["ZU", "Z4", "ZR", "ZP"]))
     ].copy()
 
-    # Total avis (tous types ZU/Z4/ZR/ZP) par poste — pour calcul du taux d'approbation
+    # Total avis (tous types ZU/Z4/ZR/ZP) par poste
     av_all_types = raw_av[raw_av["Type d'avis"].isin(["ZU", "Z4", "ZR", "ZP"])]
-    av_total_per_poste = av_all_types.groupby("Poste travail princ.").size() if "Poste travail princ." in av_all_types.columns else pd.Series(dtype=int)
+    av_total_per_poste = (
+        av_all_types.groupby("Poste travail princ.").size()
+        if "Poste travail princ." in av_all_types.columns
+        else pd.Series(dtype=int)
+    )
 
     # Postes SF1/SF2
     apm = sorted(
