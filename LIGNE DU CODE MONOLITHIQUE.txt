@@ -1,0 +1,70 @@
+LIGNE DU CODE MONOLITHIQUE          →    FICHIER CIBLE
+═══════════════════════════════════════════════════════════════════════════
+
+── IMPORTS & CONFIG ──────────────────────────────────────────────────────
+imports (streamlit, pandas, plotly...)  →  app.py (seuls les imports d'entrée)
+st.set_page_config(...)                  →  app.py
+QK, PK, ALL_KPI, CIBLE, ACT_MAP,
+KPI_RESP_MAP, LOWER_BETTER,
+MP_KW, MPLAN_KW, CONSIGNES_HSE          →  core/constants.py  ⚠️ (fichier manquant dans l'arbre)
+
+── UTILITAIRES BASIQUES ──────────────────────────────────────────────────
+get_logo_base64()                        →  components/header.py
+get_date_from_file()                     →  core/prepare_data.py
+contient_mot(t, lm)                      →  core/prepare_data.py
+cat_age(a)                               →  core/prepare_data.py
+excr(df)                                 →  core/prepare_data.py
+read_excel_safe(bytes_data)              →  core/prepare_data.py
+
+── PRÉPARATION DES DONNÉES ───────────────────────────────────────────────
+prepare_data(ot_bytes, av_bytes, ...)    →  core/prepare_data.py
+
+── CALCUL DES KPI ────────────────────────────────────────────────────────
+ckpi(n, d, sz)                           →  core/calcul_kpi.py
+cpiv(df, f, c, p)                        →  core/calcul_kpi.py
+get_text_col(df)                         →  core/calcul_kpi.py
+build_statut_pivot(df_sub, posts)        →  core/calcul_kpi.py
+calc_kpis(df_i, av_i, now_ts, posts)     →  core/calcul_kpi.py  (gros bloc ~200 lignes)
+
+── ANOMALIES ─────────────────────────────────────────────────────────────
+(détection ano_p_r, ano_p_c, ano_q_r,
+ ano_q_c à l'intérieur de calc_kpis)      →  core/anomalies.py  (à extraire)
+
+── HISTORIQUE & VARIATIONS ───────────────────────────────────────────────
+save_kpis_to_excel(...)                   →  core/export_excel.py
+load_historical_kpis(filepath)            →  core/historique.py
+calculate_variations(hist_df)             →  core/historique.py
+generate_journal(var_df)                  →  core/historique.py
+calculate_rankings(var_df)                →  core/historique.py
+
+── CSS & STYLES ─────────────────────────────────────────────────────────
+inject_custom_css()                       →  components/styles.py
+
+── COMPOSANTS UI ─────────────────────────────────────────────────────────
+get_previous_card_values(hist_df)         →  components/cards.py
+format_card_variation(current, previous)  →  components/cards.py
+html_statut_pivot(piv_df, table_class)    →  components/tables.py
+show_pie_pair(piv_df, title_prefix)       →  components/charts.py
+show_simple_pie(piv_df, title, ...)       →  components/charts.py
+(génération header HTML)                  →  components/header.py
+(logique sidebar)                         →  components/sidebar.py
+(widgets backlog)                         →  components/backlog_widgets.py
+(génération sparklines SVG)               →  components/sparklines.py
+
+── PAGES (UI STREAMLIT) ─────────────────────────────────────────────────
+(écran HSE d'accueil)                     →  app.py
+(upload fichiers + onglets)               →  app.py
+(onglet Tableau de bord)                  →  pages/dashboard.py
+(onglet Performance)                      →  pages/performance.py
+(onglet Qualité)                          →  pages/qualite.py
+(onglet Backlog)                          →  pages/backlog.py
+(onglet Évolution)                        →  pages/evolution.py
+(onglet Plan d'action)                    →  pages/plan_action.py
+(onglet IA & PowerPoint)                  →  pages/ai.py
+(onglet Recommandations)                  →  pages/recommandations.py
+
+── EXPORTS ───────────────────────────────────────────────────────────────
+(logique export PDF)                      →  core/export_pdf.py
+(logique export PPT)                      →  core/export_ppt.py
+(logique export Excel)                    →  core/export_excel.py
+(appels OpenAI)                           →  core/ai_generator.py
