@@ -29,24 +29,27 @@ PK = [
 
 ALL_KPI = QK + PK
 
+# ── CIBLES ────────────────────────────────────────────────────────────────────
+# Logique age backlog :
+#   <1m  : score = taux brut direct         → cible >= 80%
+#   1-3m : score = 100 - taux_brut          → cible >= 85% (= max 15% OT dans tranche)
+#   >3m  : score = 100 - taux_brut          → cible >= 95% (= max 5%  OT dans tranche)
+# Tous les KPIs sont "plus haut = mieux" grâce à la logique 100-val
 CIBLE = {
-    # ── Performance ──────────────────────────────────────────────────────
+    # Performance
     "TAUX_REALISATION_CORRECTIF/PT":     85,
 
-    # Age Prep — logique 100-val pour 1-3m et >3m
-    # <1m  : direct >= 80%
-    # 1-3m : score = 100 - taux_brut → cible 85% = max 15% d OT dans tranche
-    # >3m  : score = 100 - taux_brut → cible 95% = max 5%  d OT dans tranche
+    # Age Préparation
     "OT préparation <1 mois":            80,
-    "OT préparation 1mois< <3mois":      85,
-    "OT préparation >3 mois":            95,
+    "OT préparation 1mois< <3mois":      85,   # score = 100 - taux_brut
+    "OT préparation >3 mois":            95,   # score = 100 - taux_brut
 
-    # Age Plan
+    # Age Planification
     "OT planification <1 mois":          80,
     "OT planification 1mois< <3mois":    85,
     "OT planification >3 mois":          95,
 
-    # Age Exec
+    # Age Exécution
     "OT exécution <1 mois":              80,
     "OT exécution 1mois< <3mois":        85,
     "OT exécution >3 mois":              95,
@@ -56,7 +59,7 @@ CIBLE = {
     "Performance Inspection":            95,
     "Performance Systématiques":         85,
 
-    # ── Qualité ──────────────────────────────────────────────────────────
+    # Qualité
     "Taux d'approbation des Avis":       95,
     "OT LANC ESTIME":                    100,
     "Backlog préparation caractérisé":   100,
@@ -67,11 +70,12 @@ CIBLE = {
     "Total Avis de Panne":               100,
 }
 
-# Tous les KPIs sont maintenant "plus haut = mieux"
-# Les tranches 1-3m et >3m utilisent la logique 100-val dans calcul_kpi.py
-# donc LOWER_BETTER est vide
+# ── LOWER_BETTER ─────────────────────────────────────────────────────────────
+# VIDE — avec la logique 100-val, tous les KPIs sont "plus haut = mieux"
+# needs_action = actual < target pour TOUS les KPIs
 LOWER_BETTER = []
 
+# ── ACTIONS ──────────────────────────────────────────────────────────────────
 ACT_MAP = {
     "TAUX_REALISATION_CORRECTIF/PT":     "Ameliorer le taux de realisation des OT correctifs.",
     "OT préparation <1 mois":            "Accelerer la preparation des OT (reduire age < 1 mois).",
@@ -83,19 +87,20 @@ ACT_MAP = {
     "OT exécution <1 mois":              "Accelerer l execution des OT (reduire age < 1 mois).",
     "OT exécution 1mois< <3mois":        "Reduire les OT en execution entre 1 et 3 mois.",
     "OT exécution >3 mois":              "Traiter en priorite les OT en execution > 3 mois.",
-    "Performance Graissage":             "Ameliorer le taux de realisation des OT de graissage (Type 350).",
-    "Performance Inspection":            "Ameliorer le taux de realisation des OT d inspection (Types 290/300/310).",
-    "Performance Systématiques":         "Ameliorer le taux de realisation des appels systematiques (Type 360).",
+    "Performance Graissage":             "Ameliorer le taux de realisation des OT de graissage (TW=350).",
+    "Performance Inspection":            "Ameliorer le taux de realisation des OT d inspection (TW=290/300/310).",
+    "Performance Systématiques":         "Ameliorer le taux de realisation des appels systematiques (TW=360).",
     "Taux d'approbation des Avis":       "Approuver les avis en attente (statut APRQ).",
     "OT LANC ESTIME":                    "Estimer les couts des OT lances (renseigner charge estimee).",
     "Backlog préparation caractérisé":   "Caracteriser le backlog de preparation (ATPD/ATMR/ATRS/ATMO/ATER).",
     "Backlog planification caractérisé": "Caracteriser le backlog de planification (ATEI/ATAL/ATAS/AGAR/ATHS).",
     "OT CONFIME":                        "Confirmer les OT termines (statut CONF).",
-    "OT_COR_EGAL":                       "Rapprocher les couts reels et budgetes des OT correctifs.",
+    "OT_COR_EGAL":                       "Verifier l imputation des couts reels des OT correctifs.",
     "OT Fiabilité":                      "Maintenir la fiabilite des OT.",
     "Total Avis de Panne":               "Maintenir le suivi des avis de panne.",
 }
 
+# ── RESPONSABLES ─────────────────────────────────────────────────────────────
 KPI_RESP_MAP = {
     "TAUX_REALISATION_CORRECTIF/PT":     "Chef d'atelier",
     "OT préparation <1 mois":            "Préparateur BM",
@@ -107,24 +112,26 @@ KPI_RESP_MAP = {
     "OT exécution <1 mois":              "Chef d'atelier",
     "OT exécution 1mois< <3mois":        "Chef d'atelier",
     "OT exécution >3 mois":              "Chef d'atelier",
+    "Performance Graissage":             "Chef d'atelier",
+    "Performance Inspection":            "Chef d'atelier",
+    "Performance Systématiques":         "Chef d'atelier",
     "Taux d'approbation des Avis":       "Chef d'atelier",
     "OT LANC ESTIME":                    "Fiabilité",
     "Backlog préparation caractérisé":   "Préparateur BM",
     "Backlog planification caractérisé": "Planificateur BM",
     "OT CONFIME":                        "Agent de saisie",
     "OT_COR_EGAL":                       "Agent de saisie",
-    "Performance Graissage":             "Chef d'atelier",
-    "Performance Inspection":            "Chef d'atelier",
-    "Performance Systématiques":         "Chef d'atelier",
     "OT Fiabilité":                      "Fiabilité",
     "Total Avis de Panne":               "Fiabilité",
 }
 
-MP_KW   = ["CRPR ATPD","CRPR ATMR","CRPR ATER","CRPR ATRS","CRPR ATMO",
-           "ATPD","ATMR","ATER","ATRS","ATMO"]
+# ── MOTS CLES CARACTERISATION ────────────────────────────────────────────────
+MP_KW    = ["CRPR ATPD","CRPR ATMR","CRPR ATER","CRPR ATRS","CRPR ATMO",
+            "ATPD","ATMR","ATER","ATRS","ATMO"]
 MPLAN_KW = ["ATPL ATEI","ATPL ATAL","ATPL ATER","ATPL AGAR","ATPL ATHS",
             "ATEI","ATAL","ATAS","AGAR","ATHS"]
 
+# ── CONSIGNES HSE ────────────────────────────────────────────────────────────
 CONSIGNES_HSE = [
     "Port obligatoire des EPI avant toute intervention.",
     "Port obligatoire du casque de securite.",
@@ -166,10 +173,6 @@ CONSIGNES_HSE = [
     "Porter les EPI adaptes au risque identifie.",
     "Prevenir son responsable avant toute intervention particuliere.",
     "Analyser les risques avant chaque demarrage de chantier.",
-    "Verifier la stabilite des equipements.",
-    "Utiliser les bons outils pour la bonne tache.",
-    "Respecter les consignes specifiques du chantier.",
-    "Ne jamais prendre de raccourci au detriment de la securite.",
     "Arreter immediatement les travaux en cas de danger.",
     "Proteger l environnement lors des interventions.",
     "Collecter et trier correctement les dechets.",
@@ -177,11 +180,9 @@ CONSIGNES_HSE = [
     "Respecter les consignes de stockage des produits dangereux.",
     "Lire les fiches de securite avant manipulation.",
     "Verifier les equipements avant chaque prise de poste.",
-    "S assurer de la disponibilite des moyens de secours.",
     "Communiquer clairement avec l equipe avant intervention.",
     "Respecter les regles de circulation des engins.",
     "Garder une vigilance permanente sur son environnement.",
-    "Prendre le temps d effectuer le travail en securite.",
     "La securite est l affaire de tous.",
     "Chaque incident peut etre evite par la prevention.",
     "Aucun travail n est plus urgent que la securite.",
