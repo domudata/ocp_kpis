@@ -75,24 +75,32 @@ def is_lb(k): return k in LOWER_BETTER
 def _age_kpis(df, filt, col_age, posts, prefix):
     """
     Calcule les 3 KPIs age pour un backlog donné.
-    - <1m  : N_inf1m / Total          (valeur directe)
-    - 1-3m : 100 - (N_1-3m / Total)   (complement)
-    - >3m  : 100 - (N_sup3m / Total)  (complement)
-    Résultat : tous les scores sont dans [0,100] et
-               plus la valeur est haute, mieux c est.
+
+    Logique officielle OCP :
+    - <1m  : N_inf1m / Total                  → valeur directe  (maximiser, cible 80%)
+    - 1-3m : 100 - (N_1-3m  / Total * 100)   → complément       (cible ≥ 85% = max 15% dans tranche)
+    - >3m  : 100 - (N_sup3m / Total * 100)   → complément       (cible ≥ 95% = max 5% dans tranche)
+
+    Tous les scores sont dans [0,100] : plus la valeur est haute, mieux c est.
+    La somme des 3 taux BRUTS = 100% (répartition totale).
     """
     pv = cpiv(df, filt, col_age, posts)
     for c in ["<1 mois",">3 mois","1 mois < <3 mois","Inconnu"]:
         pv[c] = pv.get(c, 0)
     pv["Total"] = pv[["<1 mois","1 mois < <3 mois",">3 mois","Inconnu"]].sum(axis=1)
 
+    # Taux bruts (pour affichage dans tableau détaillé)
+    pv["taux_inf1m"]  = np.where(pv["Total"]==0, 100.0, pv["<1 mois"]          / pv["Total"] * 100)
+    pv["taux_1-3m"]   = np.where(pv["Total"]==0,   0.0, pv["1 mois < <3 mois"] / pv["Total"] * 100)
+    pv["taux_sup3m"]  = np.where(pv["Total"]==0,   0.0, pv[">3 mois"]          / pv["Total"] * 100)
+
     kpis = {}
-    # <1 mois : valeur directe — veut maximiser
-    kpis[f"OT {prefix} <1 mois"]       = ckpi(pv["<1 mois"],          pv["Total"])
-    # 1-3 mois : complement — veut minimiser la tranche donc score = 100 - tranche%
-    kpis[f"OT {prefix} 1mois< <3mois"] = ckpi_inv(pv["1 mois < <3 mois"], pv["Total"])
-    # >3 mois : complement — veut minimiser la tranche donc score = 100 - tranche%
-    kpis[f"OT {prefix} >3 mois"]       = ckpi_inv(pv[">3 mois"],          pv["Total"])
+    # KPI <1m  : taux brut direct (plus c est grand mieux c est)
+    kpis[f"OT {prefix} <1 mois"]       = pv["taux_inf1m"]
+    # KPI 1-3m : 100 - taux_brut (plus il y a d OT dans cette tranche, moins bon)
+    kpis[f"OT {prefix} 1mois< <3mois"] = 100.0 - pv["taux_1-3m"]
+    # KPI >3m  : 100 - taux_brut (plus il y a d OT dans cette tranche, moins bon)
+    kpis[f"OT {prefix} >3 mois"]       = 100.0 - pv["taux_sup3m"]
 
     return kpis, pv
 
@@ -295,3 +303,24 @@ def calc_kpis(df_i, av_i, now_ts, posts):
     res['pv_exec'] = pv_exec
 
     return res
+
+# ─── NOTE POUR constants.py ──────────────────────────────────────────────────
+# Avec la nouvelle logique 100-val, mettre à jour dans constants.py :
+#
+# CIBLE = {
+#     ...
+#     "OT préparation <1 mois":       80,   # direct >= 80%
+#     "OT préparation 1mois< <3mois": 85,   # score = 100-15 = 85%
+#     "OT préparation >3 mois":       95,   # score = 100-5  = 95%
+#     "OT planification <1 mois":     80,
+#     "OT planification 1mois< <3mois": 85,
+#     "OT planification >3 mois":     95,
+#     "OT exécution <1 mois":         80,
+#     "OT exécution 1mois< <3mois":   85,
+#     "OT exécution >3 mois":         95,
+#     ...
+# }
+#
+# LOWER_BETTER doit être VIDE pour ces KPIs car
+# la logique 100-val les rend tous "plus haut = mieux"
+# ─────────────────────────────────────────────────────────────────────────────
