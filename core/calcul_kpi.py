@@ -5,10 +5,6 @@ import pandas as pd
 from core.constants import MP_KW, MPLAN_KW, QK, PK, CIBLE, LOWER_BETTER
 
 
-# ──────────────────────────────────────────────
-# Utilitaires de calcul
-# ──────────────────────────────────────────────
-
 def ckpi(n, d, sz=100):
     return np.where(d == 0, sz, (n / d) * 100)
 
@@ -79,10 +75,6 @@ def is_lb(k: str) -> bool:
     return k in LOWER_BETTER
 
 
-# ──────────────────────────────────────────────
-# Calcul principal des KPI
-# ──────────────────────────────────────────────
-
 def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list) -> dict:
     res = {}
     df = df_i.copy()
@@ -110,9 +102,9 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list) -> di
     for c in ["<1 mois", ">3 mois", "1 mois < <3 mois", "Inconnu"]:
         pr[c] = pr.get(c, 0)
     pr["Total"] = pr[["<1 mois", "1 mois < <3 mois", ">3 mois", "Inconnu"]].sum(axis=1)
-    pr["OT préparation <1 mois"]      = ckpi(pr["<1 mois"],             pr["Total"])
-    pr["OT préparation >3 mois"]      = ckpi(pr[">3 mois"],             pr["Total"], 0)
-    pr["OT préparation 1mois< <3mois"]= ckpi(pr["1 mois < <3 mois"],   pr["Total"], 0)
+    pr["OT préparation <1 mois"]       = ckpi(pr["<1 mois"],           pr["Total"])
+    pr["OT préparation >3 mois"]       = ckpi(pr[">3 mois"],           pr["Total"], 0)
+    pr["OT préparation 1mois< <3mois"] = ckpi(pr["1 mois < <3 mois"],  pr["Total"], 0)
 
     # ── Planification ──
     pl = cpiv(
@@ -124,9 +116,9 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list) -> di
     for c in ["<1 mois", ">3 mois", "1 mois < <3 mois", "Inconnu"]:
         pl[c] = pl.get(c, 0)
     pl["Total"] = pl[["<1 mois", "1 mois < <3 mois", ">3 mois", "Inconnu"]].sum(axis=1)
-    pl["OT planification <1 mois"]      = ckpi(pl["<1 mois"],           pl["Total"])
-    pl["OT planification >3 mois"]      = ckpi(pl[">3 mois"],           pl["Total"], 0)
-    pl["OT planification 1mois< <3mois"]= ckpi(pl["1 mois < <3 mois"],  pl["Total"], 0)
+    pl["OT planification <1 mois"]       = ckpi(pl["<1 mois"],          pl["Total"])
+    pl["OT planification >3 mois"]       = ckpi(pl[">3 mois"],          pl["Total"], 0)
+    pl["OT planification 1mois< <3mois"] = ckpi(pl["1 mois < <3 mois"], pl["Total"], 0)
 
     # ── Exécution ──
     ex = cpiv(
@@ -137,9 +129,9 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list) -> di
     for c in ["<1 mois", ">3 mois", "1 mois < <3 mois", "Inconnu"]:
         ex[c] = ex.get(c, 0)
     ex["Total"] = ex[["<1 mois", "1 mois < <3 mois", ">3 mois", "Inconnu"]].sum(axis=1)
-    ex["OT exécution <1 mois"]      = ckpi(ex["<1 mois"],           ex["Total"])
-    ex["OT exécution >3 mois"]      = ckpi(ex[">3 mois"],           ex["Total"], 0)
-    ex["OT exécution 1mois< <3mois"]= ckpi(ex["1 mois < <3 mois"],  ex["Total"], 0)
+    ex["OT exécution <1 mois"]       = ckpi(ex["<1 mois"],          ex["Total"])
+    ex["OT exécution >3 mois"]       = ckpi(ex[">3 mois"],          ex["Total"], 0)
+    ex["OT exécution 1mois< <3mois"] = ckpi(ex["1 mois < <3 mois"], ex["Total"], 0)
 
     # ── OT lancé estimé ──
     la = pd.pivot_table(
@@ -172,29 +164,29 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list) -> di
     plc["Total"] = plc["CARACTERISE"] + plc["NON CARACTERISE"]
     plc["Backlog planification caractérisé"] = ckpi(plc["CARACTERISE"], plc["Total"])
 
-    # ── OT confirmé / coûts égaux ──
     # ── OT confirmé ──
-pv_conf = pd.pivot_table(
-    df[df["Statut OT"].isin(["CLOT", "TCLO"])],
-    index="Poste travail princ.", columns="OT CONFIME",
-    values="Ordre", aggfunc="count", fill_value=0
-).reindex(posts, fill_value=0)
-for c in ["OUI", "NON"]: pv_conf[c] = pv_conf.get(c, 0)
-pv_conf["Total"] = pv_conf["OUI"] + pv_conf["NON"]
-pv_conf["OT CONFIME"] = ckpi(pv_conf["OUI"], pv_conf["Total"])
-res["ot_confime"] = pv_conf
+    pv_conf = pd.pivot_table(
+        df[df["Statut OT"].isin(["CLOT", "TCLO"])],
+        index="Poste travail princ.", columns="OT CONFIME",
+        values="Ordre", aggfunc="count", fill_value=0
+    ).reindex(posts, fill_value=0)
+    for c in ["OUI", "NON"]:
+        pv_conf[c] = pv_conf.get(c, 0)
+    pv_conf["Total"] = pv_conf["OUI"] + pv_conf["NON"]
+    pv_conf["OT CONFIME"] = ckpi(pv_conf["OUI"], pv_conf["Total"])
+    res["ot_confime"] = pv_conf
 
-# ── OT coûts égaux ──
-pv_cor = pd.pivot_table(
-    df[df["Statut OT"].isin(["CLOT", "TCLO"])],
-    index="Poste travail princ.", columns="OT_COR_EGAL",
-    values="Ordre", aggfunc="count", fill_value=0
-).reindex(posts, fill_value=0)
-for c in ["OUI", "NON"]: pv_cor[c] = pv_cor.get(c, 0)
-pv_cor["Total"] = pv_cor["OUI"] + pv_cor["NON"]
-pv_cor["OT_COR_EGAL"] = ckpi(pv_cor["OUI"], pv_cor["Total"])
-res["ot_cor_egal"] = pv_cor
-
+    # ── OT coûts égaux ──
+    pv_cor = pd.pivot_table(
+        df[df["Statut OT"].isin(["CLOT", "TCLO"])],
+        index="Poste travail princ.", columns="OT_COR_EGAL",
+        values="Ordre", aggfunc="count", fill_value=0
+    ).reindex(posts, fill_value=0)
+    for c in ["OUI", "NON"]:
+        pv_cor[c] = pv_cor.get(c, 0)
+    pv_cor["Total"] = pv_cor["OUI"] + pv_cor["NON"]
+    pv_cor["OT_COR_EGAL"] = ckpi(pv_cor["OUI"], pv_cor["Total"])
+    res["ot_cor_egal"] = pv_cor
 
     # ── Taux approbation avis ──
     avf = av.copy()
@@ -249,8 +241,8 @@ res["ot_cor_egal"] = pv_cor
         sys_df["_d"] == 0, 100.0, (sys_df["_n"] / sys_df["_d"]) * 100
     )
 
-    fiab_s   = pd.Series(100.0, index=posts)
-    avpan_s  = pd.Series(100.0, index=posts)
+    fiab_s  = pd.Series(100.0, index=posts)
+    avpan_s = pd.Series(100.0, index=posts)
 
     res['ckdf'] = pd.DataFrame({
         "TAUX_REALISATION_CORRECTIF/PT":     an["TAUX_REALISATION_CORRECTIF/PT"],
@@ -270,8 +262,8 @@ res["ot_cor_egal"] = pv_cor
         "OT LANC ESTIME":                    la["OT LANC ESTIME"],
         "Backlog préparation caractérisé":   pc["Backlog préparation caractérisé"],
         "Backlog planification caractérisé": plc["Backlog planification caractérisé"],
-        "OT CONFIME":                        res['ot_confime']["OT CONFIME"],
-        "OT_COR_EGAL":                       res['ot_cor_egal']["OT_COR_EGAL"],
+        "OT CONFIME":                        res["ot_confime"]["OT CONFIME"],
+        "OT_COR_EGAL":                       res["ot_cor_egal"]["OT_COR_EGAL"],
         "OT Fiabilité":                      fiab_s,
         "Total Avis de Panne":               avpan_s,
     })
