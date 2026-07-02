@@ -173,17 +173,27 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list) -> di
     plc["Backlog planification caractérisé"] = ckpi(plc["CARACTERISE"], plc["Total"])
 
     # ── OT confirmé / coûts égaux ──
-    for kn, cn in [("OT CONFIME", "OT CONFIME"), ("OT_COR_EGAL", "OT_COR_EGAL")]:
-        pv = pd.pivot_table(
-            df[df["Statut OT"].isin(["CLOT", "TCLO"])],
-            index="Poste travail princ.", columns="OT_COR_EGAL",
-            values="Ordre", aggfunc="count", fill_value=0
-        ).reindex(posts, fill_value=0)
-        for c in ["OUI", "NON"]:
-            pv[c] = pv.get(c, 0)
-        pv["Total"] = pv["OUI"] + pv["NON"]
-        pv[cn] = ckpi(pv["OUI"], pv["Total"])
-        res[kn.lower().replace(" ", "_")] = pv
+    # ── OT confirmé ──
+pv_conf = pd.pivot_table(
+    df[df["Statut OT"].isin(["CLOT", "TCLO"])],
+    index="Poste travail princ.", columns="OT CONFIME",
+    values="Ordre", aggfunc="count", fill_value=0
+).reindex(posts, fill_value=0)
+for c in ["OUI", "NON"]: pv_conf[c] = pv_conf.get(c, 0)
+pv_conf["Total"] = pv_conf["OUI"] + pv_conf["NON"]
+pv_conf["OT CONFIME"] = ckpi(pv_conf["OUI"], pv_conf["Total"])
+res["ot_confime"] = pv_conf
+
+# ── OT coûts égaux ──
+pv_cor = pd.pivot_table(
+    df[df["Statut OT"].isin(["CLOT", "TCLO"])],
+    index="Poste travail princ.", columns="OT_COR_EGAL",
+    values="Ordre", aggfunc="count", fill_value=0
+).reindex(posts, fill_value=0)
+for c in ["OUI", "NON"]: pv_cor[c] = pv_cor.get(c, 0)
+pv_cor["Total"] = pv_cor["OUI"] + pv_cor["NON"]
+pv_cor["OT_COR_EGAL"] = ckpi(pv_cor["OUI"], pv_cor["Total"])
+res["ot_cor_egal"] = pv_cor
 
 
     # ── Taux approbation avis ──
