@@ -83,11 +83,11 @@ def main() -> None:
         df_full, av_full, apm, now_ts = pd.DataFrame(), pd.DataFrame(), [], pd.Timestamp.now()
 
     ctx = render_sidebar(fichier_date, apm, df_full, av_full, now_ts)
-    vp = ctx["vp"]
+    vp      = ctx["vp"]
     df_full = ctx["df_full"]
     av_full = ctx["av_full"]
-    apm = ctx["apm"]
-    now_ts = ctx["now_ts"]
+    apm     = ctx["apm"]
+    now_ts  = ctx["now_ts"]
 
     if df_full.empty:
         st.markdown('<div class="es">Veuillez charger les fichiers OT et AVIS via le panneau de filtres.</div>', unsafe_allow_html=True)
@@ -98,45 +98,29 @@ def main() -> None:
         sdt, edt = ctx["sdt"], ctx["edt"]
 
         df = df_full[
-            df_full["Poste travail princ."].isin(vp)
-            & df_full["Date de début planifiée"].between(sdt, edt)
+            df_full["Poste travail princ."].isin(vp) &
+            df_full["Date de début planifiée"].between(sdt, edt)
         ].copy()
 
         avdf = av_full[av_full["Poste travail princ."].isin(vp)].copy()
         if "Créé le" in avdf.columns:
             avdf = avdf[avdf["Créé le"].between(sdt, edt)]
 
-        df_dash = df_full[df_full["Poste travail princ."].isin(vp)].copy()
+        df_dash  = df_full[df_full["Poste travail princ."].isin(vp)].copy()
         avdf_dash = av_full[av_full["Poste travail princ."].isin(vp)].copy()
 
-        res = calc_kpis(df, avdf, now_ts, vp)
+        # ── Calcul KPIs ──────────────────────────────────────────────────
+        # calc_kpis() calcule correctement TOUS les KPIs incluant :
+        # - OT CONFIME  (via pivot Statut système contient CONF)
+        # - OT_COR_EGAL (via logique budget==reel, colonne OT_COR_EGAL=EGAL/DIFF)
+        # - Age Prep/Plan/Exec avec logique 100-val pour 1-3m et >3m
+        # NE PAS recalculer ces KPIs ici — utiliser directement res['ckdf']
+        res   = calc_kpis(df,      avdf,      now_ts, vp)
         res_d = calc_kpis(df_dash, avdf_dash, now_ts, vp)
 
-        ckdf = res['ckdf']
-        dfp = res['dfp']
-        avf = res['avf']
-
-        # Correction OT CONFIME
-        _df_clot = dfp[dfp["Statut OT"].isin(["CLOT", "TCLO"])]
-        if not _df_clot.empty and "OT CONFIME" in _df_clot.columns:
-            _pv = _df_clot.groupby("Poste travail princ.")["OT CONFIME"].value_counts().unstack(fill_value=0)
-            for _c in ["OUI", "NON"]:
-                if _c not in _pv.columns:
-                    _pv[_c] = 0
-            _pv = _pv.reindex(vp, fill_value=0)
-            _total = _pv["OUI"] + _pv["NON"]
-            ckdf["OT CONFIME"] = np.where(_total == 0, 100.0, (_pv["OUI"] / _total) * 100)
-
-        # Correction OT_COR_EGAL
-        _df_clot2 = dfp[dfp["Statut OT"].isin(["CLOT", "TCLO"])]
-        if not _df_clot2.empty and "OT_COR_EGAL" in _df_clot2.columns:
-            _pv2 = _df_clot2.groupby("Poste travail princ.")["OT_COR_EGAL"].value_counts().unstack(fill_value=0)
-            for _c in ["OUI", "NON"]:
-                if _c not in _pv2.columns:
-                    _pv2[_c] = 0
-            _pv2 = _pv2.reindex(vp, fill_value=0)
-            _total2 = _pv2["OUI"] + _pv2["NON"]
-            ckdf["OT_COR_EGAL"] = np.where(_total2 == 0, 100.0, (_pv2["OUI"] / _total2) * 100)
+        ckdf = res['ckdf']   # contient TOUTES les valeurs correctes
+        dfp  = res['dfp']
+        avf  = res['avf']
 
         pa = {k: round(ckdf[k].mean(), 2) for k in QK}
         qa = {k: round(ckdf[k].mean(), 2) for k in PK}
@@ -155,9 +139,9 @@ def main() -> None:
         sf2_p = np.mean([pscores[p] for p in sf2_posts]) if sf2_posts else 0
         sf2_q = np.mean([qscores[p] for p in sf2_posts]) if sf2_posts else 0
 
-        ano_map = build_ano_map(dfp, avf, now_ts)
+        ano_map    = build_ano_map(dfp, avf, now_ts)
         ano_p_rows = build_ano_rows(vp, ano_map, QK)
-        ano_q_rows = build_ano_rows(vp, ano_map, PK, fixed_zero=["OT Fiabilité", "Total Avis de Panne"])
+        ano_q_rows = build_ano_rows(vp, ano_map, PK, fixed_zero=["OT Fiabilité","Total Avis de Panne"])
         ano_p_cols = ["Poste de travail"] + QK + ["Total Anomalies"]
         ano_q_cols = ["Poste de travail"] + PK + ["Total Anomalies"]
         anomaly_dfs = build_anomaly_dfs(dfp, avf, now_ts)
@@ -196,7 +180,7 @@ def main() -> None:
         for k in QK:
             cc = tc = 0
             for rw in prows:
-                if k in rw and rw.get("_t") not in ("cible", "total"):
+                if k in rw and rw.get("_t") not in ("cible","total"):
                     try:
                         cc += gscore(k, float(rw[k]), CIBLE.get(k, 100))
                         tc += 1
@@ -210,7 +194,7 @@ def main() -> None:
         for k in PK:
             cc = tc = 0
             for rw in qrows:
-                if k in rw and rw.get("_t") not in ("cible", "total"):
+                if k in rw and rw.get("_t") not in ("cible","total"):
                     try:
                         cc += gscore(k, float(rw[k]), CIBLE.get(k, 100))
                         tc += 1
@@ -227,8 +211,8 @@ def main() -> None:
         )
 
         hist_filepath = os.path.join("kpis", "indicateurs_kpis.xlsx")
-        hist_df = load_historical_kpis(hist_filepath)
-        var_df = calculate_variations(hist_df)
+        hist_df  = load_historical_kpis(hist_filepath)
+        var_df   = calculate_variations(hist_df)
         journal_df = generate_journal(var_df)
         top5_df, bot5_df = calculate_rankings(var_df)
 
@@ -254,30 +238,31 @@ def main() -> None:
             for kpi in ALL_KPI:
                 actual = float(poste_data.get(kpi, 100))
                 target = CIBLE.get(kpi, 100)
-                lower = is_lb(kpi)
-                needs_action = actual > target if lower else actual < target
-                ecart = actual - target
-                nb_anom = int(ano_map.get(kpi, pd.Series()).get(poste, 0))
+                # Avec LOWER_BETTER=[] tous les KPIs : needs_action = actual < target
+                lower         = is_lb(kpi)
+                needs_action  = actual > target if lower else actual < target
+                ecart         = actual - target
+                nb_anom       = int(ano_map.get(kpi, pd.Series()).get(poste, 0))
                 if needs_action or nb_anom > 0:
                     plan_actions_rows.append({
-                        "poste": poste,
-                        "kpi": kpi,
+                        "poste":       poste,
+                        "kpi":         kpi,
                         "needs_action": needs_action,
-                        "ecart": ecart,
-                        "nb_anom": nb_anom,
+                        "ecart":       ecart,
+                        "nb_anom":     nb_anom,
                         "responsable": KPI_RESP_MAP.get(kpi, "Non assigne"),
-                        "action": ACT_MAP.get(kpi, ""),
-                        "delai": "",
+                        "action":      ACT_MAP.get(kpi, ""),
+                        "delai":       "",
                     })
 
         sf1_rows = [r for r in plan_actions_rows if str(r["poste"]).startswith("SF1")]
         sf2_rows = [r for r in plan_actions_rows if str(r["poste"]).startswith("SF2")]
 
-        avg_p_score = sum(pa.values()) / len(pa) if pa else 0
-        avg_q_score = sum(qa.values()) / len(qa) if qa else 0
-        total_ano_p = sum(r["Total Anomalies"] for r in ano_p_rows if r.get("Poste de travail") != "Total")
-        total_ano_q = sum(r["Total Anomalies"] for r in ano_q_rows if r.get("Poste de travail") != "Total")
-        total_ot = len(df)
+        avg_p_score  = sum(pa.values()) / len(pa) if pa else 0
+        avg_q_score  = sum(qa.values()) / len(qa) if qa else 0
+        total_ano_p  = sum(r["Total Anomalies"] for r in ano_p_rows if r.get("Poste de travail") != "Total")
+        total_ano_q  = sum(r["Total Anomalies"] for r in ano_q_rows if r.get("Poste de travail") != "Total")
+        total_ot     = len(df)
 
         render_header(fichier_date)
         prev_values = get_previous_card_values(hist_df)
@@ -313,7 +298,7 @@ def main() -> None:
 
     except Exception as e:
         st.error("Erreur lors du chargement des donnees : %s" % str(e))
-        st.markdown('<div class="es">Veuillez verifier que les fichiers ot.xlsx et avis.xlsx sont presents dans le repertoire.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="es">Veuillez verifier que les fichiers ot.xlsx et avis.xlsx sont presents.</div>', unsafe_allow_html=True)
 
     st.markdown('<div class="footer">Bureau Methodes Maroc Chimie 2026</div>', unsafe_allow_html=True)
 
