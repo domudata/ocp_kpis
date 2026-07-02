@@ -90,7 +90,7 @@ def main() -> None:
     else:
         df_full, av_full, apm, now_ts = pd.DataFrame(), pd.DataFrame(), [], pd.Timestamp.now()
 
-    ctx = render_sidebar(fichier_date, apm, df_full, av_full, now_ts)
+    ctx     = render_sidebar(fichier_date, apm, df_full, av_full, now_ts)
     vp      = ctx["vp"]
     df_full = ctx["df_full"]
     av_full = ctx["av_full"]
@@ -135,6 +135,17 @@ def main() -> None:
             _total = _pv["OUI"] + _pv["NON"]
             ckdf["OT CONFIME"] = np.where(_total == 0, 100.0, (_pv["OUI"] / _total) * 100)
 
+        # ── Correction OT_COR_EGAL ────────────────────────────────────
+        _df_clot2 = dfp[dfp["Statut OT"].isin(["CLOT", "TCLO"])]
+        if not _df_clot2.empty and "OT_COR_EGAL" in _df_clot2.columns:
+            _pv2 = _df_clot2.groupby("Poste travail princ.")["OT_COR_EGAL"].value_counts().unstack(fill_value=0)
+            for _c in ["OUI", "NON"]:
+                if _c not in _pv2.columns:
+                    _pv2[_c] = 0
+            _pv2   = _pv2.reindex(vp, fill_value=0)
+            _total2 = _pv2["OUI"] + _pv2["NON"]
+            ckdf["OT_COR_EGAL"] = np.where(_total2 == 0, 100.0, (_pv2["OUI"] / _total2) * 100)
+
         pa = {k: round(ckdf[k].mean(), 2) for k in QK}
         qa = {k: round(ckdf[k].mean(), 2) for k in PK}
 
@@ -152,12 +163,12 @@ def main() -> None:
         sf2_p = np.mean([pscores[p] for p in sf2_posts]) if sf2_posts else 0
         sf2_q = np.mean([qscores[p] for p in sf2_posts]) if sf2_posts else 0
 
-        ano_map      = build_ano_map(dfp, avf, now_ts)
-        ano_p_rows   = build_ano_rows(vp, ano_map, QK)
-        ano_q_rows   = build_ano_rows(vp, ano_map, PK, fixed_zero=["OT Fiabilité", "Total Avis de Panne"])
-        ano_p_cols   = ["Poste de travail"] + QK + ["Total Anomalies"]
-        ano_q_cols   = ["Poste de travail"] + PK + ["Total Anomalies"]
-        anomaly_dfs  = build_anomaly_dfs(dfp, avf, now_ts)
+        ano_map     = build_ano_map(dfp, avf, now_ts)
+        ano_p_rows  = build_ano_rows(vp, ano_map, QK)
+        ano_q_rows  = build_ano_rows(vp, ano_map, PK, fixed_zero=["OT Fiabilité", "Total Avis de Panne"])
+        ano_p_cols  = ["Poste de travail"] + QK + ["Total Anomalies"]
+        ano_q_cols  = ["Poste de travail"] + PK + ["Total Anomalies"]
+        anomaly_dfs = build_anomaly_dfs(dfp, avf, now_ts)
 
         pcols = ["Poste de travail"] + QK + ["Score Performance"]
         qcols = ["Poste de travail"] + PK + ["Score Qualite"]
