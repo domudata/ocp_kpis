@@ -1,3 +1,4 @@
+
 # -*- coding: utf-8 -*-
 import locale
 import os
@@ -56,14 +57,14 @@ def main() -> None:
         st.markdown("""
         <div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;
              justify-content:center;background:linear-gradient(135deg,#1a365d,#2d3748,#1a365d);padding:40px">
-          <div style="font-size:64px;margin-bottom:20px">🦺</div>
+          <div style="font-size:64px;margin-bottom:20px">&#x1F9BA;</div>
           <h1 style="text-align:center;font-size:46px;color:#fff;font-weight:900;margin:0">
             HSE - CONSIGNE DE SECURITE</h1>
           <p style="text-align:center;color:rgba(255,255,255,.6);font-size:22px;margin-top:8px;
              letter-spacing:3px;text-transform:uppercase">Securite - Sante - Environnement</p>
           <div style="background:linear-gradient(135deg,#f6e05e,#ed8936);padding:36px 48px;
                border-radius:20px;font-size:32px;font-weight:700;text-align:center;margin:40px 0;
-               color:#1a202c;max-width:800px;box-shadow:0 20px 60px rgba(0,0,0,.3)">⚠️ %s</div>
+               color:#1a202c;max-width:800px;box-shadow:0 20px 60px rgba(0,0,0,.3)">&#x26A0;&#xFE0F; %s</div>
           <h2 style="text-align:center;color:#48bb78;font-size:36px;font-weight:900">
             Aucun travail n'est plus urgent que la securite</h2>
           <div style="margin-top:40px;width:200px;height:4px;background:rgba(255,255,255,.1);
@@ -98,8 +99,8 @@ def main() -> None:
     now_ts  = ctx["now_ts"]
 
     if df_full.empty:
-        st.markdown('<div class="es">📁 Veuillez charger les fichiers OT et AVIS via le panneau de filtres.</div>', unsafe_allow_html=True)
-        st.markdown('<div class="footer">Bureau Méthodes Maroc Chimie – © 2026 Tous droits réservés</div>', unsafe_allow_html=True)
+        st.markdown('<div class="es">Veuillez charger les fichiers OT et AVIS via le panneau de filtres.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="footer">Bureau Methodes Maroc Chimie - 2026 Tous droits reserves</div>', unsafe_allow_html=True)
         return
 
     try:
@@ -107,12 +108,12 @@ def main() -> None:
 
         df = df_full[
             df_full["Poste travail princ."].isin(vp)
-            & df_full["Date de début planifiée"].between(sdt, edt)
+            & df_full["Date de debut planifiee"].between(sdt, edt)
         ].copy()
 
         avdf = av_full[av_full["Poste travail princ."].isin(vp)].copy()
-        if "Créé le" in avdf.columns:
-            avdf = avdf[avdf["Créé le"].between(sdt, edt)]
+        if "Cree le" in avdf.columns:
+            avdf = avdf[avdf["Cree le"].between(sdt, edt)]
 
         df_dash   = df_full[df_full["Poste travail princ."].isin(vp)].copy()
         avdf_dash = av_full[av_full["Poste travail princ."].isin(vp)].copy()
@@ -124,7 +125,7 @@ def main() -> None:
         dfp  = res['dfp']
         avf  = res['avf']
 
-        # ── Correction OT CONFIME ─────────────────────────────────────
+        # Correction OT CONFIME
         _df_clot = dfp[dfp["Statut OT"].isin(["CLOT", "TCLO"])]
         if not _df_clot.empty and "OT CONFIME" in _df_clot.columns:
             _pv = _df_clot.groupby("Poste travail princ.")["OT CONFIME"].value_counts().unstack(fill_value=0)
@@ -135,14 +136,14 @@ def main() -> None:
             _total = _pv["OUI"] + _pv["NON"]
             ckdf["OT CONFIME"] = np.where(_total == 0, 100.0, (_pv["OUI"] / _total) * 100)
 
-        # ── Correction OT_COR_EGAL ────────────────────────────────────
+        # Correction OT_COR_EGAL
         _df_clot2 = dfp[dfp["Statut OT"].isin(["CLOT", "TCLO"])]
         if not _df_clot2.empty and "OT_COR_EGAL" in _df_clot2.columns:
             _pv2 = _df_clot2.groupby("Poste travail princ.")["OT_COR_EGAL"].value_counts().unstack(fill_value=0)
             for _c in ["OUI", "NON"]:
                 if _c not in _pv2.columns:
                     _pv2[_c] = 0
-            _pv2   = _pv2.reindex(vp, fill_value=0)
+            _pv2    = _pv2.reindex(vp, fill_value=0)
             _total2 = _pv2["OUI"] + _pv2["NON"]
             ckdf["OT_COR_EGAL"] = np.where(_total2 == 0, 100.0, (_pv2["OUI"] / _total2) * 100)
 
@@ -165,7 +166,7 @@ def main() -> None:
 
         ano_map     = build_ano_map(dfp, avf, now_ts)
         ano_p_rows  = build_ano_rows(vp, ano_map, QK)
-        ano_q_rows  = build_ano_rows(vp, ano_map, PK, fixed_zero=["OT Fiabilité", "Total Avis de Panne"])
+        ano_q_rows  = build_ano_rows(vp, ano_map, PK, fixed_zero=["OT Fiabilite", "Total Avis de Panne"])
         ano_p_cols  = ["Poste de travail"] + QK + ["Total Anomalies"]
         ano_q_cols  = ["Poste de travail"] + PK + ["Total Anomalies"]
         anomaly_dfs = build_anomaly_dfs(dfp, avf, now_ts)
@@ -250,10 +251,10 @@ def main() -> None:
                 pv = var_df[var_df["Poste"] == poste]
                 for kpi in QK:
                     kpi_v = pv[pv["KPI"] == kpi]
-                    synth_perf[poste][kpi] = {"diff": "%+.1f" % kpi_v.iloc[-1]["Ecart"]} if not kpi_v.empty else {"diff": "—"}
+                    synth_perf[poste][kpi] = {"diff": "%+.1f" % kpi_v.iloc[-1]["Ecart"]} if not kpi_v.empty else {"diff": "---"}
                 for kpi in PK:
                     kpi_v = pv[pv["KPI"] == kpi]
-                    synth_qual[poste][kpi] = {"diff": "%+.1f" % kpi_v.iloc[-1]["Ecart"]} if not kpi_v.empty else {"diff": "—"}
+                    synth_qual[poste][kpi] = {"diff": "%+.1f" % kpi_v.iloc[-1]["Ecart"]} if not kpi_v.empty else {"diff": "---"}
 
         plan_actions_rows = []
         for poste in vp:
@@ -272,7 +273,7 @@ def main() -> None:
                         "poste": poste, "kpi": kpi,
                         "needs_action": needs_action, "ecart": ecart,
                         "nb_anom": nb_anom,
-                        "responsable": KPI_RESP_MAP.get(kpi, "Non assigné"),
+                        "responsable": KPI_RESP_MAP.get(kpi, "Non assigne"),
                         "action": ACT_MAP.get(kpi, ""), "delai": "",
                     })
 
@@ -286,7 +287,6 @@ def main() -> None:
         total_ot    = len(df)
 
         render_header(fichier_date)
-
         prev_values = get_previous_card_values(hist_df)
         render_cards(
             total_ot, avg_p_score, avg_q_score, total_ano_p + total_ano_q,
@@ -294,8 +294,8 @@ def main() -> None:
         )
 
         tabs = st.tabs([
-            "🏠 Tableau de Bord", "📈 Performance", "✅ Qualite",
-            "📂 Backlog", "📋 Suivi & Evolution", "🎯 Plan d'action",
+            "&#x1F3E0; Tableau de Bord", "&#x1F4C8; Performance", "&#x2705; Qualite",
+            "&#x1F4C2; Backlog", "&#x1F4CB; Suivi & Evolution", "&#x1F3AF; Plan d'action",
         ])
 
         with tabs[0]:
@@ -316,10 +316,12 @@ def main() -> None:
 
     except Exception as e:
         st.error("Erreur lors du chargement des donnees : %s" % str(e))
-        st.markdown('<div class="es">Veuillez verifier que les fichiers ot.xlsx et avis.xlsx sont presents dans le repertoire.</div>', unsafe_allow_html=True)
+        st.markdown('<div class="es">Veuillez verifier que les fichiers ot.xlsx et avis.xlsx sont presents.</div>', unsafe_allow_html=True)
 
-    st.markdown('<div class="footer">Bureau Méthodes Maroc Chimie – © 2026 Tous droits réservés</div>', unsafe_allow_html=True)
+    st.markdown('<div class="footer">Bureau Methodes Maroc Chimie - 2026 Tous droits reserves</div>', unsafe_allow_html=True)
 
 
 if __name__ == "__main__":
     main()
+ENDOFFILE
+echo "OK"
