@@ -125,6 +125,19 @@ def main() -> None:
         res_d = calc_kpis(df_dash, avdf_dash, now_ts, vp)
 
         ckdf = res['ckdf']
+        # ── Correction OT CONFIME (pivot séparé) ──
+_pv_conf = pd.pivot_table(
+    dfp[dfp["Statut OT"].isin(["CLOT", "TCLO"])],
+    index="Poste travail princ.", columns="OT CONFIME",
+    values="Ordre", aggfunc="count", fill_value=0
+).reindex(vp, fill_value=0)
+for _c in ["OUI", "NON"]:
+    _pv_conf[_c] = _pv_conf.get(_c, 0)
+_pv_conf["Total"] = _pv_conf["OUI"] + _pv_conf["NON"]
+ckdf["OT CONFIME"] = np.where(
+    _pv_conf["Total"] == 0, 100.0,
+    (_pv_conf["OUI"] / _pv_conf["Total"]) * 100
+        )
         dfp  = res['dfp']
         avf  = res['avf']
 
