@@ -217,8 +217,14 @@ def calc_kpis(df_i, av_i, now_ts, posts):
     la["OT LANC ESTIME"] = ckpi(la["OUI"], la["Total"])
 
     # ── 16. BACKLOG PREP CARACTERISE ─────────────────────────────────────
+    # Num = CREE + CRPR + hors SOPL + contient ATPD/ATMR/ATRS/ATMO/ATER
+    # Den = CREE + CRPR + hors SOPL
     pat_prep = '|'.join(CRPR_KW)
-    df_cree  = df[df["is_correctif"] & (df["Statut OT"]=="CRÉÉ")].copy()
+    df_cree  = df[
+        (df["Statut OT"] == "CRÉÉ") &
+        df["Statut utilisateur"].str.contains(r"\bCRPR\b", case=False, na=False) &
+        (df["Contient SOPL"] == 0)
+    ].copy()
     df_cree["_carac"] = df_cree["Statut utilisateur"].str.contains(
         pat_prep, na=False
     ).map({True:"CARACTERISE",False:"NON CARACTERISE"})
