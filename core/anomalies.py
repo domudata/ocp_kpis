@@ -65,8 +65,9 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
     # ── 14. TAUX APPROBATION AVIS ────────────────────────────────────────
     # Anomalie = avis APRQ ou REJT (non encore approuves ou rejetés)
     # Note : avf est deja filtre hors ZU/Z4/ZR/ZP dans prepare_data
+    # Anomalie = avis APRQ uniquement (en attente d approbation)
     ano_map["Taux d'approbation des Avis"] = (
-        avf[avf["Statut utilisateur"].isin(["APRQ","REJT"])]
+        avf[avf["Statut utilisateur"] == "APRQ"]
         .groupby("Poste travail princ.")["Avis"].count()
     )
 
@@ -160,7 +161,7 @@ def build_anomaly_dfs(dfp, avf, now_ts):
         "Performance Graissage":             dfp[filt_perf & (dfp["_tw_num"]==350)].copy(),
         "Performance Inspection":            dfp[filt_perf & (dfp["_tw_num"].isin([290,300,310])) & (dfp["Date de début planifiée"]<=now_ts)].copy(),
         "Performance Systématiques":         dfp[filt_perf & (dfp["_tw_num"]==360) & (dfp["Date de début planifiée"]<=now_ts)].copy(),
-        "Taux d'approbation des Avis":       avf[avf["Statut utilisateur"].isin(["APRQ","REJT"])].copy(),
+        "Taux d'approbation des Avis":       avf[avf["Statut utilisateur"]=="APRQ"].copy(),  # Anomalie = APRQ seulement
         "OT LANC ESTIME":                    dfp[dfp["is_correctif"] & (dfp["Statut OT"]=="LANC") & (dfp["Contient SOPL"]==0) & (dfp["OT LANC ESTIME"]=="NON")].copy(),
         "Backlog préparation caractérisé":   dfp[dfp["is_correctif"] & (dfp["Statut OT"]=="CRÉÉ") & (dfp["Backlog preparation"]=="NON CARACTERISE")].copy(),
         "Backlog planification caractérisé": dfp[dfp["is_correctif"] & (dfp["Statut OT"]=="LANC") & (dfp["Contient SOPL"]==0) & (dfp["Backlog planification"]=="NON CARACTERISE")].copy(),
