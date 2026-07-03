@@ -134,11 +134,11 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
     )
 
     # ── OT_COR_EGAL ──────────────────────────────────────────────────────
-    # EGAL = budget == reel  → anomalie (KPI baisse)
-    # DIFF = budget != reel  → conforme (KPI monte)
+    # OUI = budget == reel  → anomalie (coûts identiques = pas d imputation)
+    # NON = budget != reel  → conforme (coûts différents = bonne imputation)
     df["OT_COR_EGAL"] = np.where(
         df["Total coûts budgétés"].fillna(0) == df["Total coûts réels"].fillna(0),
-        "EGAL", "DIFF"
+        "OUI", "NON"
     )
 
     # ── Backlog preparation (pour graphiques) ───────────────────────────
