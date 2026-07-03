@@ -36,6 +36,21 @@ from pages.evolution import render_evolution_tab
 from pages.plan_action import render_plan_action_tab
 
 
+@st.cache_data(show_spinner="Calcul des KPIs en cours...")
+def calc_kpis_cached(df_period, avdf_period, now_ts, apm_tuple, fichier_date, sdt, edt):
+    """
+    Wrapper cache autour de calc_kpis().
+    Cle de cache = (contenu de df_period/avdf_period, now_ts, apm_tuple, fichier_date, sdt, edt).
+    Le recalcul ne se declenche que si :
+      - date.txt change (fichier_date change -> prepare_data change -> df_full change)
+      - la periode (sdt/edt) change
+      - les donnees sources (ot.xlsx / avis.xlsx) changent
+    Changer la SELECTION DE POSTES (vp) ne redeclenche PAS ce calcul,
+    car on calcule ici sur TOUS les postes (apm) puis on filtre ensuite dans main().
+    """
+    return calc_kpis(df_period, avdf_period, now_ts, list(apm_tuple))
+
+
 def main() -> None:
     try:
         locale.setlocale(locale.LC_ALL, 'fr_FR.UTF-8')
@@ -119,26 +134,36 @@ def main() -> None:
     try:
         sdt, edt = ctx["sdt"], ctx["edt"]
 
-        df = df_full[
-            df_full["Poste travail princ."].isin(vp) &
+        # ── Filtre par DATE uniquement (periode) sur TOUS les postes ───────
+        # Le filtre par poste (vp) est applique APRES le calcul en cache,
+        # pour que changer la selection de postes ne redeclenche PAS
+        # tout le calcul lourd (pivot_table / groupby sur ~130k lignes).
+        df_period = df_full[
             df_full["Date de début planifiée"].between(sdt, edt)
         ].copy()
 
-        avdf = av_full[av_full["Poste travail princ."].isin(vp)].copy()
-        if "Créé le" in avdf.columns:
-            avdf = avdf[avdf["Créé le"].between(sdt, edt)]
+        avdf_period = av_full.copy()
+        if "Créé le" in avdf_period.columns:
+            avdf_period = avdf_period[avdf_period["Créé le"].between(sdt, edt)]
 
-        # ── Calcul KPIs ──────────────────────────────────────────────────
+        # ── Calcul KPIs (mis en cache, ne tourne que si date.txt/periode change) ──
         # calc_kpis() calcule correctement TOUS les KPIs incluant :
         # - OT CONFIME  (via pivot Statut système contient CONF)
         # - OT_COR_EGAL (via logique budget==reel, colonne OT_COR_EGAL=EGAL/DIFF)
         # - Age Prep/Plan/Exec avec logique 100-val pour 1-3m et >3m
         # NE PAS recalculer ces KPIs ici — utiliser directement res['ckdf']
-        res   = calc_kpis(df, avdf, now_ts, vp)
+        res = calc_kpis_cached(df_period, avdf_period, now_ts, tuple(apm), fichier_date, sdt, edt)
 
-        ckdf = res['ckdf']   # contient TOUTES les valeurs correctes
-        dfp  = res['dfp']
-        avf  = res['avf']
+        ckdf_full = res['ckdf']   # TOUS les postes (apm)
+        dfp_full  = res['dfp']
+        avf_full  = res['avf']
+
+        # ── Filtre par postes selectionnes (vp) : simple filtrage, instantane ──
+        vp_present = [p for p in vp if p in ckdf_full.index]
+        ckdf = ckdf_full.loc[vp_present] if vp_present else ckdf_full.iloc[0:0]
+        dfp  = dfp_full[dfp_full["Poste travail princ."].isin(vp)]
+        avf  = avf_full[avf_full["Poste travail princ."].isin(vp)] if "Poste travail princ." in avf_full.columns else avf_full
+        df   = dfp
 
         pa = {k: round(ckdf[k].mean(), 2) for k in QK}
         qa = {k: round(ckdf[k].mean(), 2) for k in PK}
