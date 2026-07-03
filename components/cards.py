@@ -49,22 +49,19 @@ def render_cards(total_ot, avg_p_score, avg_q_score,
     var_p2 = format_card_variation(sf2_p,     prev_values.get("Performance SF2"))
     var_q2 = format_card_variation(sf2_q,     prev_values.get("Qualité SF2"))
 
-    # Ligne 1 : OT Analysés | Anomalies Totales | Performance SF1
+    # Toutes les 6 cartes sur une seule ligne
     st.markdown(
         '<div class="cr">'
         '<div class="cc c1"><div class="cv">%d</div>%s<div class="cl">OT Analyses</div></div>'
         '<div class="cc c4"><div class="cv">%d</div>%s<div class="cl">Anomalies Totales</div></div>'
         '<div class="cc c5"><div class="cv">%.1f%%</div>%s<div class="cl">Performance SF1</div></div>'
-        '</div>' % (total_ot, var_ot, total_ano, var_at, sf1_p, var_p1),
-        unsafe_allow_html=True,
-    )
-
-    # Ligne 2 : Qualité SF1 | Performance SF2 | Qualité SF2
-    st.markdown(
-        '<div class="cr">'
         '<div class="cc c6"><div class="cv">%.1f%%</div>%s<div class="cl">Qualite SF1</div></div>'
         '<div class="cc c7"><div class="cv">%.1f%%</div>%s<div class="cl">Performance SF2</div></div>'
         '<div class="cc c8"><div class="cv">%.1f%%</div>%s<div class="cl">Qualite SF2</div></div>'
-        '</div>' % (sf1_q, var_q1, sf2_p, var_p2, sf2_q, var_q2),
+        '</div>' % (
+            total_ot, var_ot, total_ano, var_at,
+            sf1_p, var_p1, sf1_q, var_q1,
+            sf2_p, var_p2, sf2_q, var_q2
+        ),
         unsafe_allow_html=True,
     )
