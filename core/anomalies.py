@@ -120,11 +120,12 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
     # Anomalie = budget DIFFERENT du reel (DIFF = pas conforme)
     # OT_COR_EGAL = "EGAL" si bud==reel (conforme) → KPI monte
     #             = "DIFF" si bud!=reel (anomalie) → KPI baisse
-    # Anomalie = budget == reel (EGAL) car couts pas correctement imputés
-    # KPI = nb_EGAL / total (maximiser = bonne imputation)
+    # Anomalie = Plan==0 + CLOT/TCLO + CONF + budget == reel (EGAL)
+    # KPI monte quand bud != reel (DIFF = bonne imputation des coûts)
     ano_map["OT_COR_EGAL"] = dfp[
         dfp["is_correctif"] &
         dfp["Statut OT"].isin(["CLOT","TCLO"]) &
+        dfp["Statut système"].str.contains("CONF", na=False) &
         (dfp["OT_COR_EGAL"] == "EGAL")   # budget == reel = anomalie
     ].groupby("Poste travail princ.")["Ordre"].count()
 
@@ -181,5 +182,5 @@ def build_anomaly_dfs(dfp, avf, now_ts):
         "Backlog préparation caractérisé":   dfp[(dfp["Statut OT"]=="CRÉÉ") & dfp["Statut utilisateur"].str.contains(r"\bCRPR\b",case=False,na=False) & (dfp["Contient SOPL"]==0) & ~dfp["Statut utilisateur"].str.contains("ATPD|ATMR|ATRS|ATMO|ATER",na=False)].copy(),
         "Backlog planification caractérisé": dfp[dfp["is_correctif"] & (dfp["Statut OT"]=="LANC") & (dfp["Contient SOPL"]==0) & (dfp["Backlog planification"]=="NON CARACTERISE")].copy(),
         "OT CONFIME":                        dfp[dfp["Statut OT"].isin(["CLOT","TCLO"]) & (dfp["OT CONFIME"]=="NON")].copy(),
-        "OT_COR_EGAL":                       dfp[dfp["is_correctif"] & dfp["Statut OT"].isin(["CLOT","TCLO"]) & (dfp["OT_COR_EGAL"]=="EGAL")].copy(),  # EGAL = budget==reel = anomalie
+        "OT_COR_EGAL":                       dfp[dfp["is_correctif"] & dfp["Statut OT"].isin(["CLOT","TCLO"]) & dfp["Statut système"].str.contains("CONF",na=False) & (dfp["OT_COR_EGAL"]=="EGAL")].copy(),
     }
