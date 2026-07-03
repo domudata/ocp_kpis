@@ -74,35 +74,38 @@ def is_lb(k): return k in LOWER_BETTER
 
 def _age_kpis(df, filt, col_age, posts, prefix):
     """
-    Calcule les 3 KPIs age pour un backlog donné.
-
-    Logique officielle OCP :
-    - <1m  : N_inf1m / Total                  → valeur directe  (maximiser, cible 80%)
-    - 1-3m : 100 - (N_1-3m  / Total * 100)   → complément       (cible ≥ 85% = max 15% dans tranche)
-    - >3m  : 100 - (N_sup3m / Total * 100)   → complément       (cible ≥ 95% = max 5% dans tranche)
-
-    Tous les scores sont dans [0,100] : plus la valeur est haute, mieux c est.
-    La somme des 3 taux BRUTS = 100% (répartition totale).
+    Logique officielle OCP (logique 100-val) :
+    - <1m  : score = N_inf1m / Total * 100            (direct, maximiser >= 80%)
+    - 1-3m : score = 100 - (N_1-3m / Total * 100)    (complement, cible >= 85%)
+    - >3m  : score = 100 - (N_sup3m / Total * 100)   (complement, cible >= 95%)
+    Résultat : tous dans [0,100], plus haut = mieux.
     """
     pv = cpiv(df, filt, col_age, posts)
-    for c in ["<1 mois",">3 mois","1 mois < <3 mois","Inconnu"]:
-        pv[c] = pv.get(c, 0)
+    for c in ["<1 mois", ">3 mois", "1 mois < <3 mois", "Inconnu"]:
+        if c not in pv.columns:
+            pv[c] = 0
     pv["Total"] = pv[["<1 mois","1 mois < <3 mois",">3 mois","Inconnu"]].sum(axis=1)
 
-    # Taux bruts (pour affichage dans tableau détaillé)
-    pv["taux_inf1m"]  = np.where(pv["Total"]==0, 100.0, pv["<1 mois"]          / pv["Total"] * 100)
-    pv["taux_1-3m"]   = np.where(pv["Total"]==0,   0.0, pv["1 mois < <3 mois"] / pv["Total"] * 100)
-    pv["taux_sup3m"]  = np.where(pv["Total"]==0,   0.0, pv[">3 mois"]          / pv["Total"] * 100)
-
     kpis = {}
-    # KPI <1m  : taux brut direct (plus c est grand mieux c est)
-    kpis[f"OT {prefix} <1 mois"]       = pv["taux_inf1m"]
-    # KPI 1-3m : 100 - taux_brut (plus il y a d OT dans cette tranche, moins bon)
-    kpis[f"OT {prefix} 1mois< <3mois"] = 100.0 - pv["taux_1-3m"]
-    # KPI >3m  : 100 - taux_brut (plus il y a d OT dans cette tranche, moins bon)
-    kpis[f"OT {prefix} >3 mois"]       = 100.0 - pv["taux_sup3m"]
+    for idx in pv.index:
+        tot = pv.loc[idx, "Total"]
+        if tot == 0:
+            kpis.setdefault(f"OT {prefix} <1 mois",       {})[idx] = 100.0
+            kpis.setdefault(f"OT {prefix} 1mois< <3mois", {})[idx] = 100.0
+            kpis.setdefault(f"OT {prefix} >3 mois",       {})[idx] = 100.0
+        else:
+            t1 = pv.loc[idx, "<1 mois"]           / tot * 100
+            t2 = pv.loc[idx, "1 mois < <3 mois"]  / tot * 100
+            t3 = pv.loc[idx, ">3 mois"]           / tot * 100
+            kpis.setdefault(f"OT {prefix} <1 mois",       {})[idx] = round(t1, 2)
+            kpis.setdefault(f"OT {prefix} 1mois< <3mois", {})[idx] = round(100.0 - t2, 2)
+            kpis.setdefault(f"OT {prefix} >3 mois",       {})[idx] = round(100.0 - t3, 2)
 
-    return kpis, pv
+    result = {}
+    for k, d in kpis.items():
+        result[k] = pd.Series(d).reindex(posts, fill_value=100.0)
+
+    return result, pv
 
 
 def calc_kpis(df_i, av_i, now_ts, posts):
