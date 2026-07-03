@@ -50,6 +50,24 @@ def main() -> None:
         '<style>[data-testid="stSidebarNav"] { display: none; }</style>',
         unsafe_allow_html=True
     )
+    st.markdown("""
+    <style>
+    .cr { display:flex; flex-wrap:nowrap; gap:8px; margin-bottom:8px; overflow-x:auto; }
+    .cc { flex:1 1 0; min-width:0; padding:10px 8px; text-align:center; background:#fff;
+          border-radius:8px; border-left:3px solid #cbd5e1; box-shadow:0 1px 3px rgba(0,0,0,0.06); }
+    .cc .cv { font-size:18px; font-weight:800; line-height:1.1; white-space:nowrap; }
+    .cc .cd { font-size:10px; color:#f59e0b; margin:2px 0; }
+    .cc .cl { font-size:10px; font-weight:700; color:#475569; text-transform:uppercase;
+              white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .c1 { border-left-color:#3b82f6; } .c1 .cv{color:#3b82f6;}
+    .c4 { border-left-color:#ef4444; } .c4 .cv{color:#ef4444;}
+    .c5 { border-left-color:#14b8a6; } .c5 .cv{color:#14b8a6;}
+    .c6 { border-left-color:#8b5cf6; } .c6 .cv{color:#8b5cf6;}
+    .c7 { border-left-color:#f59e0b; } .c7 .cv{color:#f59e0b;}
+    .c8 { border-left-color:#f97316; } .c8 .cv{color:#f97316;}
+    @media (max-width: 768px) { .cc .cv { font-size:14px; } .cc .cl { font-size:8px; } }
+    </style>
+    """, unsafe_allow_html=True)
     fichier_date = get_date_from_file()
 
     if "hse_affiche" not in st.session_state:
