@@ -176,31 +176,32 @@ def main() -> None:
         cible_q["Score Qualite"] = "100"
         qrows.append(cible_q)
 
+        # Total general = moyenne des valeurs par KPI
+        # On utilise la moyenne directe (pas gscore) pour respecter
+        # la logique 100-val des KPIs age (>3m et 1-3m)
         tot_p = {"Poste de travail": "Total general", "_t": "total"}
         for k in QK:
-            cc = tc = 0
+            vals = []
             for rw in prows:
                 if k in rw and rw.get("_t") not in ("cible","total"):
                     try:
-                        cc += gscore(k, float(rw[k]), CIBLE.get(k, 100))
-                        tc += 1
+                        vals.append(float(rw[k]))
                     except Exception:
                         pass
-            tot_p[k] = "%.1f" % ((cc / tc) * 100 if tc > 0 else 0)
+            tot_p[k] = "%.1f" % (sum(vals) / len(vals) if vals else 0)
         tot_p["Score Performance"] = "%.2f" % (sum(pscores.values()) / len(pscores)) if pscores else "0.00"
         prows.append(tot_p)
 
         tot_q = {"Poste de travail": "Total general", "_t": "total"}
         for k in PK:
-            cc = tc = 0
+            vals = []
             for rw in qrows:
                 if k in rw and rw.get("_t") not in ("cible","total"):
                     try:
-                        cc += gscore(k, float(rw[k]), CIBLE.get(k, 100))
-                        tc += 1
+                        vals.append(float(rw[k]))
                     except Exception:
                         pass
-            tot_q[k] = "%.1f" % ((cc / tc) * 100 if tc > 0 else 0)
+            tot_q[k] = "%.1f" % (sum(vals) / len(vals) if vals else 0)
         tot_q["Score Qualite"] = "%.2f" % (sum(qscores.values()) / len(qscores)) if qscores else "0.00"
         qrows.append(tot_q)
 
