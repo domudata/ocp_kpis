@@ -120,17 +120,17 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
     # Anomalie = budget DIFFERENT du reel (DIFF = pas conforme)
     # OT_COR_EGAL = "EGAL" si bud==reel (conforme) → KPI monte
     #             = "DIFF" si bud!=reel (anomalie) → KPI baisse
-    # Anomalie = Plan==0 + CLOT/TCLO + CONF + budget == reel
-    # Calcul direct sur les colonnes coûts (independant de la colonne OT_COR_EGAL)
-    _base_cor = dfp[
+    # Anomalie = Plan==0 + CLOT+TCLO + CONF + budget == reel
+    # Calcul direct sur colonnes couts (independant de la valeur OT_COR_EGAL)
+    _sub_cor = dfp[
         dfp["is_correctif"] &
         dfp["Statut OT"].isin(["CLOT","TCLO"]) &
         dfp["Statut système"].str.contains("CONF", na=False)
-    ].copy()
-    _bud  = _base_cor["Total coûts budgétés"].fillna(0)
-    _reel = _base_cor["Total coûts réels"].fillna(0)
-    _egal = _base_cor[_bud == _reel]   # budget == reel = anomalie
-    ano_map["OT_COR_EGAL"] = _egal.groupby("Poste travail princ.")["Ordre"].count()
+    ]
+    _bud  = _sub_cor["Total coûts budgétés"].fillna(0)
+    _reel = _sub_cor["Total coûts réels"].fillna(0)
+    ano_map["OT_COR_EGAL"] = _sub_cor[_bud == _reel].groupby(
+        "Poste travail princ.")["Ordre"].count()
 
     return ano_map
 
