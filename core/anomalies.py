@@ -95,9 +95,12 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
         dfp["Statut utilisateur"].str.contains(r"\bCRPR\b", case=False, na=False) &
         (dfp["Contient SOPL"] == 0)
     ]
-    ano_map["Backlog préparation caractérisé"] = _df_prep_base[
-        ~_df_prep_base["Statut utilisateur"].str.contains(pat_crpr_kw, na=False)
-    ].groupby("Poste travail princ.")["Ordre"].count()
+    ano_map["Backlog préparation caractérisé"] = dfp[
+    (dfp["Statut OT"] == "CRÉÉ") &
+    dfp["Statut utilisateur"].str.contains(r"\bCRPR\b", case=False, na=False) &
+    (dfp["Contient SOPL"] == 0) &
+    (dfp["Backlog preparation"] == "NON CARACTERISE")
+].groupby("Poste travail princ.")["Ordre"].count()
 
     # ── 17. BACKLOG PLAN CARACTERISE ─────────────────────────────────────
     # Anomalie = Plan==0 + LANC + hors SOPL + NON caracterise
