@@ -266,7 +266,7 @@ def calc_kpis(df_i, av_i, now_ts, posts):
 
     # ── 19. OT_COR_EGAL ──────────────────────────────────────────────────
     df_clot = df[df["is_correctif"] & df["Statut OT"].isin(["CLOT","TCLO"])].copy()
-    df_clot["_egal"] = df_clot["OT_COR_EGAL"].map({"EGAL":"OUI","DIFF":"NON"})
+    df_clot["_egal"] = df_clot["OT_COR_EGAL"]
     pv_cor = pd.pivot_table(
         df_clot, index="Poste travail princ.", columns="_egal",
         values="Ordre", aggfunc="count", fill_value=0
