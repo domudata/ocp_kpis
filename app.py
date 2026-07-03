@@ -46,6 +46,10 @@ def main() -> None:
             pass
 
     inject_custom_css()
+    st.markdown(
+        '<style>[data-testid="stSidebarNav"] { display: none; }</style>',
+        unsafe_allow_html=True
+    )
     fichier_date = get_date_from_file()
 
     if "hse_affiche" not in st.session_state:
