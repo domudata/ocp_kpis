@@ -128,17 +128,13 @@ def main() -> None:
         if "Créé le" in avdf.columns:
             avdf = avdf[avdf["Créé le"].between(sdt, edt)]
 
-        df_dash  = df_full[df_full["Poste travail princ."].isin(vp)].copy()
-        avdf_dash = av_full[av_full["Poste travail princ."].isin(vp)].copy()
-
         # ── Calcul KPIs ──────────────────────────────────────────────────
         # calc_kpis() calcule correctement TOUS les KPIs incluant :
         # - OT CONFIME  (via pivot Statut système contient CONF)
         # - OT_COR_EGAL (via logique budget==reel, colonne OT_COR_EGAL=EGAL/DIFF)
         # - Age Prep/Plan/Exec avec logique 100-val pour 1-3m et >3m
         # NE PAS recalculer ces KPIs ici — utiliser directement res['ckdf']
-        res   = calc_kpis(df,      avdf,      now_ts, vp)
-        res_d = calc_kpis(df_dash, avdf_dash, now_ts, vp)
+        res   = calc_kpis(df, avdf, now_ts, vp)
 
         ckdf = res['ckdf']   # contient TOUTES les valeurs correctes
         dfp  = res['dfp']
