@@ -265,8 +265,17 @@ def calc_kpis(df_i, av_i, now_ts, posts):
     res["ot_confime"]     = pv_conf
 
     # ── 19. OT_COR_EGAL ──────────────────────────────────────────────────
-    df_clot = df[df["is_correctif"] & df["Statut OT"].isin(["CLOT","TCLO"])].copy()
-    df_clot["_egal"] = df_clot["OT_COR_EGAL"]
+    # Base : Plan==0 + CLOT/TCLO + CONF (OT correctifs clotures confirmes)
+    # KPI  : bud != reel / total  -> maximiser (bonne imputation des couts)
+    # Calcul DIRECT sur colonnes couts, independant de toute colonne texte
+    df_clot = df[
+        df["is_correctif"] &
+        df["Statut OT"].isin(["CLOT","TCLO"]) &
+        df["Statut système"].str.contains("CONF", na=False)
+    ].copy()
+    _bud_c  = df_clot["Total coûts budgétés"].fillna(0)
+    _reel_c = df_clot["Total coûts réels"].fillna(0)
+    df_clot["_egal"] = np.where(_bud_c != _reel_c, "OUI", "NON")
     pv_cor = pd.pivot_table(
         df_clot, index="Poste travail princ.", columns="_egal",
         values="Ordre", aggfunc="count", fill_value=0
