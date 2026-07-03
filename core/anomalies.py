@@ -128,7 +128,7 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
 ]
 
     ano_map["OT_COR_EGAL"] = _sub_cor[
-    _sub_cor["OT_COR_EGAL"] == "OUI"
+    _sub_cor["OT_COR_EGAL"] == "NON"
 ].groupby("Poste travail princ.")["Ordre"].count()
     return ano_map
 
@@ -183,5 +183,5 @@ def build_anomaly_dfs(dfp, avf, now_ts):
         "Backlog préparation caractérisé":   dfp[(dfp["Statut OT"]=="CRÉÉ") & dfp["Statut utilisateur"].str.contains(r"\bCRPR\b",case=False,na=False) & (dfp["Contient SOPL"]==0) & ~dfp["Statut utilisateur"].str.contains("ATPD|ATMR|ATRS|ATMO|ATER",na=False)].copy(),
         "Backlog planification caractérisé": dfp[dfp["is_correctif"] & (dfp["Statut OT"]=="LANC") & (dfp["Contient SOPL"]==0) & (dfp["Backlog planification"]=="NON CARACTERISE")].copy(),
         "OT CONFIME":                        dfp[dfp["Statut OT"].isin(["CLOT","TCLO"]) & (dfp["OT CONFIME"]=="NON")].copy(),
-        "OT_COR_EGAL": dfp[dfp["is_correctif"] & dfp["Statut OT"].isin(["CLOT","TCLO"]) & (dfp["OT_COR_EGAL"] == "OUI")].copy(),
+        "OT_COR_EGAL": dfp[dfp["is_correctif"] & dfp["Statut OT"].isin(["CLOT","TCLO"]) & (dfp["OT_COR_EGAL"] == "NON")].copy(),
     }
