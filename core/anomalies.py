@@ -120,14 +120,17 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
     # Anomalie = budget DIFFERENT du reel (DIFF = pas conforme)
     # OT_COR_EGAL = "EGAL" si bud==reel (conforme) → KPI monte
     #             = "DIFF" si bud!=reel (anomalie) → KPI baisse
-    # Anomalie = Plan==0 + CLOT/TCLO + CONF + budget == reel (EGAL)
-    # KPI monte quand bud != reel (DIFF = bonne imputation des coûts)
-    ano_map["OT_COR_EGAL"] = dfp[
+    # Anomalie = Plan==0 + CLOT/TCLO + CONF + budget == reel
+    # Calcul direct sur les colonnes coûts (independant de la colonne OT_COR_EGAL)
+    _base_cor = dfp[
         dfp["is_correctif"] &
         dfp["Statut OT"].isin(["CLOT","TCLO"]) &
-        dfp["Statut système"].str.contains("CONF", na=False) &
-        (dfp["OT_COR_EGAL"] == "EGAL")   # budget == reel = anomalie
-    ].groupby("Poste travail princ.")["Ordre"].count()
+        dfp["Statut système"].str.contains("CONF", na=False)
+    ].copy()
+    _bud  = _base_cor["Total coûts budgétés"].fillna(0)
+    _reel = _base_cor["Total coûts réels"].fillna(0)
+    _egal = _base_cor[_bud == _reel]   # budget == reel = anomalie
+    ano_map["OT_COR_EGAL"] = _egal.groupby("Poste travail princ.")["Ordre"].count()
 
     return ano_map
 
@@ -182,5 +185,10 @@ def build_anomaly_dfs(dfp, avf, now_ts):
         "Backlog préparation caractérisé":   dfp[(dfp["Statut OT"]=="CRÉÉ") & dfp["Statut utilisateur"].str.contains(r"\bCRPR\b",case=False,na=False) & (dfp["Contient SOPL"]==0) & ~dfp["Statut utilisateur"].str.contains("ATPD|ATMR|ATRS|ATMO|ATER",na=False)].copy(),
         "Backlog planification caractérisé": dfp[dfp["is_correctif"] & (dfp["Statut OT"]=="LANC") & (dfp["Contient SOPL"]==0) & (dfp["Backlog planification"]=="NON CARACTERISE")].copy(),
         "OT CONFIME":                        dfp[dfp["Statut OT"].isin(["CLOT","TCLO"]) & (dfp["OT CONFIME"]=="NON")].copy(),
-        "OT_COR_EGAL":                       dfp[dfp["is_correctif"] & dfp["Statut OT"].isin(["CLOT","TCLO"]) & dfp["Statut système"].str.contains("CONF",na=False) & (dfp["OT_COR_EGAL"]=="EGAL")].copy(),
+        "OT_COR_EGAL": dfp[
+            dfp["is_correctif"] &
+            dfp["Statut OT"].isin(["CLOT","TCLO"]) &
+            dfp["Statut système"].str.contains("CONF", na=False) &
+            (dfp["Total coûts budgétés"].fillna(0) == dfp["Total coûts réels"].fillna(0))
+        ].copy(),
     }
