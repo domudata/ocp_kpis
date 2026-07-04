@@ -51,22 +51,16 @@ def build_statut_pivot(df_sub, posts):
 
 
 def gscore(k, a, t):
+    """
+    Score binaire par KPI :
+        - a < t (cible) → 0
+        - a ≥ t (cible) → 1
+
+    Score global d une categorie (Performance / Qualite) :
+        = somme(gscore) / nb_kpis × 100
+    """
     if pd.isna(a) or pd.isna(t): return 0
-    if k in ["OT préparation <1 mois","OT planification <1 mois","OT exécution <1 mois"]:
-        return 1 if a >= 75 else 0
-    if k in ["OT préparation 1mois< <3mois","OT planification 1mois< <3mois","OT exécution 1mois< <3mois"]:
-        return 1 if a >= 85 else 0   # score = 100-15 = 85
-    if k in ["OT préparation >3 mois","OT planification >3 mois","OT exécution >3 mois"]:
-        return 1 if a >= 95 else 0   # score = 100-5 = 95
-    if k == "TAUX_REALISATION_CORRECTIF/PT": return 1 if a >= 80 else 0
-    if k == "Taux d'approbation des Avis":   return 1 if a >= 90 else 0
-    if k in ["OT LANC ESTIME","Backlog préparation caractérisé",
-             "Backlog planification caractérisé","OT CONFIME","OT_COR_EGAL"]:
-        return 1 if a >= 95 else 0
-    if k in ["Performance Graissage","Performance Inspection","Performance Systématiques"]:
-        return 1 if a >= 95 else 0
-    if k in ["OT Fiabilité","Total Avis de Panne"]: return 1 if a >= 100 else 0
-    return 0
+    return 1 if a >= t else 0
 
 
 def is_lb(k): return k in LOWER_BETTER
@@ -125,31 +119,33 @@ def calc_kpis(df_i, av_i, now_ts, posts):
     )
 
     # ── 2-4. AGE PREP ────────────────────────────────────────────────────
-    # Plan==0 + CREE + CRPR, age = date_création
-    # <1m = direct | 1-3m = 100-val | >3m = 100-val
+    # Base : CRÉÉ + CRPR + Backlog prep NON CARAC + Date planif ≤ aujourd'hui
+    # Age  : |now - Créé le| (dans prepare_data.py, avec abs)
     filt_prep = (
-        df["is_correctif"] &
         (df["Statut OT"] == "CRÉÉ") &
-        df["Statut utilisateur"].str.contains(r"\bCRPR\b", case=False, na=False)
+        df["Statut utilisateur"].str.contains(r"\bCRPR\b", case=False, na=False) &
+        (df["Backlog preparation"] == "NON CARACTERISE") &
+        (df["Date de début planifiée"] <= now_ts)
     )
     kpis_prep, pv_prep = _age_kpis(df, filt_prep, "ap", posts, "préparation")
 
     # ── 5-7. AGE PLAN ────────────────────────────────────────────────────
-    # Plan==0 + LANC + ATPL, age = date_planif
+    # Base : LANC + hors SOPL + Backlog plan NON CARAC + Date planif ≤ aujourd'hui
+    # Age  : |now - Date planifiée| (dans prepare_data.py, avec abs)
     filt_plan = (
-        df["is_correctif"] &
         (df["Statut OT"] == "LANC") &
-        df["Statut utilisateur"].str.contains("ATPL", case=False, na=False)
+        (df["Contient SOPL"] == 0) &
+        (df["Backlog planification"] == "NON CARACTERISE") &
+        (df["Date de début planifiée"] <= now_ts)
     )
     kpis_plan, pv_plan = _age_kpis(df, filt_plan, "alp", posts, "planification")
 
     # ── 8-10. AGE EXEC ───────────────────────────────────────────────────
-    # Plan==0 + LANC + SOPL + hors TW preventifs, age = date_planif
+    # Base : LANC + SOPL (sans filtre TW preventifs — resultat SF1 1433/1171 ✅)
+    # Age  : |now - Date planifiée| (dans prepare_data.py, avec abs)
     filt_exec = (
-        df["is_correctif"] &
         (df["Statut OT"] == "LANC") &
-        (df["Contient SOPL"] == 1) &
-        (~df["_tw_num"].isin(TW_PREV))
+        (df["Contient SOPL"] == 1)
     )
     kpis_exec, pv_exec = _age_kpis(df, filt_exec, "aex", posts, "exécution")
 
@@ -275,7 +271,8 @@ def calc_kpis(df_i, av_i, now_ts, posts):
     ].copy()
     _bud_c  = df_clot["Total coûts budgétés"].fillna(0)
     _reel_c = df_clot["Total coûts réels"].fillna(0)
-    df_clot["_egal"] = np.where(_bud_c != _reel_c, "OUI", "NON")
+    # KPI = |bud - reel| >= 1 → conforme (OUI pour KPI)
+    df_clot["_egal"] = np.where((_bud_c - _reel_c).abs() >= 1, "OUI", "NON")
     pv_cor = pd.pivot_table(
         df_clot, index="Poste travail princ.", columns="_egal",
         values="Ordre", aggfunc="count", fill_value=0
