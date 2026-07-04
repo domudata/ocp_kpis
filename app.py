@@ -280,14 +280,15 @@ def main() -> None:
                 continue
             poste_data = ckdf.loc[poste]
             for kpi in ALL_KPI:
-                actual = float(poste_data.get(kpi, 100))
-                target = CIBLE.get(kpi, 100)
-                # Avec LOWER_BETTER=[] tous les KPIs : needs_action = actual < target
-                lower         = is_lb(kpi)
-                needs_action  = actual > target if lower else actual < target
-                ecart         = actual - target
-                nb_anom       = int(ano_map.get(kpi, pd.Series()).get(poste, 0))
-                if needs_action or nb_anom > 0:
+                actual  = float(poste_data.get(kpi, 100))
+                target  = CIBLE.get(kpi, 100)
+                ecart   = actual - target
+                nb_anom = int(ano_map.get(kpi, pd.Series()).get(poste, 0))
+                # "Necessite action" reflete le nombre reel d anomalies,
+                # pas seulement l ecart de score (un score < cible avec 0 anomalie
+                # ne doit pas afficher OUI).
+                needs_action = nb_anom > 0
+                if needs_action:
                     plan_actions_rows.append({
                         "poste":       poste,
                         "kpi":         kpi,
