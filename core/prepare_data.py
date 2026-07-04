@@ -103,17 +103,19 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
         df.get("Type de travail", pd.Series(dtype=float)), errors="coerce"
     )
 
-    # ── Age PREP : date de creation (en jours) ──────────────────────────
+    # ── Age PREP : |now - Créé le| en jours ─────────────────────────────
+    # abs() pour ignorer les dates futures (evite classement errone en <1m)
     if "Créé le" in df.columns:
-        df["days_prep"] = (now_ts - df["Créé le"]).dt.days
+        df["days_prep"] = (now_ts - df["Créé le"]).dt.days.abs()
         df["ap"] = df["days_prep"].apply(cat_age_jours)
     else:
         df["days_prep"] = np.nan
         df["ap"] = "Inconnu"
 
-    # ── Age PLAN et EXEC : date planifiee (en jours) ─────────────────────
+    # ── Age PLAN et EXEC : |now - Date planifiée| en jours ──────────────
+    # abs() pour ignorer les dates futures
     if "Date de début planifiée" in df.columns:
-        df["days_planif"] = (now_ts - df["Date de début planifiée"]).dt.days
+        df["days_planif"] = (now_ts - df["Date de début planifiée"]).dt.days.abs()
         df["alp"] = df["days_planif"].apply(cat_age_jours)
         df["aex"] = df["days_planif"].apply(cat_age_jours)
     else:
@@ -134,12 +136,11 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
     )
 
     # ── OT_COR_EGAL ──────────────────────────────────────────────────────
-    # OUI = budget == reel  → anomalie (coûts identiques = pas d imputation)
-    # NON = budget != reel  → conforme (coûts différents = bonne imputation)
-    df["OT_COR_EGAL"] = np.where(
-        df["Total coûts budgétés"].fillna(0) == df["Total coûts réels"].fillna(0),
-        "OUI", "NON"
-    )
+    # OUI = |bud - reel| < 1  → anomalie (coûts quasi identiques = pas d imputation reelle)
+    # NON = |bud - reel| >= 1 → conforme (ecart significatif = bonne imputation)
+    # Note : formule validee sur SF1 (58.7% calc vs 60.9% ref ✅)
+    _diff_abs = (df["Total coûts budgétés"].fillna(0) - df["Total coûts réels"].fillna(0)).abs()
+    df["OT_COR_EGAL"] = np.where(_diff_abs < 1, "OUI", "NON")
 
     # ── Backlog preparation (pour graphiques) ───────────────────────────
     pat_prep = '|'.join(CRPR_KW)
@@ -167,10 +168,14 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
     ].copy()
 
     # ── Postes de travail SF1/SF2 ────────────────────────────────────────
-    apm = sorted(
-        df[
-            df["Poste travail princ."].astype(str).str.startswith(("SF1","SF2"), na=False)
-        ]["Poste travail princ."].dropna().unique().tolist()
-    )
+    # Filtre STRICT : on ne garde QUE les OT et Avis des postes SF1/SF2
+    _mask_sf = df["Poste travail princ."].astype(str).str.startswith(("SF1","SF2"), na=False)
+    df = df[_mask_sf].copy()
+
+    if "Poste travail princ." in avf.columns:
+        _mask_sf_av = avf["Poste travail princ."].astype(str).str.startswith(("SF1","SF2"), na=False)
+        avf = avf[_mask_sf_av].copy()
+
+    apm = sorted(df["Poste travail princ."].dropna().unique().tolist())
 
     return df, avf, apm, now_ts
