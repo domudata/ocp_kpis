@@ -20,41 +20,35 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
     ].groupby("Poste travail princ.")["Ordre"].count()
 
     # ── 2/3/4. AGE PREP ─────────────────────────────────────────────────
-    # Base : Plan==0 + CREE + CRPR
+    # Base : CRÉÉ + CRPR + Backlog prep NON CARAC + Date planif ≤ aujourd'hui
     filt_prep = (
-        dfp["is_correctif"] &
         (dfp["Statut OT"] == "CRÉÉ") &
-        dfp["Statut utilisateur"].str.contains(r"\bCRPR\b", case=False, na=False)
+        dfp["Statut utilisateur"].str.contains(r"\bCRPR\b", case=False, na=False) &
+        (dfp["Backlog preparation"] == "NON CARACTERISE") &
+        (dfp["Date de début planifiée"] <= now_ts)
     )
-    # Age Prep — logique 100-val :
-    # <1m  : score = taux direct     → anomalie = OT hors <1m (1-3m + >3m)
-    # 1-3m : score = 100 - taux_brut → anomalie = OT dans 1-3m
-    # >3m  : score = 100 - taux_brut → anomalie = OT dans >3m
     ano_map["OT préparation <1 mois"]       = dfp[filt_prep & (dfp["ap"] != "<1 mois")].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["OT préparation 1mois< <3mois"] = dfp[filt_prep & (dfp["ap"] == "1 mois < <3 mois")].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["OT préparation >3 mois"]       = dfp[filt_prep & (dfp["ap"] == ">3 mois")].groupby("Poste travail princ.")["Ordre"].count()
 
     # ── 5/6/7. AGE PLAN ─────────────────────────────────────────────────
-    # Base : Plan==0 + LANC + ATPL
+    # Base : LANC + hors SOPL + Backlog plan NON CARAC + Date planif ≤ aujourd'hui
     filt_plan = (
-        dfp["is_correctif"] &
         (dfp["Statut OT"] == "LANC") &
-        dfp["Statut utilisateur"].str.contains("ATPL", case=False, na=False)
+        (dfp["Contient SOPL"] == 0) &
+        (dfp["Backlog planification"] == "NON CARACTERISE") &
+        (dfp["Date de début planifiée"] <= now_ts)
     )
-    # Age Plan
     ano_map["OT planification <1 mois"]      = dfp[filt_plan & (dfp["alp"] != "<1 mois")].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["OT planification 1mois< <3mois"] = dfp[filt_plan & (dfp["alp"] == "1 mois < <3 mois")].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["OT planification >3 mois"]       = dfp[filt_plan & (dfp["alp"] == ">3 mois")].groupby("Poste travail princ.")["Ordre"].count()
 
     # ── 8/9/10. AGE EXEC ────────────────────────────────────────────────
-    # Base : Plan==0 + LANC + SOPL + hors TW preventifs
+    # Base : LANC + SOPL (sans filtre TW preventifs)
     filt_exec = (
-        dfp["is_correctif"] &
         (dfp["Statut OT"] == "LANC") &
-        (dfp["Contient SOPL"] == 1) &
-        (~dfp["_tw_num"].isin(TW_PREV))
+        (dfp["Contient SOPL"] == 1)
     )
-    # Age Exec
     ano_map["OT exécution <1 mois"]          = dfp[filt_exec & (dfp["aex"] != "<1 mois")].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["OT exécution 1mois< <3mois"]    = dfp[filt_exec & (dfp["aex"] == "1 mois < <3 mois")].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["OT exécution >3 mois"]          = dfp[filt_exec & (dfp["aex"] == ">3 mois")].groupby("Poste travail princ.")["Ordre"].count()
@@ -129,7 +123,8 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
     ]
     _bud  = _sub_cor["Total coûts budgétés"].fillna(0)
     _reel = _sub_cor["Total coûts réels"].fillna(0)
-    ano_map["OT_COR_EGAL"] = _sub_cor[_bud == _reel].groupby(
+    # Anomalie = |bud - reel| < 1 (couts quasi identiques = pas d imputation reelle)
+    ano_map["OT_COR_EGAL"] = _sub_cor[(_bud - _reel).abs() < 1].groupby(
         "Poste travail princ.")["Ordre"].count()
 
     return ano_map
@@ -161,9 +156,9 @@ def build_ano_rows(vp, ano_map, kpi_list, fixed_zero=None):
 
 
 def build_anomaly_dfs(dfp, avf, now_ts):
-    filt_prep = dfp["is_correctif"] & (dfp["Statut OT"]=="CRÉÉ") & dfp["Statut utilisateur"].str.contains(r"\bCRPR\b",case=False,na=False)
-    filt_plan = dfp["is_correctif"] & (dfp["Statut OT"]=="LANC") & dfp["Statut utilisateur"].str.contains("ATPL",case=False,na=False)
-    filt_exec = dfp["is_correctif"] & (dfp["Statut OT"]=="LANC") & (dfp["Contient SOPL"]==1) & (~dfp["_tw_num"].isin(TW_PREV))
+    filt_prep = (dfp["Statut OT"]=="CRÉÉ") & dfp["Statut utilisateur"].str.contains(r"\bCRPR\b",case=False,na=False) & (dfp["Backlog preparation"]=="NON CARACTERISE") & (dfp["Date de début planifiée"]<=now_ts)
+    filt_plan = (dfp["Statut OT"]=="LANC") & (dfp["Contient SOPL"]==0) & (dfp["Backlog planification"]=="NON CARACTERISE") & (dfp["Date de début planifiée"]<=now_ts)
+    filt_exec = (dfp["Statut OT"]=="LANC") & (dfp["Contient SOPL"]==1)
     filt_perf = (dfp["Contient SOPL"]==1) & (~dfp["Statut OT"].isin(["CLOT","TCLO"]))
 
     return {
@@ -189,6 +184,6 @@ def build_anomaly_dfs(dfp, avf, now_ts):
             dfp["is_correctif"] &
             dfp["Statut OT"].isin(["CLOT","TCLO"]) &
             dfp["Statut système"].str.contains("CONF", na=False) &
-            (dfp["Total coûts budgétés"].fillna(0) == dfp["Total coûts réels"].fillna(0))
+            ((dfp["Total coûts budgétés"].fillna(0) - dfp["Total coûts réels"].fillna(0)).abs() < 1)
         ].copy(),
     }
