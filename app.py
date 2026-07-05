@@ -160,32 +160,13 @@ def main() -> None:
         # calc_kpis() calcule correctement TOUS les KPIs incluant :
         # - OT CONFIME  (via pivot Statut système contient CONF)
         # - OT_COR_EGAL (via logique budget==reel, colonne OT_COR_EGAL=EGAL/DIFF)
-        # - Age Prep/Plan/Exec avec logique 100-val pour 1-3m et >3m
+        # - Age Prep/Plan/Exec en valeurs brutes (taux reel par tranche)
         # NE PAS recalculer ces KPIs ici — utiliser directement res['ckdf']
         res = calc_kpis_cached(df_period, avdf_period, now_ts, tuple(apm), fichier_date, sdt, edt)
 
         ckdf_full = res['ckdf']   # TOUS les postes (apm)
         dfp_full  = res['dfp']
         avf_full  = res['avf']
-
-        # ── FILET DE SÉCURITÉ : garantir la logique 100-val ─────────────────
-        # Les colonnes ">3 mois" et "1mois< <3mois" doivent TOUJOURS afficher
-        # 100 - taux_brut. Si calc_kpis a renvoyé des valeurs brutes (ancienne
-        # version en cache ou module non a jour), on les convertit ici.
-        # Détection : valeurs brutes ⇔ somme des 3 tranches ≤ 110 en moyenne
-        # (avec 100-val, la somme = 2×t1 + 100 + part_inconnu ≥ ~120 en pratique).
-        _age_cols_by_group = [
-            ("OT préparation <1 mois",    "OT préparation 1mois< <3mois",    "OT préparation >3 mois"),
-            ("OT planification <1 mois",  "OT planification 1mois< <3mois",  "OT planification >3 mois"),
-            ("OT exécution <1 mois",      "OT exécution 1mois< <3mois",      "OT exécution >3 mois"),
-        ]
-        for c1, c2, c3 in _age_cols_by_group:
-            if all(c in ckdf_full.columns for c in (c1, c2, c3)) and len(ckdf_full) > 0:
-                _sum_mean = (ckdf_full[c1] + ckdf_full[c2] + ckdf_full[c3]).mean()
-                # somme ≤ 110 → valeurs brutes détectées → conversion 100-val
-                if _sum_mean <= 110:
-                    ckdf_full[c2] = (100.0 - ckdf_full[c2]).clip(0, 100).round(2)
-                    ckdf_full[c3] = (100.0 - ckdf_full[c3]).clip(0, 100).round(2)
 
         # ── Filtre par postes selectionnes (vp) : simple filtrage, instantane ──
         vp_present = [p for p in vp if p in ckdf_full.index]
@@ -248,9 +229,7 @@ def main() -> None:
         cible_q["Score Qualite"] = "100"
         qrows.append(cible_q)
 
-        # Total general = moyenne des valeurs par KPI
-        # On utilise la moyenne directe (pas gscore) pour respecter
-        # la logique 100-val des KPIs age (>3m et 1-3m)
+        # Total general = moyenne directe des valeurs par KPI
         tot_p = {"Poste de travail": "Total general", "_t": "total"}
         for k in QK:
             vals = []
