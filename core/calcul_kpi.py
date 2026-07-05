@@ -79,7 +79,9 @@ def _age_kpis(df, filt, col_age, posts, prefix):
     for c in ["<1 mois", ">3 mois", "1 mois < <3 mois", "Inconnu"]:
         if c not in pv.columns:
             pv[c] = 0
-    pv["Total"] = pv[["<1 mois","1 mois < <3 mois",">3 mois","Inconnu"]].sum(axis=1)
+    # Total = somme des 3 tranches SEULEMENT (hors Inconnu)
+    # → garantit que <1m + 1-3m + >3m = 100% exactement
+    pv["Total"] = pv[["<1 mois","1 mois < <3 mois",">3 mois"]].sum(axis=1)
 
     kpis = {}
     for idx in pv.index:
