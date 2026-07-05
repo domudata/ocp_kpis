@@ -175,15 +175,21 @@ def main() -> None:
         avf  = avf_full[avf_full["Poste travail princ."].isin(vp)] if "Poste travail princ." in avf_full.columns else avf_full
         df   = dfp
 
-        pa = {k: round(ckdf[k].mean(), 2) for k in QK}
-        qa = {k: round(ckdf[k].mean(), 2) for k in PK}
+        # mean() ignore nativement les NaN (skipna=True) : une cellule vide
+        # (OT absent) n'est pas comptee dans la moyenne du KPI.
+        pa = {k: round(ckdf[k].mean(skipna=True), 2) for k in QK}
+        qa = {k: round(ckdf[k].mean(skipna=True), 2) for k in PK}
 
         pscores = {}
         qscores = {}
         for poste in ckdf.index:
             r = ckdf.loc[poste]
-            pscores[poste] = (sum(gscore(k, r[k], CIBLE[k]) for k in QK if k in r.index) / len(QK) * 100) if QK else 0
-            qscores[poste] = (sum(gscore(k, r[k], CIBLE[k]) for k in PK if k in r.index) / len(PK) * 100) if PK else 0
+            # Exclure les KPIs NaN (cellule vide = OT absent) du calcul :
+            # score = nb KPIs conformes / nb KPIs NON-NaN × 100
+            valid_q = [k for k in QK if k in r.index and pd.notna(r[k])]
+            valid_p = [k for k in PK if k in r.index and pd.notna(r[k])]
+            pscores[poste] = (sum(gscore(k, r[k], CIBLE[k]) for k in valid_q) / len(valid_q) * 100) if valid_q else 0
+            qscores[poste] = (sum(gscore(k, r[k], CIBLE[k]) for k in valid_p) / len(valid_p) * 100) if valid_p else 0
 
         sf1_posts = [p for p in vp if str(p).startswith("SF1")]
         sf2_posts = [p for p in vp if str(p).startswith("SF2")]
@@ -290,17 +296,32 @@ def main() -> None:
             for kpi in ALL_KPI:
                 actual  = float(poste_data.get(kpi, 100))
                 target  = CIBLE.get(kpi, 100)
-                ecart   = actual - target
                 nb_anom = int(ano_map.get(kpi, pd.Series()).get(poste, 0))
-                # "Necessite action" reflete le nombre reel d anomalies,
-                # pas seulement l ecart de score (un score < cible avec 0 anomalie
-                # ne doit pas afficher OUI).
-                needs_action = nb_anom > 0
-                if needs_action:
+                lower   = is_lb(kpi)
+                # Ecart SIGNE : positif = conforme, negatif = non conforme
+                # (sens inverse pour les KPIs LOWER_BETTER)
+                ecart = (target - actual) if lower else (actual - target)
+                # 0 anomalie → ecart force a 0
+                if nb_anom == 0:
+                    ecart = 0.0
+                conforme = (actual <= target) if lower else (actual >= target)
+                # Statut a 3 etats :
+                #   0 anomalie                → NON (vert)
+                #   anomalies + sous cible    → OUI (rouge)
+                #   anomalies + cible atteinte→ OUI (vert)
+                if nb_anom == 0:
+                    status = "non_vert"
+                elif conforme:
+                    status = "oui_vert"
+                else:
+                    status = "oui_rouge"
+                # Inclure la ligne si anomalies OU si sous cible
+                if nb_anom > 0 or not conforme:
                     plan_actions_rows.append({
                         "poste":       poste,
                         "kpi":         kpi,
-                        "needs_action": needs_action,
+                        "needs_action": nb_anom > 0,
+                        "status":      status,
                         "ecart":       ecart,
                         "nb_anom":     nb_anom,
                         "responsable": KPI_RESP_MAP.get(kpi, "Non assigne"),
@@ -347,6 +368,25 @@ def main() -> None:
                 synth_perf, synth_qual, vp,
             )
         with tabs[5]:
+            # ── Bouton export PowerPoint (dynamique selon filtre poste) ──
+            try:
+                from core.export_pptx import build_presentation
+                pptx_bytes = build_presentation(
+                    vp, ckdf, ano_map, pa, qa, pscores, qscores,
+                    hist_df, fichier_date,
+                )
+                _ent = "Maroc_Chimie" if all(str(p).startswith("SF1") for p in vp) else \
+                       ("FEEDS" if all(str(p).startswith("SF2") for p in vp) else "OCP")
+                st.download_button(
+                    "📊 Exporter la présentation PowerPoint",
+                    data=pptx_bytes,
+                    file_name=f"Presentation_KPIs_{_ent}_{fichier_date.replace('/','-')}.pptx",
+                    mime="application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                    use_container_width=True,
+                )
+            except Exception as _e:
+                st.caption(f"Export PowerPoint indisponible : {_e}")
+
             render_plan_action_tab(plan_actions_rows, sf1_rows, sf2_rows, anomaly_dfs)
 
     except Exception as e:
