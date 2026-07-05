@@ -6,6 +6,15 @@ import pandas as pd
 
 # Seuil (en %) sous lequel un secteur est considere "mince"
 # et regroupe dans "Autres" (detaille dans le 2e camembert)
+# Desactiver zoom / pan / barre d outils sur tous les charts
+PLOTLY_CONFIG = {
+    "staticPlot": False,
+    "displayModeBar": False,
+    "scrollZoom": False,
+    "doubleClick": False,
+    "showAxisDragHandles": False,
+}
+
 SMALL_SLICE_PCT = 8.0
 
 COLOR_MAP = {"CARACTERISE": "#10b981", "NON CARACTERISE": "#f97316"}
@@ -66,7 +75,7 @@ def show_simple_pie(piv_df: pd.DataFrame, title: str, keep_non_carac: bool = Fal
             legend=dict(orientation="h", yanchor="bottom", y=-0.15, x=0.5, xanchor="center"),
             margin=dict(t=80, b=80, l=40, r=40),
         )
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
         return
 
     # ── Pie of pie : principal (grands + "Autres") | detail des minces ──
@@ -111,7 +120,7 @@ def show_simple_pie(piv_df: pd.DataFrame, title: str, keep_non_carac: bool = Fal
         legend=dict(orientation="h", yanchor="bottom", y=-0.18, x=0.5, xanchor="center"),
         margin=dict(t=90, b=90, l=30, r=30),
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
 
 
 def show_pie_pair(piv_df: pd.DataFrame, title_prefix: str) -> None:
@@ -135,12 +144,14 @@ def show_pie_pair(piv_df: pd.DataFrame, title_prefix: str) -> None:
         ),
     )
 
+    # Style unifie avec show_simple_pie : hole 0.4, labels exterieurs,
+    # bord blanc fin, hover normalise
     fig.add_trace(go.Pie(
-        labels=global_counts.index, values=global_counts.values, hole=0.4,
-        texttemplate='%{label}<br>%{percent:.1%}<br>(%{value})',
-        textposition='inside', insidetextorientation='radial',
-        textfont=dict(size=14, color='white', family='Inter, sans-serif'),
-        marker=dict(colors=colors, line=dict(color='#FFFFFF', width=3)),
+        labels=global_counts.index, values=global_counts.values,
+        hole=0.4, sort=False,
+        texttemplate="%{label}<br>%{percent:.1%} (%{value})",
+        textposition="outside",
+        marker=dict(colors=colors, line=dict(color="white", width=2)),
     ), 1, 1)
 
     pie2 = pd.Series(
@@ -148,18 +159,23 @@ def show_pie_pair(piv_df: pd.DataFrame, title_prefix: str) -> None:
         index=["Réalisés (CLOT+TCLO)", "Non Réalisés"],
     )
     fig.add_trace(go.Pie(
-        labels=pie2.index, values=pie2.values, hole=0.5,
-        texttemplate='%{label}<br>%{percent:.1%}<br>(%{value})',
-        textposition='inside', insidetextorientation='radial',
-        textfont=dict(size=14, color='white', family='Inter, sans-serif'),
-        marker=dict(colors=["#10b981", "#8b5cf6"], line=dict(color='#FFFFFF', width=3)),
+        labels=pie2.index, values=pie2.values,
+        hole=0.4, sort=False,
+        texttemplate="%{label}<br>%{percent:.1%} (%{value})",
+        textposition="outside",
+        marker=dict(colors=["#10b981", "#ef4444"], line=dict(color="white", width=2)),
     ), 1, 2)
 
-    fig.update_layout(
-        margin=dict(t=80, b=20, l=20, r=20), height=450,
-        legend=dict(orientation="h", yanchor="bottom", y=-0.12, x=0.5, xanchor="center"),
+    fig.update_traces(
+        hovertemplate="<b>%{label}</b><br>Nombre : %{value}<br>Pourcentage : %{percent}<extra></extra>",
+        textfont=dict(size=12, family='Inter, sans-serif'),
     )
-    st.plotly_chart(fig, use_container_width=True)
+    fig.update_layout(
+        height=480, showlegend=True,
+        legend=dict(orientation="h", yanchor="bottom", y=-0.15, x=0.5, xanchor="center"),
+        margin=dict(t=80, b=80, l=40, r=40),
+    )
+    st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -204,13 +220,13 @@ def show_hbar_thresholds(labels, values, title, s1=S1_DEFAULT, s2=S2_DEFAULT,
     fig.update_layout(
         title=dict(text=title, x=0.5, xanchor='center', font=dict(size=16)),
         height=max(300, 40 * len(labels) + 120),
-        xaxis=dict(range=[0, 115], showgrid=False, showticklabels=False, zeroline=False),
-        yaxis=dict(autorange="reversed", tickfont=dict(size=12, family='Inter')),
+        xaxis=dict(range=[0, 115], showgrid=False, showticklabels=False, zeroline=False, fixedrange=True),
+        yaxis=dict(autorange="reversed", tickfont=dict(size=12, family='Inter'), fixedrange=True),
         plot_bgcolor='white', paper_bgcolor='white',
         margin=dict(t=90, b=20, l=10, r=40),
         showlegend=False,
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
 
 
 def show_statut_hbar(piv_df: pd.DataFrame, title: str,
@@ -250,17 +266,21 @@ def show_grouped_hbar(vp, pscores: dict, qscores: dict, title: str,
     p_vals = [round(pscores.get(p, 0), 1) for p in postes]
     q_vals = [round(qscores.get(p, 0), 1) for p in postes]
 
+    def _score_colors(vals):
+        return [C_HIGH if v >= s2 else (C_MID if v >= s1 else C_LOW) for v in vals]
+
     fig = go.Figure()
     fig.add_trace(go.Bar(
         x=p_vals, y=postes, orientation='h', name='Performance',
-        marker=dict(color="#10b981", line=dict(color='white', width=1)),
+        marker=dict(color=_score_colors(p_vals), line=dict(color='white', width=1)),
         text=[f"{v:.0f}%" for v in p_vals], textposition='outside',
         textfont=dict(size=11, family='Inter'),
         hovertemplate="<b>%{y}</b><br>Performance : %{x:.1f}%<extra></extra>",
     ))
     fig.add_trace(go.Bar(
         x=q_vals, y=postes, orientation='h', name='Qualité',
-        marker=dict(color="#3b82f6", line=dict(color='white', width=1)),
+        marker=dict(color=_score_colors(q_vals), line=dict(color='white', width=1),
+                    pattern=dict(shape="/", size=4, solidity=0.35)),
         text=[f"{v:.0f}%" for v in q_vals], textposition='outside',
         textfont=dict(size=11, family='Inter'),
         hovertemplate="<b>%{y}</b><br>Qualité : %{x:.1f}%<extra></extra>",
@@ -277,10 +297,10 @@ def show_grouped_hbar(vp, pscores: dict, qscores: dict, title: str,
         title=dict(text=title, x=0.5, xanchor='center', font=dict(size=16)),
         barmode='group', bargap=0.25, bargroupgap=0.08,
         height=max(350, 52 * len(postes) + 130),
-        xaxis=dict(range=[0, 115], showgrid=False, showticklabels=False, zeroline=False),
-        yaxis=dict(autorange="reversed", tickfont=dict(size=12, family='Inter')),
+        xaxis=dict(range=[0, 115], showgrid=False, showticklabels=False, zeroline=False, fixedrange=True),
+        yaxis=dict(autorange="reversed", tickfont=dict(size=12, family='Inter'), fixedrange=True),
         plot_bgcolor='white', paper_bgcolor='white',
         legend=dict(orientation="h", yanchor="bottom", y=-0.08, x=0.5, xanchor="center"),
         margin=dict(t=90, b=60, l=10, r=40),
     )
-    st.plotly_chart(fig, use_container_width=True)
+    st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
