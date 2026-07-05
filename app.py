@@ -193,10 +193,10 @@ def main() -> None:
 
         sf1_posts = [p for p in vp if str(p).startswith("SF1")]
         sf2_posts = [p for p in vp if str(p).startswith("SF2")]
-        sf1_p = np.mean([pscores[p] for p in sf1_posts]) if sf1_posts else 0
-        sf1_q = np.mean([qscores[p] for p in sf1_posts]) if sf1_posts else 0
-        sf2_p = np.mean([pscores[p] for p in sf2_posts]) if sf2_posts else 0
-        sf2_q = np.mean([qscores[p] for p in sf2_posts]) if sf2_posts else 0
+        sf1_p = np.nanmean([pscores[p] for p in sf1_posts]) if sf1_posts else 0
+        sf1_q = np.nanmean([qscores[p] for p in sf1_posts]) if sf1_posts else 0
+        sf2_p = np.nanmean([pscores[p] for p in sf2_posts]) if sf2_posts else 0
+        sf2_q = np.nanmean([qscores[p] for p in sf2_posts]) if sf2_posts else 0
 
         ano_map    = build_ano_map(dfp, avf, now_ts)
         ano_p_rows = build_ano_rows(vp, ano_map, QK)
@@ -235,17 +235,19 @@ def main() -> None:
         cible_q["Score Qualite"] = "100"
         qrows.append(cible_q)
 
-        # Total general = moyenne directe des valeurs par KPI
+        # Total general = moyenne directe des valeurs par KPI (NaN exclus)
         tot_p = {"Poste de travail": "Total general", "_t": "total"}
         for k in QK:
             vals = []
             for rw in prows:
                 if k in rw and rw.get("_t") not in ("cible","total"):
                     try:
-                        vals.append(float(rw[k]))
+                        fv = float(rw[k])
+                        if pd.notna(fv):        # exclure les NaN
+                            vals.append(fv)
                     except Exception:
                         pass
-            tot_p[k] = "%.1f" % (sum(vals) / len(vals) if vals else 0)
+            tot_p[k] = "%.1f" % (sum(vals) / len(vals)) if vals else "nan"
         tot_p["Score Performance"] = "%.2f" % (sum(pscores.values()) / len(pscores)) if pscores else "0.00"
         prows.append(tot_p)
 
@@ -255,10 +257,12 @@ def main() -> None:
             for rw in qrows:
                 if k in rw and rw.get("_t") not in ("cible","total"):
                     try:
-                        vals.append(float(rw[k]))
+                        fv = float(rw[k])
+                        if pd.notna(fv):        # exclure les NaN
+                            vals.append(fv)
                     except Exception:
                         pass
-            tot_q[k] = "%.1f" % (sum(vals) / len(vals) if vals else 0)
+            tot_q[k] = "%.1f" % (sum(vals) / len(vals)) if vals else "nan"
         tot_q["Score Qualite"] = "%.2f" % (sum(qscores.values()) / len(qscores)) if qscores else "0.00"
         qrows.append(tot_q)
 
@@ -332,8 +336,10 @@ def main() -> None:
         sf1_rows = [r for r in plan_actions_rows if str(r["poste"]).startswith("SF1")]
         sf2_rows = [r for r in plan_actions_rows if str(r["poste"]).startswith("SF2")]
 
-        avg_p_score  = sum(pa.values()) / len(pa) if pa else 0
-        avg_q_score  = sum(qa.values()) / len(qa) if qa else 0
+        _pa_valid = [v for v in pa.values() if pd.notna(v)]
+        _qa_valid = [v for v in qa.values() if pd.notna(v)]
+        avg_p_score  = sum(_pa_valid) / len(_pa_valid) if _pa_valid else 0
+        avg_q_score  = sum(_qa_valid) / len(_qa_valid) if _qa_valid else 0
         total_ano_p  = sum(r["Total Anomalies"] for r in ano_p_rows if r.get("Poste de travail") != "Total")
         total_ano_q  = sum(r["Total Anomalies"] for r in ano_q_rows if r.get("Poste de travail") != "Total")
         total_ot     = len(df)
