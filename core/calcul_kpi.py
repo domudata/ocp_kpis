@@ -14,7 +14,7 @@ def ckpi(n, d, sz=100):
 
 def ckpi_inv(n, d, sz=100):
     """100 - (n/d*100) : pour tranches 1-3m et >3m"""
-    return np.where(d == 0, sz, (n / d) * 100)
+    return np.where(d == 0, sz, 100.0 - (n / d) * 100)
 
 
 def cpiv(df, filt, col, posts):
@@ -53,13 +53,15 @@ def build_statut_pivot(df_sub, posts):
 def gscore(k, a, t):
     """
     Score binaire par KPI :
-        - a < t (cible) → 0
-        - a ≥ t (cible) → 1
+    - KPI normal (plus haut = mieux)      : 1 si a >= t, sinon 0
+    - KPI LOWER_BETTER (plus bas = mieux) : 1 si a <= t, sinon 0
 
     Score global d une categorie (Performance / Qualite) :
         = somme(gscore) / nb_kpis × 100
     """
     if pd.isna(a) or pd.isna(t): return 0
+    if k in LOWER_BETTER:
+        return 1 if a <= t else 0
     return 1 if a >= t else 0
 
 
@@ -68,11 +70,10 @@ def is_lb(k): return k in LOWER_BETTER
 
 def _age_kpis(df, filt, col_age, posts, prefix):
     """
-    Logique officielle OCP (logique 100-val) :
-    - <1m  : score = N_inf1m / Total * 100            (direct, maximiser >= 80%)
-    - 1-3m : score = 100 - (N_1-3m / Total * 100)    (complement, cible >= 85%)
-    - >3m  : score = 100 - (N_sup3m / Total * 100)   (complement, cible >= 95%)
-    Résultat : tous dans [0,100], plus haut = mieux.
+    Valeurs BRUTES (taux réel d'OT dans chaque tranche) :
+    - <1m  : N_inf1m / Total * 100   (maximiser, cible >= 80%)
+    - 1-3m : N_1-3m  / Total * 100   (minimiser, cible <= 15%)
+    - >3m  : N_sup3m / Total * 100   (minimiser, cible <= 5%)
     """
     pv = cpiv(df, filt, col_age, posts)
     for c in ["<1 mois", ">3 mois", "1 mois < <3 mois", "Inconnu"]:
@@ -84,7 +85,8 @@ def _age_kpis(df, filt, col_age, posts, prefix):
     for idx in pv.index:
         tot = pv.loc[idx, "Total"]
         if tot == 0:
-            kpis.setdefault(f"OT {prefix} <1 mois",       {})[idx] = 0.0
+            # Base vide = aucun OT en retard → <1m parfait, 1-3m et >3m à 0
+            kpis.setdefault(f"OT {prefix} <1 mois",       {})[idx] = 100.0
             kpis.setdefault(f"OT {prefix} 1mois< <3mois", {})[idx] = 0.0
             kpis.setdefault(f"OT {prefix} >3 mois",       {})[idx] = 0.0
         else:
@@ -97,7 +99,8 @@ def _age_kpis(df, filt, col_age, posts, prefix):
 
     result = {}
     for k, d in kpis.items():
-        result[k] = pd.Series(d).reindex(posts, fill_value=100.0)
+        default = 100.0 if "<1 mois" in k else 0.0
+        result[k] = pd.Series(d).reindex(posts, fill_value=default)
 
     return result, pv
 
