@@ -84,9 +84,9 @@ def _age_kpis(df, filt, col_age, posts, prefix):
     for idx in pv.index:
         tot = pv.loc[idx, "Total"]
         if tot == 0:
-            kpis.setdefault(f"OT {prefix} <1 mois",       {})[idx] = 100.0
-            kpis.setdefault(f"OT {prefix} 1mois< <3mois", {})[idx] = 100.0
-            kpis.setdefault(f"OT {prefix} >3 mois",       {})[idx] = 100.0
+            kpis.setdefault(f"OT {prefix} <1 mois",       {})[idx] = 0.0
+            kpis.setdefault(f"OT {prefix} 1mois< <3mois", {})[idx] = 0.0
+            kpis.setdefault(f"OT {prefix} >3 mois",       {})[idx] = 0.0
         else:
             t1 = pv.loc[idx, "<1 mois"]           / tot * 100
             t2 = pv.loc[idx, "1 mois < <3 mois"]  / tot * 100
