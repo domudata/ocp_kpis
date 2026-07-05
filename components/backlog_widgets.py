@@ -17,8 +17,8 @@ def render_backlog_tab(dfp: pd.DataFrame, vp: list) -> None:
     """Rendu complet de l onglet Backlog."""
 
     # ── Filtres de base ──────────────────────────────────────────────────
-    # Filtre Plan d entretien != 0 (preventifs) UNIQUEMENT sur la page backlog
-    df_correctif = dfp[~dfp['is_correctif']].copy() if 'is_correctif' in dfp.columns else dfp.copy()
+    # Aucun filtre Plan d'entretien : tous les OT sur la page backlog
+    df_correctif = dfp.copy()
 
     pat_prep = '|'.join(CRPR_KW)
     pat_plan = '|'.join(ATPL_KW)
