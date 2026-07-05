@@ -70,8 +70,8 @@ def _age_kpis(df, filt, col_age, posts, prefix):
     """
     Logique officielle OCP (logique 100-val) :
     - <1m  : score = N_inf1m / Total * 100            (direct, maximiser >= 80%)
-    - 1-3m : score = (N_1-3m / Total * 100)    (complement, cible >= 85%)
-    - >3m  : score = (N_sup3m / Total * 100)   (complement, cible >= 95%)
+    - 1-3m : score = 100-(N_1-3m / Total * 100)    (complement, cible >= 85%)
+    - >3m  : score =100- (N_sup3m / Total * 100)   (complement, cible >= 95%)
     Résultat : tous dans [0,100], plus haut = mieux.
     """
     pv = cpiv(df, filt, col_age, posts)
@@ -92,8 +92,8 @@ def _age_kpis(df, filt, col_age, posts, prefix):
             t2 = pv.loc[idx, "1 mois < <3 mois"]  / tot * 100
             t3 = pv.loc[idx, ">3 mois"]           / tot * 100
             kpis.setdefault(f"OT {prefix} <1 mois",       {})[idx] = round(t1, 2)
-            kpis.setdefault(f"OT {prefix} 1mois< <3mois", {})[idx] = round(t2, 2)
-            kpis.setdefault(f"OT {prefix} >3 mois",       {})[idx] = round(t3, 2)
+            kpis.setdefault(f"OT {prefix} 1mois< <3mois", {})[idx] = round(100-t2, 2)
+            kpis.setdefault(f"OT {prefix} >3 mois",       {})[idx] = round(100-t3, 2)
 
     result = {}
     for k, d in kpis.items():
