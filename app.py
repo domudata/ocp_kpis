@@ -36,15 +36,25 @@ from pages.evolution import render_evolution_tab
 from pages.plan_action import render_plan_action_tab
 
 
+# ── VERSION DE CALCUL ────────────────────────────────────────────────────────
+# IMPORTANT : incrementer ce numero a CHAQUE modification de core/calcul_kpi.py,
+# core/prepare_data.py ou core/anomalies.py.
+# Streamlit ne hash que le code de la fonction decoree par @st.cache_data,
+# PAS les fonctions internes appelees — sans ce numero, le cache continuerait
+# de servir les valeurs calculees avec l ANCIEN code apres un deploiement.
+CALC_VERSION = "v2.0"
+
+
 @st.cache_data(show_spinner="Calcul des KPIs en cours...")
-def calc_kpis_cached(df_period, avdf_period, now_ts, apm_tuple, fichier_date, sdt, edt):
+def calc_kpis_cached(df_period, avdf_period, now_ts, apm_tuple, fichier_date, sdt, edt, calc_version=CALC_VERSION):
     """
     Wrapper cache autour de calc_kpis().
-    Cle de cache = (contenu de df_period/avdf_period, now_ts, apm_tuple, fichier_date, sdt, edt).
+    Cle de cache = (contenu de df_period/avdf_period, now_ts, apm_tuple, fichier_date, sdt, edt, calc_version).
     Le recalcul ne se declenche que si :
       - date.txt change (fichier_date change -> prepare_data change -> df_full change)
       - la periode (sdt/edt) change
       - les donnees sources (ot.xlsx / avis.xlsx) changent
+      - CALC_VERSION est incremente (nouvelle version des formules)
     Changer la SELECTION DE POSTES (vp) ne redeclenche PAS ce calcul,
     car on calcule ici sur TOUS les postes (apm) puis on filtre ensuite dans main().
     """
@@ -157,6 +167,25 @@ def main() -> None:
         ckdf_full = res['ckdf']   # TOUS les postes (apm)
         dfp_full  = res['dfp']
         avf_full  = res['avf']
+
+        # ── FILET DE SÉCURITÉ : garantir la logique 100-val ─────────────────
+        # Les colonnes ">3 mois" et "1mois< <3mois" doivent TOUJOURS afficher
+        # 100 - taux_brut. Si calc_kpis a renvoyé des valeurs brutes (ancienne
+        # version en cache ou module non a jour), on les convertit ici.
+        # Détection : valeurs brutes ⇔ somme des 3 tranches ≤ 110 en moyenne
+        # (avec 100-val, la somme = 2×t1 + 100 + part_inconnu ≥ ~120 en pratique).
+        _age_cols_by_group = [
+            ("OT préparation <1 mois",    "OT préparation 1mois< <3mois",    "OT préparation >3 mois"),
+            ("OT planification <1 mois",  "OT planification 1mois< <3mois",  "OT planification >3 mois"),
+            ("OT exécution <1 mois",      "OT exécution 1mois< <3mois",      "OT exécution >3 mois"),
+        ]
+        for c1, c2, c3 in _age_cols_by_group:
+            if all(c in ckdf_full.columns for c in (c1, c2, c3)) and len(ckdf_full) > 0:
+                _sum_mean = (ckdf_full[c1] + ckdf_full[c2] + ckdf_full[c3]).mean()
+                # somme ≤ 110 → valeurs brutes détectées → conversion 100-val
+                if _sum_mean <= 110:
+                    ckdf_full[c2] = (100.0 - ckdf_full[c2]).clip(0, 100).round(2)
+                    ckdf_full[c3] = (100.0 - ckdf_full[c3]).clip(0, 100).round(2)
 
         # ── Filtre par postes selectionnes (vp) : simple filtrage, instantane ──
         vp_present = [p for p in vp if p in ckdf_full.index]
