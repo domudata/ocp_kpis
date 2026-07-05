@@ -167,7 +167,9 @@ def show_pie_pair(piv_df: pd.DataFrame, title_prefix: str) -> None:
 # Rose < seuil1 | Orange >= seuil1 | Vert >= seuil2
 # ═══════════════════════════════════════════════════════════════════════════
 S1_DEFAULT, S2_DEFAULT = 70, 90
-C_LOW, C_MID, C_HIGH = "#ec4899", "#f97316", "#22c55e"
+# Couleurs identiques aux cellules Total des tableaux :
+# rouge < s1 | jaune s1-s2 | vert >= s2
+C_LOW, C_MID, C_HIGH = "#ef4444", "#f59e0b", "#10b981"
 
 
 def show_hbar_thresholds(labels, values, title, s1=S1_DEFAULT, s2=S2_DEFAULT,
