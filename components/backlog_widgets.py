@@ -3,7 +3,7 @@ import streamlit as st
 import pandas as pd
 import numpy as np
 
-from components.charts import show_pie_pair, show_simple_pie, show_statut_hbar
+from components.charts import show_pie_pair, show_simple_pie
 from components.tables import html_generic_pivot, html_statut_pivot
 from core.calcul_kpi import build_statut_pivot, get_text_col
 
@@ -283,18 +283,18 @@ def render_backlog_tab(dfp: pd.DataFrame, vp: list) -> None:
     with c5:
         st.markdown(html_statut_pivot(piv_oms, 'omt'), unsafe_allow_html=True)
     with c6:
-        show_statut_hbar(piv_oms, 'OT OMS')
+        show_pie_pair(piv_oms, 'OT OMS')
 
     st.markdown('<div class="stl s">OT Thermographie par Poste et Statut OT</div>', unsafe_allow_html=True)
     c7, c8 = st.columns([0.5, 0.5], vertical_alignment='center')
     with c7:
         st.markdown(html_statut_pivot(piv_thm, 'tht'), unsafe_allow_html=True)
     with c8:
-        show_statut_hbar(piv_thm, 'OT Thermographie')
+        show_pie_pair(piv_thm, 'OT Thermographie')
 
     st.markdown('<div class="stl s">Tous les OT par Poste et Statut OT</div>', unsafe_allow_html=True)
     c9, c10 = st.columns([0.5, 0.5], vertical_alignment='center')
     with c9:
         st.markdown(html_statut_pivot(piv_all, 'pt'), unsafe_allow_html=True)
     with c10:
-        show_statut_hbar(piv_all, 'Tous les OT')
+        show_pie_pair(piv_all, 'Tous les OT')
