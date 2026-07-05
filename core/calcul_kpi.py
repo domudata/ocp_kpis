@@ -13,8 +13,8 @@ def ckpi(n, d, sz=100):
 
 
 def ckpi_inv(n, d, sz=100):
-    """100 - (n/d*100) : pour tranches 1-3m et >3m"""
-    return np.where(d == 0, sz, 100.0 - (n / d) * 100)
+    """ (n/d*100) : pour tranches 1-3m et >3m"""
+    return np.where(d == 0, sz, (n / d) * 100)
 
 
 def cpiv(df, filt, col, posts):
@@ -70,8 +70,8 @@ def _age_kpis(df, filt, col_age, posts, prefix):
     """
     Logique officielle OCP (logique 100-val) :
     - <1m  : score = N_inf1m / Total * 100            (direct, maximiser >= 80%)
-    - 1-3m : score = 100-(N_1-3m / Total * 100)    (complement, cible >= 85%)
-    - >3m  : score =100- (N_sup3m / Total * 100)   (complement, cible >= 95%)
+    - 1-3m : score = (N_1-3m / Total * 100)    (complement, cible >= 85%)
+    - >3m  : score = (N_sup3m / Total * 100)   (complement, cible >= 95%)
     Résultat : tous dans [0,100], plus haut = mieux.
     """
     pv = cpiv(df, filt, col_age, posts)
