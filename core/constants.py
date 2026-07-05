@@ -41,18 +41,18 @@ CIBLE = {
 
     # Age Préparation
     "OT préparation <1 mois":            80,
-    "OT préparation 1mois< <3mois":      85,   # score = 100 - taux_brut
-    "OT préparation >3 mois":            95,   # score = 100 - taux_brut
+    "OT préparation 1mois< <3mois":      15,
+    "OT préparation >3 mois":            5,
 
     # Age Planification
     "OT planification <1 mois":          80,
-    "OT planification 1mois< <3mois":    85,
-    "OT planification >3 mois":          95,
+    "OT planification 1mois< <3mois":    15,
+    "OT planification >3 mois":          5,
 
     # Age Exécution
     "OT exécution <1 mois":              80,
-    "OT exécution 1mois< <3mois":        85,
-    "OT exécution >3 mois":              95,
+    "OT exécution 1mois< <3mois":        15,
+    "OT exécution >3 mois":              5,
 
     # Performance préventif
     "Performance Graissage":             95,
@@ -71,9 +71,13 @@ CIBLE = {
 }
 
 # ── LOWER_BETTER ─────────────────────────────────────────────────────────────
-# VIDE — avec la logique 100-val, tous les KPIs sont "plus haut = mieux"
-# needs_action = actual < target pour TOUS les KPIs
-LOWER_BETTER = []
+# KPIs ou plus BAS = meilleur (taux d OT en retard, a minimiser)
+# gscore : 1 si valeur <= cible
+LOWER_BETTER = [
+    "OT préparation 1mois< <3mois",  "OT préparation >3 mois",
+    "OT planification 1mois< <3mois", "OT planification >3 mois",
+    "OT exécution 1mois< <3mois",     "OT exécution >3 mois",
+]
 
 # ── ACTIONS ──────────────────────────────────────────────────────────────────
 ACT_MAP = {
