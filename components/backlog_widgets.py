@@ -17,9 +17,8 @@ def render_backlog_tab(dfp: pd.DataFrame, vp: list) -> None:
     """Rendu complet de l onglet Backlog."""
 
     # ── Filtres de base ──────────────────────────────────────────────────
-    # Filtre Plan==0 applique UNIQUEMENT sur la page backlog
-    # (les KPIs Backlog Prep/Plan Carac restent sans ce filtre)
-    df_correctif = dfp[dfp['is_correctif']].copy() if 'is_correctif' in dfp.columns else dfp.copy()
+    # Filtre Plan d entretien != 0 (preventifs) UNIQUEMENT sur la page backlog
+    df_correctif = dfp[~dfp['is_correctif']].copy() if 'is_correctif' in dfp.columns else dfp.copy()
 
     pat_prep = '|'.join(CRPR_KW)
     pat_plan = '|'.join(ATPL_KW)
@@ -102,8 +101,7 @@ def render_backlog_tab(dfp: pd.DataFrame, vp: list) -> None:
 
     # Section 1 : Caracterisation Backlog Preparation
     st.markdown(
-        '<div class="stl c">📋 Caractérisation Backlog Préparation '
-        '(OT CRÉÉ + Plan==0, carac = ATPD/ATMR/ATRS/ATMO/ATER)</div>',
+        '<div class="stl c">📋 Caractérisation Backlog Préparation</div>',
         unsafe_allow_html=True
     )
 
@@ -192,8 +190,7 @@ def render_backlog_tab(dfp: pd.DataFrame, vp: list) -> None:
 
     # Section 2 : Caracterisation Backlog Planification
     st.markdown(
-        '<div class="stl c">📋 Caractérisation Backlog Planification '
-        '(OT LANC + Plan==0 + hors SOPL, carac = ATEI/ATAL/ATAS/AGAR/ATHS)</div>',
+        '<div class="stl c">📋 Caractérisation Backlog Planification</div>',
         unsafe_allow_html=True
     )
 
