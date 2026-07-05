@@ -14,7 +14,7 @@ def ckpi(n, d, sz=100):
 
 def ckpi_inv(n, d, sz=100):
     """100 - (n/d*100) : pour tranches 1-3m et >3m"""
-    return np.where(d == 0, sz, 100.0 - (n / d) * 100)
+    return np.where(d == 0, sz, (n / d) * 100)
 
 
 def cpiv(df, filt, col, posts):
