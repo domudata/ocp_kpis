@@ -92,8 +92,8 @@ def _age_kpis(df, filt, col_age, posts, prefix):
             t2 = pv.loc[idx, "1 mois < <3 mois"]  / tot * 100
             t3 = pv.loc[idx, ">3 mois"]           / tot * 100
             kpis.setdefault(f"OT {prefix} <1 mois",       {})[idx] = round(t1, 2)
-            kpis.setdefault(f"OT {prefix} 1mois< <3mois", {})[idx] = round(100-t2, 2)
-            kpis.setdefault(f"OT {prefix} >3 mois",       {})[idx] = round(100-t3, 2)
+            kpis.setdefault(f"OT {prefix} 1mois< <3mois", {})[idx] = round(t2, 2)
+            kpis.setdefault(f"OT {prefix} >3 mois",       {})[idx] = round(t3, 2)
 
     result = {}
     for k, d in kpis.items():
