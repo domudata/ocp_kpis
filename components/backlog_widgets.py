@@ -24,9 +24,9 @@ def render_backlog_tab(dfp: pd.DataFrame, vp: list) -> None:
     pat_plan = '|'.join(ATPL_KW)
 
     # ── Backlog Preparation ──────────────────────────────────────────────
-    # Aucun filtre de statut : TOUS les OT, repartis carac / non carac
+    # Filtre : Statut OT == CRÉÉ
     # Caracterise = contient ATPD/ATMR/ATRS/ATMO/ATER
-    df_prep = df_correctif.copy()
+    df_prep = df_correctif[df_correctif['Statut OT'] == 'CRÉÉ'].copy()
     df_prep['Carac Prep'] = df_prep['Statut utilisateur'].str.contains(
         pat_prep, na=False
     ).map({True: 'CARACTERISE', False: 'NON CARACTERISE'})
@@ -53,9 +53,12 @@ def render_backlog_tab(dfp: pd.DataFrame, vp: list) -> None:
     ).reindex(vp, fill_value=0)
 
     # ── Backlog Planification ────────────────────────────────────────────
-    # Aucun filtre de statut : TOUS les OT, repartis carac / non carac
+    # Filtre : Statut OT == LANC + Contient SOPL == 0
     # Caracterise = contient ATEI/ATAL/ATAS/AGAR/ATHS
-    df_plan = df_correctif.copy()
+    df_plan = df_correctif[
+        (df_correctif['Statut OT'] == 'LANC') &
+        (df_correctif['Contient SOPL'] == 0)
+    ].copy()
     df_plan['Carac Plan'] = df_plan['Statut utilisateur'].str.contains(
         pat_plan, na=False
     ).map({True: 'CARACTERISE', False: 'NON CARACTERISE'})
