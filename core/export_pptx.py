@@ -74,7 +74,7 @@ def _blank_slide(prs):
 # ═══════════════════════════════════════════════════════════════════════════
 # SLIDE 1 — Titre
 # ═══════════════════════════════════════════════════════════════════════════
-def _slide_title(prs, entity, fichier_date):
+def _slide_title(prs, entity, fichier_date, vp=None):
     slide = _blank_slide(prs)
     # Fond vert plein
     bg = slide.shapes.add_shape(1, 0, 0, SW, SH)
@@ -89,8 +89,19 @@ def _slide_title(prs, entity, fichier_date):
     band.fill.solid(); band.fill.fore_color.rgb = MOSS
     band.line.fill.background(); band.shadow.inherit = False
 
+    # Logo (logo.png a la racine du repo) — coin haut gauche
+    import os
+    for logo_path in ("logo.png", "assets/logo.png", "images/logo.png"):
+        if os.path.exists(logo_path):
+            try:
+                slide.shapes.add_picture(logo_path, Inches(0.5), Inches(0.4),
+                                         height=Inches(1.1))
+                break
+            except Exception:
+                pass
+
     # Titre principal
-    box = slide.shapes.add_textbox(Inches(1.0), Inches(2.3), Inches(11.3), Inches(2.2))
+    box = slide.shapes.add_textbox(Inches(1.0), Inches(2.1), Inches(11.3), Inches(2.0))
     tf = box.text_frame; tf.word_wrap = True
     p = tf.paragraphs[0]; p.alignment = PP_ALIGN.CENTER
     r = p.add_run(); r.text = "Présentation des KPIs"
@@ -100,13 +111,27 @@ def _slide_title(prs, entity, fichier_date):
     r2.font.size = Pt(30); r2.font.color.rgb = RGBColor(0xE7, 0xE8, 0xD1); r2.font.name = "Calibri"
 
     # Entité
-    box2 = slide.shapes.add_textbox(Inches(1.0), Inches(4.6), Inches(11.3), Inches(1.0))
+    box2 = slide.shapes.add_textbox(Inches(1.0), Inches(4.25), Inches(11.3), Inches(0.9))
     tf2 = box2.text_frame; p3 = tf2.paragraphs[0]; p3.alignment = PP_ALIGN.CENTER
     r3 = p3.add_run(); r3.text = entity
     r3.font.size = Pt(32); r3.font.bold = True; r3.font.color.rgb = WHITE; r3.font.name = "Calibri"
 
+    # Postes sélectionnés
+    if vp:
+        postes_txt = ", ".join(str(p) for p in vp)
+        if len(postes_txt) > 130:
+            postes_txt = postes_txt[:127] + "…"
+        box_p = slide.shapes.add_textbox(Inches(1.0), Inches(5.15), Inches(11.3), Inches(1.2))
+        tfp = box_p.text_frame; tfp.word_wrap = True
+        pp = tfp.paragraphs[0]; pp.alignment = PP_ALIGN.CENTER
+        lbl = pp.add_run(); lbl.text = f"Postes de travail ({len(vp)}) : "
+        lbl.font.size = Pt(13); lbl.font.bold = True
+        lbl.font.color.rgb = RGBColor(0xE7, 0xE8, 0xD1); lbl.font.name = "Calibri"
+        val = pp.add_run(); val.text = postes_txt
+        val.font.size = Pt(13); val.font.color.rgb = WHITE; val.font.name = "Calibri"
+
     # Date
-    box3 = slide.shapes.add_textbox(Inches(1.0), Inches(6.7), Inches(11.3), Inches(0.7))
+    box3 = slide.shapes.add_textbox(Inches(1.0), Inches(6.75), Inches(11.3), Inches(0.55))
     tf3 = box3.text_frame; p4 = tf3.paragraphs[0]; p4.alignment = PP_ALIGN.CENTER
     r4 = p4.add_run(); r4.text = f"Données du {fichier_date}   •   Généré le {datetime.now().strftime('%d/%m/%Y')}"
     r4.font.size = Pt(13); r4.font.color.rgb = DARK; r4.font.name = "Calibri"
@@ -198,30 +223,37 @@ def _bar_row(slide, label, value, y, x0=Inches(0.8), maxw=8.5,
     r2.font.size = Pt(11); r2.font.bold = True; r2.font.color.rgb = DARK; r2.font.name = "Calibri"
 
 
-def _slide_scores_and_perf(prs, entity, vp, pscores, qscores, pa):
+def _slide_scores_indicateurs(prs, entity, vp, scores, moyennes, kpi_list, kind):
+    """
+    Slide : scores globaux par poste (gauche) + taux moyens par KPI (droite),
+    pour une seule catégorie (Performance OU Qualité).
+    """
     slide = _blank_slide(prs)
-    _add_title_bar(slide, "Scores globaux par poste",
-                   f"{entity} — Performance (vert) et Qualité (bleu)")
+    _add_title_bar(slide, f"Scores globaux par poste — {kind}",
+                   f"{entity} — score par poste et taux moyens par indicateur")
 
     # Section gauche : scores par poste
-    postes = [p for p in vp if p in pscores or p in qscores][:9]
+    postes = [p for p in vp if p in scores][:9]
     y = Inches(1.5)
     for poste in postes:
-        ps = pscores.get(poste, 0)
-        _bar_row(slide, poste, ps, y, x0=Inches(0.4), maxw=4.2, label_w=1.9)
+        _bar_row(slide, poste, scores.get(poste, 0), y,
+                 x0=Inches(0.4), maxw=4.2, label_w=1.9)
         y += Inches(0.55)
 
-    # Section droite : Taux moyens Performance
+    # Section droite : Taux moyens par KPI
     hdr = slide.shapes.add_textbox(Inches(7.2), Inches(1.35), Inches(5.5), Inches(0.4))
     p = hdr.text_frame.paragraphs[0]; r = p.add_run()
-    r.text = "Taux moyens — Performance"
+    r.text = f"Taux moyens — {kind}"
     r.font.size = Pt(15); r.font.bold = True; r.font.color.rgb = GREEN_OCP; r.font.name = "Calibri"
 
     y2 = Inches(1.9)
-    for kpi in QK[:9]:
-        if kpi in pa:
-            short = kpi.replace("OT ", "").replace("Performance ", "Perf ")[:22]
-            _bar_row(slide, short, pa[kpi], y2, x0=Inches(6.7), maxw=3.2, label_w=2.4)
+    for kpi in kpi_list[:9]:
+        if kpi in moyennes and pd.notna(moyennes[kpi]):
+            short = (kpi.replace("OT ", "").replace("Performance ", "Perf ")
+                        .replace("TAUX_REALISATION_CORRECTIF/PT", "Taux Réalis. Corr.")
+                        .replace("Backlog ", "Bcklg ")
+                        .replace("Taux d'approbation des Avis", "Taux Appro. Avis"))[:24]
+            _bar_row(slide, short, moyennes[kpi], y2, x0=Inches(6.7), maxw=3.2, label_w=2.6)
             y2 += Inches(0.52)
 
 
@@ -353,8 +385,9 @@ def build_presentation(vp, ckdf, ano_map, pa, qa,
 
     entity = _entity_name(vp)
 
-    _slide_title(prs, entity, fichier_date)
-    _slide_scores_and_perf(prs, entity, vp, pscores, qscores, pa)
+    _slide_title(prs, entity, fichier_date, vp)
+    _slide_scores_indicateurs(prs, entity, vp, pscores, pa, QK, "Performance")
+    _slide_scores_indicateurs(prs, entity, vp, qscores, qa, PK, "Qualité")
     _slide_detail(prs, entity, vp, ckdf, ano_map, QK, "Performance")
     _slide_detail(prs, entity, vp, ckdf, ano_map, PK, "Qualité")
     _slide_sparklines(prs, entity, vp, hist_df, pscores, qscores)
