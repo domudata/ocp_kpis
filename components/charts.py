@@ -70,10 +70,10 @@ def show_simple_pie(piv_df: pd.DataFrame, title: str, keep_non_carac: bool = Fal
             textfont=dict(size=13, family='Inter, sans-serif'),
         )
         fig.update_layout(
-            title=dict(text=title, x=0.5, xanchor='center', font=dict(size=16)),
-            height=480, showlegend=True,
+            title=dict(text=title, x=0.5, xanchor='center', font=dict(size=13), y=0.97),
+            height=440, showlegend=True,
             legend=dict(orientation="h", yanchor="bottom", y=-0.15, x=0.5, xanchor="center"),
-            margin=dict(t=80, b=80, l=40, r=40),
+            margin=dict(t=55, b=80, l=40, r=40),
         )
         st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
         return
@@ -115,10 +115,10 @@ def show_simple_pie(piv_df: pd.DataFrame, title: str, keep_non_carac: bool = Fal
         textfont=dict(size=12, family='Inter, sans-serif'),
     )
     fig.update_layout(
-        title=dict(text=title, x=0.5, xanchor='center', font=dict(size=16)),
-        height=500, showlegend=True,
+        title=dict(text=title, x=0.5, xanchor='center', font=dict(size=13), y=0.97),
+        height=460, showlegend=True,
         legend=dict(orientation="h", yanchor="bottom", y=-0.18, x=0.5, xanchor="center"),
-        margin=dict(t=90, b=90, l=30, r=30),
+        margin=dict(t=65, b=90, l=30, r=30),
     )
     st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
 
@@ -173,7 +173,7 @@ def show_pie_pair(piv_df: pd.DataFrame, title_prefix: str) -> None:
     fig.update_layout(
         height=480, showlegend=True,
         legend=dict(orientation="h", yanchor="bottom", y=-0.15, x=0.5, xanchor="center"),
-        margin=dict(t=80, b=80, l=40, r=40),
+        margin=dict(t=55, b=80, l=40, r=40),
     )
     st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
 
@@ -221,9 +221,9 @@ def show_hbar_thresholds(labels, values, title, s1=S1_DEFAULT, s2=S2_DEFAULT,
         title=dict(text=title, x=0.5, xanchor='center', font=dict(size=16)),
         height=max(300, 40 * len(labels) + 120),
         xaxis=dict(range=[0, 115], showgrid=False, showticklabels=False, zeroline=False, fixedrange=True),
-        yaxis=dict(autorange="reversed", tickfont=dict(size=12, family='Inter'), fixedrange=True),
+        yaxis=dict(autorange="reversed", tickfont=dict(size=12, family='Inter'), fixedrange=True, automargin=True),
         plot_bgcolor='white', paper_bgcolor='white',
-        margin=dict(t=90, b=20, l=10, r=40),
+        margin=dict(t=90, b=20, l=20, r=50),
         showlegend=False,
     )
     st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
@@ -298,9 +298,23 @@ def show_grouped_hbar(vp, pscores: dict, qscores: dict, title: str,
         barmode='group', bargap=0.25, bargroupgap=0.08,
         height=max(350, 52 * len(postes) + 130),
         xaxis=dict(range=[0, 115], showgrid=False, showticklabels=False, zeroline=False, fixedrange=True),
-        yaxis=dict(autorange="reversed", tickfont=dict(size=12, family='Inter'), fixedrange=True),
+        yaxis=dict(autorange="reversed", tickfont=dict(size=12, family='Inter'), fixedrange=True, automargin=True),
         plot_bgcolor='white', paper_bgcolor='white',
         legend=dict(orientation="h", yanchor="bottom", y=-0.08, x=0.5, xanchor="center"),
-        margin=dict(t=90, b=60, l=10, r=40),
+        margin=dict(t=90, b=60, l=20, r=50),
     )
     st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
+
+
+def show_scores_hbar(vp, scores: dict, title, s1=S1_DEFAULT, s2=S2_DEFAULT):
+    """
+    Barres horizontales des scores PAR POSTE (une seule serie),
+    colorees selon le score (rouge/jaune/vert). Pour afficher
+    Performance et Qualite separement cote a cote.
+    """
+    postes = [p for p in vp if p in scores]
+    if not postes:
+        st.markdown('<div class="es">Aucune donnee</div>', unsafe_allow_html=True)
+        return
+    vals = [round(scores.get(p, 0), 1) for p in postes]
+    show_hbar_thresholds(postes, vals, title, s1, s2)
