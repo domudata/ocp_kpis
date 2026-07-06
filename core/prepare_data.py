@@ -81,47 +81,59 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
         if c in raw_av.columns:
             raw_av[c] = pd.to_datetime(raw_av[c], errors="coerce")
 
-    now_ts = pd.to_datetime(date_str, dayfirst=True)
-    df = raw_ot.copy()
+    # ── Date de référence (date.txt) ────────────────────────────────────────
+now_ts = pd.to_datetime(date_str, dayfirst=True)
+df = raw_ot.copy()
 
-    # ── OT correctif = Plan d entretien == 0 ────────────────────────────
-    df["is_correctif"] = df["Plan d'entretien"].fillna(0) == 0
+# ── OT correctif = Plan d'entretien == 0 ────────────────────────────────
+df["is_correctif"] = df["Plan d'entretien"].fillna(0) == 0
 
-    # ── Statut OT (1er mot du statut systeme) ───────────────────────────
-    if "Statut système" in df.columns:
-        df["Statut OT"] = (
-            df["Statut système"].fillna("").astype(str).str.strip().str.split().str[0]
-        )
-
-    # ── SOPL ─────────────────────────────────────────────────────────────
-    df["Contient SOPL"] = (
-        df["Statut utilisateur"].str.contains("SOPL", na=False).map({True:1, False:0})
+# ── Statut OT (1er mot du statut système) ───────────────────────────────
+if "Statut système" in df.columns:
+    df["Statut OT"] = (
+        df["Statut système"]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+        .str.split()
+        .str[0]
     )
 
-    # ── Type de travail numerique ────────────────────────────────────────
-    df["_tw_num"] = pd.to_numeric(
-        df.get("Type de travail", pd.Series(dtype=float)), errors="coerce"
-    )
+# ── SOPL ────────────────────────────────────────────────────────────────
+df["Contient SOPL"] = (
+    df["Statut utilisateur"]
+    .fillna("")
+    .str.contains("SOPL", na=False)
+    .astype(int)
+)
 
-    # ── Age PREP : |now - Créé le| en jours ─────────────────────────────
-    # abs() pour ignorer les dates futures (evite classement errone en <1m)
-    if "Créé le" in df.columns:
-        
-        df["ap"] = df["days_prep"].apply(cat_age_jours)
-    else:
-        df["days_prep"] = np.nan
-        df["ap"] = "Inconnu"
+# ── Type de travail numérique ───────────────────────────────────────────
+df["_tw_num"] = pd.to_numeric(
+    df.get("Type de travail", pd.Series(dtype=float)),
+    errors="coerce"
+)
 
-    # ── Age PLAN et EXEC : |now - Date planifiée| en jours ──────────────
-    # abs() pour ignorer les dates futures
-    if "Date de début planifiée" in df.columns:
-        
-        df["alp"] = df["days_planif"].apply(cat_age_jours)
-        df["aex"] = df["days_planif"].apply(cat_age_jours)
-    else:
-        df["days_planif"] = np.nan
-        df["alp"] = "Inconnu"
-        df["aex"] = "Inconnu"
+# ========================================================================
+# AGE PREPARATION
+# ========================================================================
+if "Créé le" in df.columns:
+    df["days_prep"] = (now_ts - df["Créé le"]).dt.days
+    df["ap"] = df["days_prep"].apply(cat_age_jours)
+else:
+    df["days_prep"] = np.nan
+    df["ap"] = "Inconnu"
+
+# ========================================================================
+# AGE PLANIFICATION / EXECUTION
+# ========================================================================
+if "Date de début planifiée" in df.columns:
+    df["days_planif"] = (now_ts - df["Date de début planifiée"]).dt.days
+    df["alp"] = df["days_planif"].apply(cat_age_jours)
+    df["aex"] = df["days_planif"].apply(cat_age_jours)
+else:
+    df["days_planif"] = np.nan
+    df["alp"] = "Inconnu"
+    df["aex"] = "Inconnu"
 
     # ── OT CONFIME ───────────────────────────────────────────────────────
     df["OT CONFIME"] = np.where(
