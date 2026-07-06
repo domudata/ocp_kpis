@@ -385,6 +385,39 @@ def main() -> None:
         with tabs[3]:
             render_backlog_page(dfp, vp)
         with tabs[4]:
+            # ── Gestion de l'historique (persistance via GitHub) ─────────────
+            _hist_path = os.path.join("kpis", "indicateurs_kpis.xlsx")
+            n_dates = 0
+            if not hist_df.empty and "Date" in hist_df.columns:
+                n_dates = hist_df["Date"].nunique()
+
+            with st.expander(f"📁 Historique : {n_dates} date(s) enregistrée(s) — cliquez pour gérer", expanded=(n_dates < 2)):
+                if n_dates < 2:
+                    st.info(
+                        "ℹ️ Il faut **au moins 2 dates** pour calculer des variations. "
+                        "Actuellement, l'historique contient %d date(s).\n\n"
+                        "**Comment ajouter une date à l'historique permanent :**\n"
+                        "1. Chargez une nouvelle extraction (date.txt + ot.xlsx + avis.xlsx)\n"
+                        "2. Téléchargez le fichier historique mis à jour ci-dessous\n"
+                        "3. Committez-le sur GitHub dans le dossier `kpis/`\n"
+                        "4. L'app le rechargera automatiquement au prochain démarrage" % n_dates
+                    )
+                if os.path.exists(_hist_path):
+                    with open(_hist_path, "rb") as _hf:
+                        st.download_button(
+                            "⬇️ Télécharger l'historique (indicateurs_kpis.xlsx)",
+                            data=_hf.read(),
+                            file_name="indicateurs_kpis.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            use_container_width=True,
+                        )
+                    st.caption(
+                        "Après téléchargement : placez ce fichier dans `kpis/indicateurs_kpis.xlsx` "
+                        "sur GitHub (glisser-déposer dans le dossier + Commit)."
+                    )
+                else:
+                    st.warning("Aucun fichier historique généré pour l'instant.")
+
             render_evolution_tab(
                 hist_df, var_df, journal_df, top5_df, bot5_df,
                 synth_perf, synth_qual, vp,
