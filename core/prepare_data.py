@@ -81,7 +81,7 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
         if c in raw_av.columns:
             raw_av[c] = pd.to_datetime(raw_av[c], errors="coerce")
 
-    now_ts = pd.Timestamp.today()
+    now_ts = pd.to_datetime(date_str, dayfirst=True)
     df = raw_ot.copy()
 
     # ── OT correctif = Plan d entretien == 0 ────────────────────────────
@@ -106,7 +106,7 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
     # ── Age PREP : |now - Créé le| en jours ─────────────────────────────
     # abs() pour ignorer les dates futures (evite classement errone en <1m)
     if "Créé le" in df.columns:
-        df["days_prep"] = (now_ts - df["Créé le"]).dt.days.abs()
+        
         df["ap"] = df["days_prep"].apply(cat_age_jours)
     else:
         df["days_prep"] = np.nan
@@ -115,7 +115,7 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
     # ── Age PLAN et EXEC : |now - Date planifiée| en jours ──────────────
     # abs() pour ignorer les dates futures
     if "Date de début planifiée" in df.columns:
-        df["days_planif"] = (now_ts - df["Date de début planifiée"]).dt.days.abs()
+        
         df["alp"] = df["days_planif"].apply(cat_age_jours)
         df["aex"] = df["days_planif"].apply(cat_age_jours)
     else:
