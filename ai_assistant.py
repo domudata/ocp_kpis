@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-Assistant IA (Groq - gratuit) pour le tableau de bord KPI OCP.
+Assistant IA (Groq — gratuit) pour le tableau de bord KPI OCP.
 
 Deux fonctionnalités :
   1. Analyse automatique  : synthèse écrite des KPIs du périmètre affiché
@@ -9,15 +9,14 @@ Deux fonctionnalités :
 Configuration (Streamlit Cloud → Settings → Secrets) :
     GROQ_API_KEY = "gsk_..."
 
-Obtenir une clé GRATUITE (sans carte bancaire) :
-    https://console.groq.com → API Keys → Create API Key
+Obtenir une clé gratuite : https://console.groq.com (menu API Keys)
 
 Dépendance à ajouter dans requirements.txt :
     groq
 """
 import streamlit as st
 
-# Modèle Groq (gratuit). Llama 3.3 70B : excellent en français, rapide.
+# Modèle Groq (gratuit, rapide). Llama 3.3 70B = bon raisonnement en français.
 MODEL = "llama-3.3-70b-versatile"
 MAX_TOKENS = 1500
 
@@ -98,12 +97,12 @@ Contexte métier :
 - Une "anomalie" = un OT qui ne respecte pas la règle d'un indicateur.
 
 Quand tu analyses, identifie les points forts, les points faibles prioritaires, \
-et propose 2-3 actions concrètes. Privilégie des phrases courtes et des listes \
-à puces. Ne fais pas de tableaux longs."""
+et propose 2-3 actions concrètes. Ne fais pas de tableaux longs ; privilégie des \
+phrases courtes et des listes à puces."""
 
 
 def _call_groq(client, system, messages):
-    """Appel à l'API Groq (compatible format OpenAI)."""
+    """Appel à l'API Groq (compatible OpenAI chat completions)."""
     resp = client.chat.completions.create(
         model=MODEL,
         max_tokens=MAX_TOKENS,
@@ -121,11 +120,10 @@ def render_ai_assistant(entity, vp, pa, qa, pscores, qscores, ano_map,
     client = _get_client()
     if client is None:
         st.warning(
-            "🔑 Assistant IA non configuré. Ajoutez votre clé Groq (GRATUITE) dans "
+            "🔑 Assistant IA non configuré. Ajoutez votre clé API Groq (gratuite) dans "
             "**Manage app → Settings → Secrets** :\n\n"
             '```toml\nGROQ_API_KEY = "gsk_..."\n```\n\n'
-            "Obtenez une clé gratuite sur https://console.groq.com "
-            "(menu API Keys, sans carte bancaire)."
+            "Obtenez une clé gratuite sur https://console.groq.com (menu API Keys)."
         )
         return
 
@@ -179,13 +177,14 @@ def render_ai_assistant(entity, vp, pa, qa, pscores, qscores, ano_map,
         with st.chat_message("assistant"):
             with st.spinner("…"):
                 try:
+                    # Historique complet pour le contexte conversationnel
                     history_msgs = [
                         {"role": role, "content": text}
                         for role, text in st.session_state["ai_chat_history"][:-1]
                     ]
                     answer = _call_groq(
                         client,
-                        SYSTEM_PROMPT + "\n\nContexte des données actuelles :\n" + context,
+                        SYSTEM_PROMPT + "\n\nContexte données actuelles :\n" + context,
                         history_msgs + [{"role": "user", "content": user_q}],
                     )
                     st.markdown(answer)
