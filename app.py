@@ -75,6 +75,21 @@ def main() -> None:
         '<style>[data-testid="stSidebarNav"] { display: none; }</style>',
         unsafe_allow_html=True
     )
+    # Masquer la barre d'outils Streamlit (Share/étoile/crayon/GitHub/menu),
+    # le bandeau "Manage app", le menu principal et le footer
+    st.markdown("""
+    <style>
+    [data-testid="stToolbar"] { display: none !important; }
+    [data-testid="stToolbarActions"] { display: none !important; }
+    [data-testid="stStatusWidget"] { display: none !important; }
+    [data-testid="stDecoration"] { display: none !important; }
+    #MainMenu { visibility: hidden !important; }
+    header { visibility: hidden !important; }
+    footer { visibility: hidden !important; }
+    .stAppDeployButton { display: none !important; }
+    .viewerBadge_container__1QSob { display: none !important; }
+    </style>
+    """, unsafe_allow_html=True)
     st.markdown("""
     <style>
     .cr { display:flex; flex-wrap:nowrap; gap:8px; margin-bottom:8px; overflow-x:auto; }
@@ -358,6 +373,7 @@ def main() -> None:
             "Backlog",
             "Suivi & Evolution",
             "Plan d'action",
+            "🤖 Assistant IA",
         ])
 
         with tabs[0]:
@@ -394,6 +410,18 @@ def main() -> None:
                 st.caption(f"Export PowerPoint indisponible : {_e}")
 
             render_plan_action_tab(plan_actions_rows, sf1_rows, sf2_rows, anomaly_dfs)
+
+        with tabs[6]:
+            try:
+                from ai_assistant import render_ai_assistant
+                _entity = "Maroc Chimie" if all(str(p).startswith("SF1") for p in vp) else \
+                          ("FEEDS" if all(str(p).startswith("SF2") for p in vp) else "OCP — Maroc Chimie & FEEDS")
+                render_ai_assistant(
+                    _entity, vp, pa, qa, pscores, qscores, ano_map,
+                    fichier_date, CIBLE,
+                )
+            except Exception as _e:
+                st.error(f"Assistant IA indisponible : {_e}")
 
     except Exception as e:
         st.error("Erreur lors du chargement des donnees : %s" % str(e))
