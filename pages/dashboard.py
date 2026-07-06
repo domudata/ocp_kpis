@@ -3,14 +3,18 @@ import streamlit as st
 
 from core.constants import QK, PK, CIBLE
 from components.tables import html_classement
-from components.charts import show_grouped_hbar, show_hbar_thresholds
+from components.charts import show_scores_hbar, show_hbar_thresholds
 
 
 def render_dashboard_tab(vp: list, pscores: dict, qscores: dict,
                           pa: dict, qa: dict) -> None:
-    # ── Comparaison Performance / Qualite par poste (style rapport OCP) ──
+    # ── Scores globaux par poste : Performance | Qualité côte à côte ─────
     st.markdown('<div class="stl p">Scores globaux par poste</div>', unsafe_allow_html=True)
-    show_grouped_hbar(vp, pscores, qscores, "Comparaison Performance / Qualité par poste")
+    c1, c2 = st.columns(2)
+    with c1:
+        show_scores_hbar(vp, pscores, "Performance par poste")
+    with c2:
+        show_scores_hbar(vp, qscores, "Qualité par poste")
 
     # ── Taux moyens par KPI (barres horizontales + seuils 70/90) ─────────
     col1, col2 = st.columns(2)
