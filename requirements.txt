@@ -20,3 +20,4 @@ plotly
 numpy
 openai>=1.0.0
 python-pptx
+anthropic
