@@ -46,9 +46,9 @@ def ks(v, c) -> str:
     if c in ["OT préparation <1 mois", "OT planification <1 mois", "OT exécution <1 mois"]:
         return "background:#c6efce;color:#006100;font-weight:600" if val >= 80 else ("background:#ffeb9c;color:#9c6500;font-weight:600" if val >= 75 else "background:#ffc7ce;color:#9c0006;font-weight:600")
     if c in ["OT préparation 1mois< <3mois", "OT planification 1mois< <3mois", "OT exécution 1mois< <3mois"]:
-        return "background:#c6efce;color:#006100;font-weight:600" if val <= 85 else "background:#ffc7ce;color:#9c0006;font-weight:600"
+        return "background:#c6efce;color:#006100;font-weight:600" if val <= 15 else "background:#ffc7ce;color:#9c0006;font-weight:600"
     if c in ["OT préparation >3 mois", "OT planification >3 mois", "OT exécution >3 mois"]:
-        return "background:#c6efce;color:#006100;font-weight:600" if val <= 95 else "background:#ffc7ce;color:#9c0006;font-weight:600"
+        return "background:#c6efce;color:#006100;font-weight:600" if val <= 5 else "background:#ffc7ce;color:#9c0006;font-weight:600"
     if c == "TAUX_REALISATION_CORRECTIF/PT":
         return "background:#c6efce;color:#006100;font-weight:600" if val >= 85 else ("background:#ffeb9c;color:#9c6500;font-weight:600" if val >= 80 else "background:#ffc7ce;color:#9c0006;font-weight:600")
     if c == "Taux d'approbation des Avis":
@@ -379,8 +379,8 @@ def html_plan_actions_table(rows: list, title: str, accent_color: str,
                         df_anom = anomaly_dfs[kpi_name]
                         df_poste = df_anom[df_anom["Poste travail princ."] == poste_name] if "Poste travail princ." in df_anom.columns else df_anom
                         if not df_poste.empty:
-                            csv_data = df_poste.to_csv(index=False, sep=';', encoding='utf-8-sig')
-                            b64 = base64.b64encode(csv_data.encode('utf-8-sig')).decode()
+                            csv_data = df_poste.to_csv(index=False, sep=';')
+                            b64 = base64.b64encode(csv_data.encode('utf-8')).decode()
                             safe_fn = (f"{poste_name}_{kpi_name}"
                                        .replace("/", "-").replace("\\", "-")
                                        .replace(" ", "_").replace("<", "").replace(">", "")[:50])
