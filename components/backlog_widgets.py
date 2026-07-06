@@ -127,7 +127,7 @@ def render_backlog_tab(dfp: pd.DataFrame, vp: list) -> None:
         'Taux Carac %': f'{round(total_carac/total_tot*100,1) if total_tot>0 else 0}%'
     })
 
-    c1, c2 = st.columns([0.5, 0.5], vertical_alignment='center')
+    c1, c2 = st.columns([0.5, 0.5], vertical_alignment='top')
     with c1:
         # Tableau HTML
         h = '<table class="tw omt"><thead><tr>'
@@ -214,7 +214,7 @@ def render_backlog_tab(dfp: pd.DataFrame, vp: list) -> None:
         'Taux Carac %': f'{round(total_carac/total_tot*100,1) if total_tot>0 else 0}%'
     })
 
-    c3, c4 = st.columns([0.5, 0.5], vertical_alignment='center')
+    c3, c4 = st.columns([0.5, 0.5], vertical_alignment='top')
     with c3:
         h = '<table class="tw omt"><thead><tr>'
         for col in ['Poste de travail','Caractérisé','Non Caractérisé','Total','Taux Carac %']:
@@ -272,21 +272,21 @@ def render_backlog_tab(dfp: pd.DataFrame, vp: list) -> None:
     st.markdown('<div class="stl p">📊 Statuts OT par Poste de Travail</div>', unsafe_allow_html=True)
 
     st.markdown('<div class="stl s">OT OMS par Poste et Statut OT</div>', unsafe_allow_html=True)
-    c5, c6 = st.columns([0.5, 0.5], vertical_alignment='center')
+    c5, c6 = st.columns([0.5, 0.5], vertical_alignment='top')
     with c5:
         st.markdown(html_statut_pivot(piv_oms, 'omt'), unsafe_allow_html=True)
     with c6:
         show_pie_pair(piv_oms, 'OT OMS')
 
     st.markdown('<div class="stl s">OT Thermographie par Poste et Statut OT</div>', unsafe_allow_html=True)
-    c7, c8 = st.columns([0.5, 0.5], vertical_alignment='center')
+    c7, c8 = st.columns([0.5, 0.5], vertical_alignment='top')
     with c7:
         st.markdown(html_statut_pivot(piv_thm, 'tht'), unsafe_allow_html=True)
     with c8:
         show_pie_pair(piv_thm, 'OT Thermographie')
 
     st.markdown('<div class="stl s">Tous les OT par Poste et Statut OT</div>', unsafe_allow_html=True)
-    c9, c10 = st.columns([0.5, 0.5], vertical_alignment='center')
+    c9, c10 = st.columns([0.5, 0.5], vertical_alignment='top')
     with c9:
         st.markdown(html_statut_pivot(piv_all, 'pt'), unsafe_allow_html=True)
     with c10:
