@@ -127,8 +127,10 @@ def calc_kpis(df_i, av_i, now_ts, posts):
     # Base : CRÉÉ + CRPR + Backlog prep NON CARAC + Date planif ≤ aujourd'hui
     # Age  : |now - Créé le| (dans prepare_data.py, avec abs)
     filt_prep = (
-        (df["Statut OT"] == "CRÉÉ") 
-        
+        (df["Statut OT"] == "CRÉÉ") &
+        df["Statut utilisateur"].str.contains(r"\bCRPR\b", case=False, na=False) &
+        (df["Backlog preparation"] == "NON CARACTERISE") &
+        (df["Date de début planifiée"] <= now_ts)
     )
     kpis_prep, pv_prep = _age_kpis(df, filt_prep, "ap", posts, "préparation")
 
