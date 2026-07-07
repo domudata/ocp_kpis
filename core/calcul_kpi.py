@@ -312,8 +312,8 @@ pv_cor["OT_COR_EGAL"] = ckpi(pv_cor["OUI"], pv_cor["Total"])
 
 res["ot_cor_egal"] = pv_cor
 
-    fiab_s  = pd.Series(100.0, index=posts)
-    avpan_s = pd.Series(100.0, index=posts)
+fiab_s  = pd.Series(100.0, index=posts)
+avpan_s = pd.Series(100.0, index=posts)
 
     res['ckdf'] = pd.DataFrame({
         "TAUX_REALISATION_CORRECTIF/PT":     an["TAUX_REALISATION_CORRECTIF/PT"],
