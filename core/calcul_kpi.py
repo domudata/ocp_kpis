@@ -74,6 +74,13 @@ def _age_kpis(df, filt, col_age, posts, prefix):
     - <1m  : N_inf1m / Total * 100   (maximiser, cible >= 80%)
     - 1-3m : N_1-3m  / Total * 100   (minimiser, cible <= 15%)
     - >3m  : N_sup3m / Total * 100   (minimiser, cible <= 5%)
+
+    Base vide (Total==0) → NaN (PAS de valeur par defaut a 100%).
+    Un poste sans aucun OT correspondant au filtre n a "rien a montrer"
+    -> ce n est pas la meme chose qu un poste "parfait". Afficher NaN
+    permet de distinguer clairement "pas de donnees" de "0% de retard".
+    NaN est automatiquement exclu des moyennes (pandas skipna) et des
+    scores (deja gere via pd.notna dans app.py).
     """
     pv = cpiv(df, filt, col_age, posts)
     for c in ["<1 mois", ">3 mois", "1 mois < <3 mois", "Inconnu"]:
@@ -87,10 +94,10 @@ def _age_kpis(df, filt, col_age, posts, prefix):
     for idx in pv.index:
         tot = pv.loc[idx, "Total"]
         if tot == 0:
-            # Base vide = aucun OT en retard → <1m parfait, 1-3m et >3m à 0
-            kpis.setdefault(f"OT {prefix} <1 mois",       {})[idx] = 100.0
-            kpis.setdefault(f"OT {prefix} 1mois< <3mois", {})[idx] = 0.0
-            kpis.setdefault(f"OT {prefix} >3 mois",       {})[idx] = 0.0
+            # Base vide = aucun OT pour ce poste avec ce filtre -> pas de donnees
+            kpis.setdefault(f"OT {prefix} <1 mois",       {})[idx] = np.nan
+            kpis.setdefault(f"OT {prefix} 1mois< <3mois", {})[idx] = np.nan
+            kpis.setdefault(f"OT {prefix} >3 mois",       {})[idx] = np.nan
         else:
             t1 = pv.loc[idx, "<1 mois"]           / tot * 100
             t2 = pv.loc[idx, "1 mois < <3 mois"]  / tot * 100
@@ -101,8 +108,7 @@ def _age_kpis(df, filt, col_age, posts, prefix):
 
     result = {}
     for k, d in kpis.items():
-        default = 100.0 if "<1 mois" in k else 0.0
-        result[k] = pd.Series(d).reindex(posts, fill_value=default)
+        result[k] = pd.Series(d).reindex(posts, fill_value=np.nan)
 
     return result, pv
 
