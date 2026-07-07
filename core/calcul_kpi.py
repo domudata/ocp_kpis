@@ -124,8 +124,6 @@ def calc_kpis(df_i, av_i, now_ts, posts):
     )
 
     # ── 2-4. AGE PREP ────────────────────────────────────────────────────
-    # Base : CRÉÉ + Backlog prep NON CARAC
-    # Age  : |now - Créé le| (dans prepare_data.py, avec abs)
     filt_prep = (
         (df["Statut OT"] == "CRÉÉ") &
         (df["Backlog preparation"] == "NON CARACTERISE")
@@ -133,8 +131,6 @@ def calc_kpis(df_i, av_i, now_ts, posts):
     kpis_prep, pv_prep = _age_kpis(df, filt_prep, "ap", posts, "préparation")
 
     # ── 5-7. AGE PLAN ────────────────────────────────────────────────────
-    # Base : LANC + hors SOPL + Backlog plan NON CARAC
-    # Age  : |now - Date planifiée| (dans prepare_data.py, avec abs)
     filt_plan = (
         (df["Statut OT"] == "LANC") &
         (df["Contient SOPL"] == 0) &
@@ -143,8 +139,6 @@ def calc_kpis(df_i, av_i, now_ts, posts):
     kpis_plan, pv_plan = _age_kpis(df, filt_plan, "alp", posts, "planification")
 
     # ── 8-10. AGE EXEC ───────────────────────────────────────────────────
-    # Base : LANC + SOPL (sans filtre TW preventifs — resultat SF1 1433/1171 ✅)
-    # Age  : |now - Date planifiée| (dans prepare_data.py, avec abs)
     filt_exec = (
         (df["Statut OT"] == "LANC") &
         (df["Contient SOPL"] == 1)
@@ -199,7 +193,6 @@ def calc_kpis(df_i, av_i, now_ts, posts):
         values="Avis", aggfunc="count", fill_value=0
     ).reindex(posts, fill_value=0)
     tca["APRV"] = tca.get("APRV", 0)
-    # Total = tous les avis (toutes colonnes statut sauf index)
     tca["Total"] = tca.sum(axis=1)
     tca["Taux d'approbation des Avis"] = ckpi(tca["APRV"], tca["Total"])
 
@@ -218,10 +211,6 @@ def calc_kpis(df_i, av_i, now_ts, posts):
     la["OT LANC ESTIME"] = ckpi(la["OUI"], la["Total"])
 
     # ── 16. BACKLOG PREP CARACTERISE ─────────────────────────────────────
-    # Num = CREE + CRPR + hors SOPL + contient ATPD/ATMR/ATRS/ATMO/ATER
-    # ── 16. BACKLOG PREP CARACTERISE ─────────────────────────────────────
-    # Base = Statut CRÉÉ + Plan d'entretien != 0 (préventif)
-    # Caracterise = contient ATPD/ATMR/ATRS/ATMO/ATER
     pat_prep = '|'.join(CRPR_KW)
     df_cree  = df[
         (df["Statut OT"] == "CRÉÉ") &
@@ -239,8 +228,6 @@ def calc_kpis(df_i, av_i, now_ts, posts):
     pc["Backlog préparation caractérisé"] = ckpi(pc["CARACTERISE"], pc["Total"])
 
     # ── 17. BACKLOG PLAN CARACTERISE ─────────────────────────────────────
-    # Base = Statut LANC + hors SOPL + Plan d'entretien != 0 (préventif)
-    # Caracterise = contient ATEI/ATAL/ATAS/AGAR/ATHS
     pat_plan = '|'.join(ATPL_KW)
     df_lancp = df[
         (~df["is_correctif"]) &          # Plan d'entretien != 0
@@ -271,7 +258,7 @@ def calc_kpis(df_i, av_i, now_ts, posts):
 
     # ── 19. OT_COR_EGAL ──────────────────────────────────────────────────
     # Base : Plan==0 + CLOT/TCLO + CONF (OT correctifs clotures confirmes)
-    # KPI  : bud != reel / total  -> maximiser (bonne imputation des couts)
+    # KPI  : |bud - reel| >= 1 → conforme (bonne imputation des couts)
     # Calcul DIRECT sur colonnes couts, independant de toute colonne texte
     df_clot = df[
         df["is_correctif"] &
@@ -280,10 +267,12 @@ def calc_kpis(df_i, av_i, now_ts, posts):
     ].copy()
     _bud_c = pd.to_numeric(df_clot["Total coûts budgétés"], errors="coerce")
     _reel_c = pd.to_numeric(df_clot["Total coûts réels"], errors="coerce")
-    # KPI = |bud - reel| >= 1 → conforme (OUI pour KPI)
-    df_clot["_egal"] = np.where(_bud_c == _reel_c, "OUI", "NON")
+    
+    # CORRECTION : L'écart absolu doit être >= 1 pour être "OUI" (Conforme)
+    df_clot["_conforme"] = np.where(np.abs(_bud_c - _reel_c) >= 1, "OUI", "NON")
+    
     pv_cor = pd.pivot_table(
-        df_clot, index="Poste travail princ.", columns="_egal",
+        df_clot, index="Poste travail princ.", columns="_conforme",
         values="Ordre", aggfunc="count", fill_value=0
     ).reindex(posts, fill_value=0)
     for c in ["OUI","NON"]: pv_cor[c] = pv_cor.get(c, 0)
