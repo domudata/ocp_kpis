@@ -130,37 +130,24 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
     return ano_map
 
 
-def build_ano_rows(vp, ano_map, kpi_list, fixed_zero=None, ckdf=None):
-    """
-    ckdf (optionnel) : DataFrame des valeurs KPI par poste. Si fourni, un
-    poste dont la valeur est NaN pour un KPI (= aucune donnee / base vide)
-    affiche "N/A" au lieu de 0 anomalies, pour ne pas laisser croire a un
-    poste "conforme" alors qu il n y a simplement rien a evaluer.
-    """
+def build_ano_rows(vp, ano_map, kpi_list, fixed_zero=None):
     fixed_zero = fixed_zero or []
     rows = []
     for poste in vp:
         r = {"Poste de travail": poste}
         total = 0
         for kpi in kpi_list:
-            has_data = True
-            if ckdf is not None and poste in ckdf.index and kpi in ckdf.columns:
-                has_data = pd.notna(ckdf.loc[poste, kpi])
-            if kpi in fixed_zero:
-                cnt = 0
-            elif not has_data:
-                cnt = None  # pas de donnees -> affiche "N/A"
-            else:
-                cnt = int(ano_map.get(kpi, pd.Series()).get(poste, 0))
-            r[kpi] = cnt if cnt is not None else "N/A"
-            if isinstance(cnt, int):
-                total += cnt
+            cnt = 0 if kpi in fixed_zero else int(
+                ano_map.get(kpi, pd.Series()).get(poste, 0)
+            )
+            r[kpi] = cnt
+            total += cnt
         r["Total Anomalies"] = total
         rows.append(r)
     tot = {"Poste de travail": "Total"}
     grand = 0
     for kpi in kpi_list:
-        s = sum(r[kpi] for r in rows if isinstance(r[kpi], int))
+        s = sum(r[kpi] for r in rows)
         tot[kpi] = s
         grand += s
     tot["Total Anomalies"] = grand
