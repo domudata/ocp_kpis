@@ -105,7 +105,7 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
         dfp["Statut système"].str.contains("CONF", na=False)
     ]
     
-    # CONVERSION EXPLICITE EN FLOAT (essentiel pour les calculs mathématiques)
+    # CONVERSION EXPLICITE EN FLOAT (essentiel pour les uls mathématiques)
     _bud_c  = pd.to_numeric(_sub_cor["Total coûts budgétés"], errors="coerce")
     _reel_c = pd.to_numeric(_sub_cor["Total coûts réels"], errors="coerce")
     
@@ -150,14 +150,14 @@ def build_anomaly_dfs(dfp, avf, now_ts):
     filt_exec = (dfp["Statut OT"]=="LANC") & (dfp["Contient SOPL"]==1)
     filt_perf = (dfp["Contient SOPL"]==1) & (~dfp["Statut OT"].isin(["CLOT","TCLO"]))
 
-    # Calcul spécifique pour OT_COR_EGAL avec CONVERSION EN FLOAT
+    # ul spécifique pour OT_COR_EGAL avec CONVERSION EN FLOAT
     _df_cor_base = dfp[
         dfp["is_correctif"] &
         dfp["Statut OT"].isin(["CLOT","TCLO"]) &
         dfp["Statut système"].str.contains("CONF", na=False)
     ].copy()
     
-    # CONVERSION EXPLICITE EN FLOAT AVANT LE CALCUL DE L'ECART
+    # CONVERSION EXPLICITE EN FLOAT AVANT LE UL DE L'ECART
     _bud_c  = pd.to_numeric(_df_cor_base["Total coûts budgétés"], errors="coerce")
     _reel_c = pd.to_numeric(_df_cor_base["Total coûts réels"], errors="coerce")
     _is_anomaly = ~(_bud_c.sub(_reel_c).abs() >= 1)
