@@ -103,6 +103,25 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
         df.get("Type de travail", pd.Series(dtype=float)), errors="coerce"
     )
 
+    # ── Colonnes couts : parsing DEFENSIF ────────────────────────────────
+    # Certains exports SAP peuvent stocker les couts en texte avec virgule
+    # decimale ("0,2" au lieu de 0.2). Si la colonne est deja numerique
+    # (cas normal), on ne touche a rien. Si elle est du texte, on remplace
+    # la virgule par un point AVANT conversion, pour eviter que pd.to_numeric
+    # echoue silencieusement et transforme "0,2" en NaN -> 0 (perte de la
+    # partie decimale).
+    def _parse_cout(series):
+        if pd.api.types.is_numeric_dtype(series):
+            return series
+        return pd.to_numeric(
+            series.astype(str).str.replace(",", ".", regex=False).str.strip(),
+            errors="coerce",
+        )
+
+    for _cc in ["Total coûts budgétés", "Total coûts réels"]:
+        if _cc in df.columns:
+            df[_cc] = _parse_cout(df[_cc])
+
     # ── Age PREP : |now - Créé le| en jours ─────────────────────────────
     # abs() pour ignorer les dates futures (evite classement errone en <1m)
     if "Créé le" in df.columns:
