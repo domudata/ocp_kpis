@@ -261,8 +261,8 @@ def main() -> None:
         sf2_q = np.nanmean([qscores[p] for p in sf2_posts]) if sf2_posts else 0
 
         ano_map    = build_ano_map(dfp, avf, now_ts)
-        ano_p_rows = build_ano_rows(vp, ano_map, QK)
-        ano_q_rows = build_ano_rows(vp, ano_map, PK, fixed_zero=["OT Fiabilité","Total Avis de Panne"])
+        ano_p_rows = build_ano_rows(vp, ano_map, QK, ckdf=ckdf)
+        ano_q_rows = build_ano_rows(vp, ano_map, PK, fixed_zero=["OT Fiabilité","Total Avis de Panne"], ckdf=ckdf)
         ano_p_cols = ["Poste de travail"] + QK + ["Total Anomalies"]
         ano_q_cols = ["Poste de travail"] + PK + ["Total Anomalies"]
         anomaly_dfs = build_anomaly_dfs(dfp, avf, now_ts)
