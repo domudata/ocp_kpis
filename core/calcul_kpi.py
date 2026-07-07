@@ -128,20 +128,17 @@ def calc_kpis(df_i, av_i, now_ts, posts):
     # Age  : |now - Créé le| (dans prepare_data.py, avec abs)
     filt_prep = (
         (df["Statut OT"] == "CRÉÉ") &
-        df["Statut utilisateur"].str.contains(r"\bCRPR\b", case=False, na=False) &
-        (df["Backlog preparation"] == "NON CARACTERISE") &
-        (df["Date de début planifiée"] <= now_ts)
+        (df["Backlog preparation"] == "CARACTERISE")
     )
     kpis_prep, pv_prep = _age_kpis(df, filt_prep, "ap", posts, "préparation")
 
     # ── 5-7. AGE PLAN ────────────────────────────────────────────────────
-    # Base : LANC + hors SOPL + Backlog plan NON CARAC + Date planif ≤ aujourd'hui
+    # Base : LANC + hors SOPL + Backlog plan CARACTERISE
     # Age  : |now - Date planifiée| (dans prepare_data.py, avec abs)
     filt_plan = (
         (df["Statut OT"] == "LANC") &
         (df["Contient SOPL"] == 0) &
-        (df["Backlog planification"] == "NON CARACTERISE") &
-        (df["Date de début planifiée"] <= now_ts)
+        (df["Backlog planification"] == "CARACTERISE")
     )
     kpis_plan, pv_plan = _age_kpis(df, filt_plan, "alp", posts, "planification")
 
@@ -222,12 +219,13 @@ def calc_kpis(df_i, av_i, now_ts, posts):
 
     # ── 16. BACKLOG PREP CARACTERISE ─────────────────────────────────────
     # Num = CREE + CRPR + hors SOPL + contient ATPD/ATMR/ATRS/ATMO/ATER
-    # Den = CREE + CRPR + hors SOPL
+    # ── 16. BACKLOG PREP CARACTERISE ─────────────────────────────────────
+    # Base = Statut CRÉÉ + Plan d'entretien != 0 (préventif)
+    # Caracterise = contient ATPD/ATMR/ATRS/ATMO/ATER
     pat_prep = '|'.join(CRPR_KW)
     df_cree  = df[
         (df["Statut OT"] == "CRÉÉ") &
-        df["Statut utilisateur"].str.contains(r"\bCRPR\b", case=False, na=False) &
-        (df["Contient SOPL"] == 0)
+        (~df["is_correctif"])   # Plan d'entretien != 0
     ].copy()
     df_cree["_carac"] = df_cree["Statut utilisateur"].str.contains(
         pat_prep, na=False
@@ -241,8 +239,14 @@ def calc_kpis(df_i, av_i, now_ts, posts):
     pc["Backlog préparation caractérisé"] = ckpi(pc["CARACTERISE"], pc["Total"])
 
     # ── 17. BACKLOG PLAN CARACTERISE ─────────────────────────────────────
+    # Base = Statut LANC + Contient SOPL + Plan d'entretien != 0 (préventif)
+    # Caracterise = contient ATEI/ATAL/ATAS/AGAR/ATHS
     pat_plan = '|'.join(ATPL_KW)
-    df_lancp = df[df["is_correctif"] & (df["Statut OT"]=="LANC") & (df["Contient SOPL"]==0)].copy()
+    df_lancp = df[
+        (~df["is_correctif"]) &          # Plan d'entretien != 0
+        (df["Statut OT"] == "LANC") &
+        (df["Contient SOPL"] == 1)
+    ].copy()
     df_lancp["_carac"] = df_lancp["Statut utilisateur"].str.contains(
         pat_plan, na=False
     ).map({True:"CARACTERISE",False:"NON CARACTERISE"})
