@@ -106,22 +106,21 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
         (dfp["OT CONFIME"] == "NON")
     ].groupby("Poste travail princ.")["Ordre"].count()
 
-    # ── 19. OT_COR_EGAL ──────────────────────────────────────────────────
-    # Anomalie = Plan==0 + CLOT+TCLO + CONF + |bud-reel| < 1 (quasi identiques)
-    _sub_cor = dfp[
-        dfp["is_correctif"] &
-        dfp["Statut OT"].isin(["CLOT","TCLO"]) &
-        dfp["Statut système"].str.contains("CONF", na=False)
-    ]
-    ano_map["OT_COR_EGAL"] = _sub_cor[
-    (
-        pd.to_numeric(_sub_cor["Total coûts budgétés"], errors="coerce").fillna(0.0).astype(float)
-        -
-        pd.to_numeric(_sub_cor["Total coûts réels"], errors="coerce").fillna(0.0).astype(float)
-    ).abs() < 1
+  # ── 19. OT_COR_EGAL ──────────────────────────────────────────────────
+_sub_cor = dfp[
+    dfp["is_correctif"] &
+    dfp["Statut OT"].isin(["CLOT", "TCLO"]) &
+    dfp["Statut système"].str.contains("CONF", na=False)
+]
+
+ano_map["OT_COR_EGAL"] = _sub_cor[
+    pd.to_numeric(_sub_cor["Total coûts budgétés"], errors="coerce").fillna(0.0).astype(float)
+    ==
+    pd.to_numeric(_sub_cor["Total coûts réels"], errors="coerce").fillna(0.0).astype(float)
 ].groupby("Poste travail princ.")["Ordre"].count()
 
-    return ano_map
+return ano_map
+
 
 
 def build_ano_rows(vp, ano_map, kpi_list, fixed_zero=None):
