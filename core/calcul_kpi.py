@@ -1,350 +1,189 @@
 # -*- coding: utf-8 -*-
-import numpy as np
 import pandas as pd
-from core.constants import QK, PK, CIBLE, LOWER_BETTER
+from core.constants import QK, PK
 
 TW_PREV = [350, 290, 300, 310, 360]
 CRPR_KW = ['ATPD','ATMR','ATRS','ATMO','ATER']
 ATPL_KW = ['ATEI','ATAL','ATAS','AGAR','ATHS']
 
 
-def ckpi(n, d, sz=100):
-    return np.where(d == 0, sz, (n / d) * 100)
+def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
 
-
-def ckpi_inv(n, d, sz=100):
-    """100 - (n/d*100) : pour tranches 1-3m et >3m"""
-    return np.where(d == 0, sz, 100.0 - (n / d) * 100)
-
-
-def cpiv(df, filt, col, posts):
-    return pd.pivot_table(
-        df[filt], index="Poste travail princ.", columns=col,
-        values="Ordre", aggfunc="count", fill_value=0
-    ).reindex(posts, fill_value=0)
-
-
-def get_text_col(df):
-    for c in ["Désignation","Designation","Désignation OT","Texte ordre",
-              "Texte","Description","Libellé","Libelle"]:
-        if c in df.columns: return c
-    for c in df.columns:
-        if df[c].dtype == 'object' and any(
-            kw in str(c).lower() for kw in ['sign','text','desc','libell']
-        ): return c
-    return None
-
-
-def build_statut_pivot(df_sub, posts):
-    if df_sub.empty:
-        return pd.DataFrame(
-            index=posts, columns=["CRÉÉ","LANC","CLOT","TCLO","Total"]
-        ).fillna(0).astype(int)
-    piv = pd.pivot_table(
-        df_sub, index="Poste travail princ.", columns="Statut OT",
-        values="Ordre", aggfunc="count", fill_value=0
-    )
-    for s in ["CRÉÉ","LANC","CLOT","TCLO"]:
-        if s not in piv.columns: piv[s] = 0
-    piv["Total"] = piv[["CRÉÉ","LANC","CLOT","TCLO"]].sum(axis=1)
-    return piv.reindex(posts, fill_value=0).fillna(0).astype(int)
-
-
-def gscore(k, a, t):
-    """
-    Score binaire par KPI :
-    - KPI normal (plus haut = mieux)      : 1 si a >= t, sinon 0
-    - KPI LOWER_BETTER (plus bas = mieux) : 1 si a <= t, sinon 0
-
-    Score global d une categorie (Performance / Qualite) :
-        = somme(gscore) / nb_kpis × 100
-    """
-    if pd.isna(a) or pd.isna(t): return 0
-    if k in LOWER_BETTER:
-        return 1 if a <= t else 0
-    return 1 if a >= t else 0
-
-
-def is_lb(k): return k in LOWER_BETTER
-
-
-def _age_kpis(df, filt, col_age, posts, prefix):
-    """
-    Valeurs BRUTES (taux réel d'OT dans chaque tranche) :
-    - <1m  : N_inf1m / Total * 100   (maximiser, cible >= 80%)
-    - 1-3m : N_1-3m  / Total * 100   (minimiser, cible <= 15%)
-    - >3m  : N_sup3m / Total * 100   (minimiser, cible <= 5%)
-    """
-    pv = cpiv(df, filt, col_age, posts)
-    for c in ["<1 mois", ">3 mois", "1 mois < <3 mois", "Inconnu"]:
-        if c not in pv.columns:
-            pv[c] = 0
-    # Total = somme des 3 tranches SEULEMENT (hors Inconnu)
-    # → garantit que <1m + 1-3m + >3m = 100% exactement
-    pv["Total"] = pv[["<1 mois","1 mois < <3 mois",">3 mois"]].sum(axis=1)
-
-    kpis = {}
-    for idx in pv.index:
-        tot = pv.loc[idx, "Total"]
-        if tot == 0:
-            # Base vide = aucun OT en retard → <1m parfait, 1-3m et >3m à 0
-            kpis.setdefault(f"OT {prefix} <1 mois",       {})[idx] = 100.0
-            kpis.setdefault(f"OT {prefix} 1mois< <3mois", {})[idx] = 0.0
-            kpis.setdefault(f"OT {prefix} >3 mois",       {})[idx] = 0.0
-        else:
-            t1 = pv.loc[idx, "<1 mois"]           / tot * 100
-            t2 = pv.loc[idx, "1 mois < <3 mois"]  / tot * 100
-            t3 = pv.loc[idx, ">3 mois"]           / tot * 100
-            kpis.setdefault(f"OT {prefix} <1 mois",       {})[idx] = round(t1, 2)
-            kpis.setdefault(f"OT {prefix} 1mois< <3mois", {})[idx] = round(t2, 2)
-            kpis.setdefault(f"OT {prefix} >3 mois",       {})[idx] = round(t3, 2)
-
-    result = {}
-    for k, d in kpis.items():
-        default = 100.0 if "<1 mois" in k else 0.0
-        result[k] = pd.Series(d).reindex(posts, fill_value=default)
-
-    return result, pv
-
-
-def calc_kpis(df_i, av_i, now_ts, posts):
-    res = {}
-    df  = df_i.copy()
-    av  = av_i.copy()
-    res['dfp'] = df
+    ano_map = {}
 
     # ── 1. TAUX REALISATION CORRECTIF ───────────────────────────────────
-    filt_cor = df["is_correctif"] & (df["Contient SOPL"] == 1)
-    an = cpiv(df, filt_cor, "Statut OT", posts)
-    for c in ["CLOT","CRÉÉ","LANC","TCLO"]: an[c] = an.get(c, 0)
-    an["OT_CLOTURES"] = an["CLOT"] + an["TCLO"]
-    an["TOTAL_OT"]    = an[["CLOT","CRÉÉ","LANC","TCLO"]].sum(axis=1)
-    an["TAUX_REALISATION_CORRECTIF/PT"] = np.where(
-        an["TOTAL_OT"] == 0, 100.0, ckpi(an["OT_CLOTURES"], an["TOTAL_OT"])
-    )
+    # Anomalie = OT correctifs (Plan==0+SOPL) non clôturés
+    ano_map["TAUX_REALISATION_CORRECTIF/PT"] = dfp[
+        dfp["is_correctif"] &
+        (dfp["Contient SOPL"] == 1) &
+        (~dfp["Statut OT"].isin(["CLOT","TCLO"]))
+    ].groupby("Poste travail princ.")["Ordre"].count()
 
-    # ── 2-4. AGE PREP ────────────────────────────────────────────────────
+    # ── 2/3/4. AGE PREP ─────────────────────────────────────────────────
     # Base : CRÉÉ + CRPR + Backlog prep NON CARAC + Date planif ≤ aujourd'hui
-    # Age  : |now - Créé le| (dans prepare_data.py, avec abs)
     filt_prep = (
-        (df["Statut OT"] == "CRÉÉ") &
-        (df["Backlog preparation"] == "CARACTERISE")
+        (dfp["Statut OT"] == "CRÉÉ") &
+        (dfp["Backlog preparation"] == "CARACTERISE")
     )
-    kpis_prep, pv_prep = _age_kpis(df, filt_prep, "ap", posts, "préparation")
+    ano_map["OT préparation <1 mois"]       = dfp[filt_prep & (dfp["ap"] == "<1 mois")].groupby("Poste travail princ.")["Ordre"].count()
+    ano_map["OT préparation 1mois< <3mois"] = dfp[filt_prep & (dfp["ap"] == "1 mois < <3 mois")].groupby("Poste travail princ.")["Ordre"].count()
+    ano_map["OT préparation >3 mois"]       = dfp[filt_prep & (dfp["ap"] == ">3 mois")].groupby("Poste travail princ.")["Ordre"].count()
 
-    # ── 5-7. AGE PLAN ────────────────────────────────────────────────────
+    # ── 5/6/7. AGE PLAN ─────────────────────────────────────────────────
     # Base : LANC + hors SOPL + Backlog plan CARACTERISE
-    # Age  : |now - Date planifiée| (dans prepare_data.py, avec abs)
     filt_plan = (
-        (df["Statut OT"] == "LANC") &
-        (df["Contient SOPL"] == 0) &
-        (df["Backlog planification"] == "CARACTERISE")
+        (dfp["Statut OT"] == "LANC") &
+        (dfp["Contient SOPL"] == 0) &
+        (dfp["Backlog planification"] == "CARACTERISE")
     )
-    kpis_plan, pv_plan = _age_kpis(df, filt_plan, "alp", posts, "planification")
+    ano_map["OT planification <1 mois"]      = dfp[filt_plan & (dfp["alp"] == "<1 mois")].groupby("Poste travail princ.")["Ordre"].count()
+    ano_map["OT planification 1mois< <3mois"] = dfp[filt_plan & (dfp["alp"] == "1 mois < <3 mois")].groupby("Poste travail princ.")["Ordre"].count()
+    ano_map["OT planification >3 mois"]       = dfp[filt_plan & (dfp["alp"] == ">3 mois")].groupby("Poste travail princ.")["Ordre"].count()
 
-    # ── 8-10. AGE EXEC ───────────────────────────────────────────────────
-    # Base : LANC + SOPL (sans filtre TW preventifs — resultat SF1 1433/1171 ✅)
-    # Age  : |now - Date planifiée| (dans prepare_data.py, avec abs)
+    # ── 8/9/10. AGE EXEC ────────────────────────────────────────────────
+    # Base : LANC + SOPL (sans filtre TW preventifs)
     filt_exec = (
-        (df["Statut OT"] == "LANC") &
-        (df["Contient SOPL"] == 1)
+        (dfp["Statut OT"] == "LANC") &
+        (dfp["Contient SOPL"] == 1)
     )
-    kpis_exec, pv_exec = _age_kpis(df, filt_exec, "aex", posts, "exécution")
+    ano_map["OT exécution <1 mois"]          = dfp[filt_exec & (dfp["aex"] == "<1 mois")].groupby("Poste travail princ.")["Ordre"].count()
+    ano_map["OT exécution 1mois< <3mois"]    = dfp[filt_exec & (dfp["aex"] == "1 mois < <3 mois")].groupby("Poste travail princ.")["Ordre"].count()
+    ano_map["OT exécution >3 mois"]          = dfp[filt_exec & (dfp["aex"] == ">3 mois")].groupby("Poste travail princ.")["Ordre"].count()
 
-    # ── 11. PERFORMANCE GRAISSAGE (TW=350) ──────────────────────────────
-    g_num = df[df["Statut OT"].isin(["CLOT","TCLO"]) & (df["_tw_num"]==350)].groupby(
-        "Poste travail princ.")["Ordre"].count()
-    g_den = df[(df["Contient SOPL"]==1) & (df["_tw_num"]==350) & (df["Date de début planifiée"]<=now_ts)].groupby(
-        "Poste travail princ.")["Ordre"].count()
-    g_df  = pd.DataFrame({"_n":g_num,"_d":g_den}).reindex(posts, fill_value=0)
-    g_df["Performance Graissage"] = np.where(
-        g_df["_d"]==0, 100.0, (g_df["_n"]/g_df["_d"])*100
-    )
+    # ── 11/12/13. PERFORMANCE PREVENTIF ─────────────────────────────────
+    # Anomalie = SOPL non clôturé pour chaque TW
+    perf_base = dfp["is_correctif"] if False else pd.Series(True, index=dfp.index)
+    filt_perf = (dfp["Contient SOPL"] == 1) & (~dfp["Statut OT"].isin(["CLOT","TCLO"]))
 
-    # ── 12. PERFORMANCE INSPECTION (TW=290/300/310) ──────────────────────
-    ins_base = (
-        df["_tw_num"].isin([290,300,310]) &
-        df["Date de début planifiée"].notna() &
-        (df["Date de début planifiée"] <= now_ts)
-    )
-    ins_num = df[df["Statut OT"].isin(["CLOT","TCLO"]) & ins_base].groupby(
-        "Poste travail princ.")["Ordre"].count()
-    ins_den = df[(df["Contient SOPL"]==1) & ins_base].groupby(
-        "Poste travail princ.")["Ordre"].count()
-    ins_df  = pd.DataFrame({"_n":ins_num,"_d":ins_den}).reindex(posts, fill_value=0)
-    ins_df["Performance Inspection"] = np.where(
-        ins_df["_d"]==0, 100.0, (ins_df["_n"]/ins_df["_d"])*100
-    )
-
-    # ── 13. PERFORMANCE SYSTEMATIQUES (TW=360) ───────────────────────────
-    sys_base = (
-        (df["_tw_num"] == 360) &
-        df["Date de début planifiée"].notna() &
-        (df["Date de début planifiée"] <= now_ts)
-    )
-    sys_num = df[df["Statut OT"].isin(["CLOT","TCLO"]) & sys_base].groupby(
-        "Poste travail princ.")["Ordre"].count()
-    sys_den = df[(df["Contient SOPL"]==1) & sys_base].groupby(
-        "Poste travail princ.")["Ordre"].count()
-    sys_df  = pd.DataFrame({"_n":sys_num,"_d":sys_den}).reindex(posts, fill_value=0)
-    sys_df["Performance Systématiques"] = np.where(
-        sys_df["_d"]==0, 100.0, (sys_df["_n"]/sys_df["_d"])*100
-    )
+    ano_map["Performance Graissage"]     = dfp[filt_perf & (dfp["_tw_num"]==350)].groupby("Poste travail princ.")["Ordre"].count()
+    ano_map["Performance Inspection"]    = dfp[filt_perf & (dfp["_tw_num"].isin([290,300,310])) & (dfp["Date de début planifiée"]<=now_ts)].groupby("Poste travail princ.")["Ordre"].count()
+    ano_map["Performance Systématiques"] = dfp[filt_perf & (dfp["_tw_num"]==360) & (dfp["Date de début planifiée"]<=now_ts)].groupby("Poste travail princ.")["Ordre"].count()
 
     # ── 14. TAUX APPROBATION AVIS ────────────────────────────────────────
-    avf = av.copy()
-    res['avf'] = avf
-    tca = pd.pivot_table(
-        avf, index="Poste travail princ.", columns="Statut utilisateur",
-        values="Avis", aggfunc="count", fill_value=0
-    ).reindex(posts, fill_value=0)
-    tca["APRV"] = tca.get("APRV", 0)
-    # Total = tous les avis (toutes colonnes statut sauf index)
-    tca["Total"] = tca.sum(axis=1)
-    tca["Taux d'approbation des Avis"] = ckpi(tca["APRV"], tca["Total"])
+    # Anomalie = avis APRQ ou REJT (non encore approuves ou rejetés)
+    # Note : avf est deja filtre hors ZU/Z4/ZR/ZP dans prepare_data
+    # Anomalie = avis APRQ uniquement (en attente d approbation)
+    ano_map["Taux d'approbation des Avis"] = (
+        avf[avf["Statut utilisateur"] == "APRQ"]
+        .groupby("Poste travail princ.")["Avis"].count()
+    )
 
     # ── 15. OT LANC ESTIME ───────────────────────────────────────────────
-    filt_lanc = (
-        df["is_correctif"] &
-        (df["Statut OT"] == "LANC") &
-        (df["Contient SOPL"] == 0)
-    )
-    la = pd.pivot_table(
-        df[filt_lanc], index="Poste travail princ.", columns="OT LANC ESTIME",
-        values="Ordre", aggfunc="count", fill_value=0
-    ).reindex(posts, fill_value=0)
-    for c in ["OUI","NON"]: la[c] = la.get(c, 0)
-    la["Total"] = la["OUI"] + la["NON"]
-    la["OT LANC ESTIME"] = ckpi(la["OUI"], la["Total"])
+    # Anomalie = Plan==0 + LANC + hors SOPL + charge estimee == 0
+    ano_map["OT LANC ESTIME"] = dfp[
+        dfp["is_correctif"] &
+        (dfp["Statut OT"] == "LANC") &
+        (dfp["Contient SOPL"] == 0) &
+        (dfp["OT LANC ESTIME"] == "NON")
+    ].groupby("Poste travail princ.")["Ordre"].count()
 
     # ── 16. BACKLOG PREP CARACTERISE ─────────────────────────────────────
-    # Num = CREE + CRPR + hors SOPL + contient ATPD/ATMR/ATRS/ATMO/ATER
-    # ── 16. BACKLOG PREP CARACTERISE ─────────────────────────────────────
-    # Base = Statut CRÉÉ + Plan d'entretien != 0 (préventif)
-    # Caracterise = contient ATPD/ATMR/ATRS/ATMO/ATER
-    pat_prep = '|'.join(CRPR_KW)
-    df_cree  = df[
-        (df["Statut OT"] == "CRÉÉ") &
-        (~df["is_correctif"])   # Plan d'entretien != 0
-    ].copy()
-    df_cree["_carac"] = df_cree["Statut utilisateur"].str.contains(
-        pat_prep, na=False
-    ).map({True:"CARACTERISE",False:"NON CARACTERISE"})
-    pc = pd.pivot_table(
-        df_cree, index="Poste travail princ.", columns="_carac",
-        values="Ordre", aggfunc="count", fill_value=0
-    ).reindex(posts, fill_value=0)
-    for c in ["CARACTERISE","NON CARACTERISE"]: pc[c] = pc.get(c, 0)
-    pc["Total"] = pc["CARACTERISE"] + pc["NON CARACTERISE"]
-    pc["Backlog préparation caractérisé"] = ckpi(pc["CARACTERISE"], pc["Total"])
+    # Base : CRÉÉ + Plan d'entretien != 0 (préventif)
+    # Anomalie = hors ATPD/ATMR/ATRS/ATMO/ATER (NON caracterise)
+    pat_crpr_kw = "ATPD|ATMR|ATRS|ATMO|ATER"
+    _df_prep_base = dfp[
+        (dfp["Statut OT"] == "CRÉÉ") &
+        (~dfp["is_correctif"])
+    ]
+    ano_map["Backlog préparation caractérisé"] = _df_prep_base[
+        ~_df_prep_base["Statut utilisateur"].str.contains(pat_crpr_kw, na=False)
+    ].groupby("Poste travail princ.")["Ordre"].count()
 
     # ── 17. BACKLOG PLAN CARACTERISE ─────────────────────────────────────
-    # Base = Statut LANC + Contient SOPL + Plan d'entretien != 0 (préventif)
-    # Caracterise = contient ATEI/ATAL/ATAS/AGAR/ATHS
-    pat_plan = '|'.join(ATPL_KW)
-    df_lancp = df[
-        (~df["is_correctif"]) &          # Plan d'entretien != 0
-        (df["Statut OT"] == "LANC") &
-        (df["Contient SOPL"] == 1)
-    ].copy()
-    df_lancp["_carac"] = df_lancp["Statut utilisateur"].str.contains(
-        pat_plan, na=False
-    ).map({True:"CARACTERISE",False:"NON CARACTERISE"})
-    plc = pd.pivot_table(
-        df_lancp, index="Poste travail princ.", columns="_carac",
-        values="Ordre", aggfunc="count", fill_value=0
-    ).reindex(posts, fill_value=0)
-    for c in ["CARACTERISE","NON CARACTERISE"]: plc[c] = plc.get(c, 0)
-    plc["Total"] = plc["CARACTERISE"] + plc["NON CARACTERISE"]
-    plc["Backlog planification caractérisé"] = ckpi(plc["CARACTERISE"], plc["Total"])
+    # Base : LANC + Contient SOPL + Plan d'entretien != 0 (préventif)
+    # Anomalie = hors ATEI/ATAL/ATAS/AGAR/ATHS (NON caracterise)
+    pat_atpl_kw = "ATEI|ATAL|ATAS|AGAR|ATHS"
+    _df_plan_base = dfp[
+        (~dfp["is_correctif"]) &
+        (dfp["Statut OT"] == "LANC") &
+        (dfp["Contient SOPL"] == 1)
+    ]
+    ano_map["Backlog planification caractérisé"] = _df_plan_base[
+        ~_df_plan_base["Statut utilisateur"].str.contains(pat_atpl_kw, na=False)
+    ].groupby("Poste travail princ.")["Ordre"].count()
 
     # ── 18. OT CONFIME ───────────────────────────────────────────────────
-    pv_conf = pd.pivot_table(
-        df[df["Statut OT"].isin(["CLOT","TCLO"])],
-        index="Poste travail princ.", columns="OT CONFIME",
-        values="Ordre", aggfunc="count", fill_value=0
-    ).reindex(posts, fill_value=0)
-    for c in ["OUI","NON"]: pv_conf[c] = pv_conf.get(c, 0)
-    pv_conf["Total"]      = pv_conf["OUI"] + pv_conf["NON"]
-    pv_conf["OT CONFIME"] = ckpi(pv_conf["OUI"], pv_conf["Total"])
-    res["ot_confime"]     = pv_conf
+    # Anomalie = CLOT+TCLO sans confirmation CONF
+    ano_map["OT CONFIME"] = dfp[
+        dfp["Statut OT"].isin(["CLOT","TCLO"]) &
+        (dfp["OT CONFIME"] == "NON")
+    ].groupby("Poste travail princ.")["Ordre"].count()
 
     # ── 19. OT_COR_EGAL ──────────────────────────────────────────────────
-    # Base : Plan==0 + CLOT/TCLO + CONF (OT correctifs clotures confirmes)
-    # KPI  : bud != reel / total  -> maximiser (bonne imputation des couts)
-    # Calcul DIRECT sur colonnes couts, independant de toute colonne texte
-    df_clot = df[
-        df["is_correctif"] &
-        df["Statut OT"].isin(["CLOT","TCLO"]) &
-        df["Statut système"].str.contains("CONF", na=False)
-    ].copy()
-    _bud_c  = df_clot["Total coûts budgétés"].fillna(0)
-    _reel_c = df_clot["Total coûts réels"].fillna(0)
-    # KPI = |bud - reel| >= 1 → conforme (OUI pour KPI)
-    df_clot["_egal"] = np.where((_bud_c - _reel_c).abs() >= 1, "OUI", "NON")
-    pv_cor = pd.pivot_table(
-        df_clot, index="Poste travail princ.", columns="_egal",
-        values="Ordre", aggfunc="count", fill_value=0
-    ).reindex(posts, fill_value=0)
-    for c in ["OUI","NON"]: pv_cor[c] = pv_cor.get(c, 0)
-    pv_cor["Total"]       = pv_cor["OUI"] + pv_cor["NON"]
-    pv_cor["OT_COR_EGAL"] = ckpi(pv_cor["OUI"], pv_cor["Total"])
-    res["ot_cor_egal"]    = pv_cor
+    # KPI  = budget == reel / total (EGAL = conforme, objectif = maximiser)
+    # Anomalie = budget DIFFERENT du reel (DIFF = pas conforme)
+    # OT_COR_EGAL = "EGAL" si bud==reel (conforme) → KPI monte
+    #             = "DIFF" si bud!=reel (anomalie) → KPI baisse
+    # Anomalie = Plan==0 + CLOT+TCLO + CONF + budget == reel
+    # Calcul direct sur colonnes couts (independant de la valeur OT_COR_EGAL)
+    _sub_cor = dfp[
+        dfp["is_correctif"] &
+        dfp["Statut OT"].isin(["CLOT","TCLO"]) &
+        dfp["Statut système"].str.contains("CONF", na=False)
+    ]
+    _bud  = _sub_cor["Total coûts budgétés"].fillna(0)
+    _reel = _sub_cor["Total coûts réels"].fillna(0)
+    # Anomalie = |bud - reel| < 1 (couts quasi identiques = pas d imputation reelle)
+    ano_map["OT_COR_EGAL"] = _sub_cor[(_bud - _reel).abs() < 1].groupby(
+        "Poste travail princ.")["Ordre"].count()
 
-    fiab_s  = pd.Series(100.0, index=posts)
-    avpan_s = pd.Series(100.0, index=posts)
+    return ano_map
 
-    res['ckdf'] = pd.DataFrame({
-        "TAUX_REALISATION_CORRECTIF/PT":     an["TAUX_REALISATION_CORRECTIF/PT"],
-        # Age Prep : <1m direct, 1-3m et >3m = 100-val
-        "OT préparation <1 mois":            kpis_prep["OT préparation <1 mois"],
-        "OT préparation >3 mois":            kpis_prep["OT préparation >3 mois"],
-        "OT préparation 1mois< <3mois":      kpis_prep["OT préparation 1mois< <3mois"],
-        # Age Plan
-        "OT planification <1 mois":          kpis_plan["OT planification <1 mois"],
-        "OT planification >3 mois":          kpis_plan["OT planification >3 mois"],
-        "OT planification 1mois< <3mois":    kpis_plan["OT planification 1mois< <3mois"],
-        # Age Exec
-        "OT exécution <1 mois":              kpis_exec["OT exécution <1 mois"],
-        "OT exécution >3 mois":              kpis_exec["OT exécution >3 mois"],
-        "OT exécution 1mois< <3mois":        kpis_exec["OT exécution 1mois< <3mois"],
-        "Performance Graissage":             g_df["Performance Graissage"],
-        "Performance Inspection":            ins_df["Performance Inspection"],
-        "Performance Systématiques":         sys_df["Performance Systématiques"],
-        "Taux d'approbation des Avis":       tca["Taux d'approbation des Avis"],
-        "OT LANC ESTIME":                    la["OT LANC ESTIME"],
-        "Backlog préparation caractérisé":   pc["Backlog préparation caractérisé"],
-        "Backlog planification caractérisé": plc["Backlog planification caractérisé"],
-        "OT CONFIME":                        res["ot_confime"]["OT CONFIME"],
-        "OT_COR_EGAL":                       res["ot_cor_egal"]["OT_COR_EGAL"],
-        "OT Fiabilité":                      fiab_s,
-        "Total Avis de Panne":               avpan_s,
-    })
 
-    # Stocker les pivots bruts pour les graphiques backlog
-    res['pv_prep'] = pv_prep
-    res['pv_plan'] = pv_plan
-    res['pv_exec'] = pv_exec
+def build_ano_rows(vp, ano_map, kpi_list, fixed_zero=None):
+    fixed_zero = fixed_zero or []
+    rows = []
+    for poste in vp:
+        r = {"Poste de travail": poste}
+        total = 0
+        for kpi in kpi_list:
+            cnt = 0 if kpi in fixed_zero else int(
+                ano_map.get(kpi, pd.Series()).get(poste, 0)
+            )
+            r[kpi] = cnt
+            total += cnt
+        r["Total Anomalies"] = total
+        rows.append(r)
+    tot = {"Poste de travail": "Total"}
+    grand = 0
+    for kpi in kpi_list:
+        s = sum(r[kpi] for r in rows)
+        tot[kpi] = s
+        grand += s
+    tot["Total Anomalies"] = grand
+    rows.append(tot)
+    return rows
 
-    return res
 
-# ─── NOTE POUR constants.py ──────────────────────────────────────────────────
-# Avec la nouvelle logique 100-val, mettre à jour dans constants.py :
-#
-# CIBLE = {
-#     ...
-#     "OT préparation <1 mois":       80,   # direct >= 80%
-#     "OT préparation 1mois< <3mois": 85,   # score = 100-15 = 85%
-#     "OT préparation >3 mois":       95,   # score = 100-5  = 95%
-#     "OT planification <1 mois":     80,
-#     "OT planification 1mois< <3mois": 85,
-#     "OT planification >3 mois":     95,
-#     "OT exécution <1 mois":         80,
-#     "OT exécution 1mois< <3mois":   85,
-#     "OT exécution >3 mois":         95,
-#     ...
-# }
-#
-# LOWER_BETTER doit être VIDE pour ces KPIs car
-# la logique 100-val les rend tous "plus haut = mieux"
-# ─────────────────────────────────────────────────────────────────────────────
+def build_anomaly_dfs(dfp, avf, now_ts):
+    filt_prep = (dfp["Statut OT"]=="CRÉÉ") & (dfp["Backlog preparation"]=="CARACTERISE")
+    filt_plan = (dfp["Statut OT"]=="LANC") & (dfp["Contient SOPL"]==0) & (dfp["Backlog planification"]=="CARACTERISE")
+    filt_exec = (dfp["Statut OT"]=="LANC") & (dfp["Contient SOPL"]==1)
+    filt_perf = (dfp["Contient SOPL"]==1) & (~dfp["Statut OT"].isin(["CLOT","TCLO"]))
+
+    return {
+        "TAUX_REALISATION_CORRECTIF/PT":     dfp[dfp["is_correctif"] & (dfp["Contient SOPL"]==1) & (~dfp["Statut OT"].isin(["CLOT","TCLO"]))].copy(),
+        "OT préparation <1 mois":            dfp[filt_prep & (dfp["ap"] == "<1 mois")].copy(),
+        "OT préparation >3 mois":            dfp[filt_prep & (dfp["ap"] == ">3 mois")].copy(),
+        "OT préparation 1mois< <3mois":      dfp[filt_prep & (dfp["ap"] == "1 mois < <3 mois")].copy(),
+        "OT planification <1 mois":          dfp[filt_plan & (dfp["alp"] == "<1 mois")].copy(),
+        "OT planification >3 mois":          dfp[filt_plan & (dfp["alp"] == ">3 mois")].copy(),
+        "OT planification 1mois< <3mois":    dfp[filt_plan & (dfp["alp"] == "1 mois < <3 mois")].copy(),
+        "OT exécution <1 mois":              dfp[filt_exec & (dfp["aex"] == "<1 mois")].copy(),
+        "OT exécution >3 mois":              dfp[filt_exec & (dfp["aex"] == ">3 mois")].copy(),
+        "OT exécution 1mois< <3mois":        dfp[filt_exec & (dfp["aex"] == "1 mois < <3 mois")].copy(),
+        "Performance Graissage":             dfp[filt_perf & (dfp["_tw_num"]==350)].copy(),
+        "Performance Inspection":            dfp[filt_perf & (dfp["_tw_num"].isin([290,300,310])) & (dfp["Date de début planifiée"]<=now_ts)].copy(),
+        "Performance Systématiques":         dfp[filt_perf & (dfp["_tw_num"]==360) & (dfp["Date de début planifiée"]<=now_ts)].copy(),
+        "Taux d'approbation des Avis":       avf[avf["Statut utilisateur"]=="APRQ"].copy(),  # Anomalie = APRQ seulement
+        "OT LANC ESTIME":                    dfp[dfp["is_correctif"] & (dfp["Statut OT"]=="LANC") & (dfp["Contient SOPL"]==0) & (dfp["OT LANC ESTIME"]=="NON")].copy(),
+        "Backlog préparation caractérisé":   dfp[(dfp["Statut OT"]=="CRÉÉ") & dfp["Statut utilisateur"].str.contains(r"\bCRPR\b",case=False,na=False) & (dfp["Contient SOPL"]==0) & ~dfp["Statut utilisateur"].str.contains("ATPD|ATMR|ATRS|ATMO|ATER",na=False)].copy(),
+        "Backlog planification caractérisé": dfp[dfp["is_correctif"] & (dfp["Statut OT"]=="LANC") & (dfp["Contient SOPL"]==0) & (dfp["Backlog planification"]=="NON CARACTERISE")].copy(),
+        "OT CONFIME":                        dfp[dfp["Statut OT"].isin(["CLOT","TCLO"]) & (dfp["OT CONFIME"]=="NON")].copy(),
+        "OT_COR_EGAL": dfp[
+            dfp["is_correctif"] &
+            dfp["Statut OT"].isin(["CLOT","TCLO"]) &
+            dfp["Statut système"].str.contains("CONF", na=False) &
+            ((dfp["Total coûts budgétés"].fillna(0) - dfp["Total coûts réels"].fillna(0)).abs() < 1)
+        ].copy(),
+    }
