@@ -177,8 +177,8 @@ def build_anomaly_dfs(dfp, avf, now_ts):
         "Performance Systématiques":         dfp[filt_perf & (dfp["_tw_num"]==360) & (dfp["Date de début planifiée"]<=now_ts)].copy(),
         "Taux d'approbation des Avis":       avf[avf["Statut utilisateur"]=="APRQ"].copy(),  # Anomalie = APRQ seulement
         "OT LANC ESTIME":                    dfp[dfp["is_correctif"] & (dfp["Statut OT"]=="LANC") & (dfp["Contient SOPL"]==0) & (dfp["OT LANC ESTIME"]=="NON")].copy(),
-        "Backlog préparation caractérisé":   dfp[(dfp["Statut OT"]=="CRÉÉ") & dfp["Statut utilisateur"].str.contains(r"\bCRPR\b",case=False,na=False) & (dfp["Contient SOPL"]==0) & ~dfp["Statut utilisateur"].str.contains("ATPD|ATMR|ATRS|ATMO|ATER",na=False)].copy(),
-        "Backlog planification caractérisé": dfp[dfp["is_correctif"] & (dfp["Statut OT"]=="LANC") & (dfp["Contient SOPL"]==0) & (dfp["Backlog planification"]=="NON CARACTERISE")].copy(),
+        "Backlog préparation caractérisé":   dfp[(dfp["Statut OT"]=="CRÉÉ") & (~dfp["is_correctif"]) & ~dfp["Statut utilisateur"].str.contains("ATPD|ATMR|ATRS|ATMO|ATER",na=False)].copy(),
+        "Backlog planification caractérisé": dfp[(~dfp["is_correctif"]) & (dfp["Statut OT"]=="LANC") & (dfp["Contient SOPL"]==1) & ~dfp["Statut utilisateur"].str.contains("ATEI|ATAL|ATAS|AGAR|ATHS",na=False)].copy(),
         "OT CONFIME":                        dfp[dfp["Statut OT"].isin(["CLOT","TCLO"]) & (dfp["OT CONFIME"]=="NON")].copy(),
         "OT_COR_EGAL": dfp[
             dfp["is_correctif"] &
