@@ -19,7 +19,7 @@ try:
         LOWER_BETTER, CONSIGNES_HSE,
     )
     from core.prepare_data import prepare_data, get_date_from_file
-    from core.calcul_kpi import calc_kpis, gscore, is_lb
+    from core.calcul_kpi import calcul_kpi, gscore, is_lb
     from core.anomalies import build_ano_map, build_ano_rows, build_anomaly_dfs
     from core.historique import (
         load_historical_kpis, calculate_variations,
