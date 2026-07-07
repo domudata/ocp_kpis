@@ -143,7 +143,7 @@ def build_anomaly_dfs(dfp, avf, now_ts):
     # Calcul sécurisé pour OT_COR_EGAL
     _bud_c = pd.to_numeric(dfp["Total coûts budgétés"], errors="coerce").fillna(0.0)
     _reel_c = pd.to_numeric(dfp["Total coûts réels"], errors="coerce").fillna(0.0)
-    _mask_anomalie = (_bud_c - _reel_c).abs() >= 1
+    _mask_egal = _bud_c.eq(_reel_c)
 
     return {
         "TAUX_REALISATION_CORRECTIF/PT":     dfp[dfp["is_correctif"] & (dfp["Contient SOPL"] == 1) & (~dfp["Statut OT"].isin(["CLOT", "TCLO"]))].copy(),
