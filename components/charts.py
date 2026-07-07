@@ -70,11 +70,13 @@ def show_simple_pie(piv_df: pd.DataFrame, title: str, keep_non_carac: bool = Fal
             textfont=dict(size=13, family='Inter, sans-serif'),
         )
         fig.update_layout(
-            title=dict(text=title, x=0.5, xanchor='center', font=dict(size=13), y=0.97),
-            height=440, showlegend=True,
-            legend=dict(orientation="h", yanchor="bottom", y=-0.15, x=0.5, xanchor="center"),
-            margin=dict(t=55, b=80, l=40, r=40),
+            title=dict(text=title, x=0.5, xanchor='center', font=dict(size=14), y=0.98, yanchor='top'),
+            height=450, showlegend=True,
+            legend=dict(orientation="h", yanchor="bottom", y=-0.12, x=0.5, xanchor="center"),
+            margin=dict(t=60, b=70, l=40, r=40),
         )
+        # Reduire le domaine du pie pour laisser la place au titre en haut
+        fig.update_traces(domain=dict(y=[0.0, 0.85]))
         st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
         return
 
@@ -86,9 +88,15 @@ def show_simple_pie(piv_df: pd.DataFrame, title: str, keep_non_carac: bool = Fal
         specs=[[{"type": "domain"}, {"type": "domain"}]],
         column_widths=[0.60, 0.40],
         subplot_titles=("Répartition principale", f"Détail « Autres » ({small.sum():.0f} OT)"),
+        vertical_spacing=0.0,
     )
+    # Abaisser les sous-titres pour les separer du titre principal
+    for ann in fig.layout.annotations:
+        ann.y = 0.90
+        ann.font.size = 11
+        ann.font.color = "#64748B"
 
-    # Camembert principal ("Autres" en gris)
+    # Camembert principal ("Autres" en gris) — domaine reduit vers le bas
     main_colors = _colors_for(big.index) + ["#94a3b8"]
     fig.add_trace(go.Pie(
         labels=main_counts.index, values=main_counts.values,
@@ -97,6 +105,7 @@ def show_simple_pie(piv_df: pd.DataFrame, title: str, keep_non_carac: bool = Fal
         textposition="outside",
         marker=dict(colors=main_colors, line=dict(color="white", width=2)),
         legendgroup="main",
+        domain=dict(y=[0.0, 0.80]),
     ), 1, 1)
 
     # Camembert secondaire : detail des secteurs minces
@@ -108,6 +117,7 @@ def show_simple_pie(piv_df: pd.DataFrame, title: str, keep_non_carac: bool = Fal
         textposition="outside",
         marker=dict(colors=small_colors, line=dict(color="white", width=2)),
         legendgroup="detail",
+        domain=dict(y=[0.0, 0.80]),
     ), 1, 2)
 
     fig.update_traces(
@@ -115,10 +125,10 @@ def show_simple_pie(piv_df: pd.DataFrame, title: str, keep_non_carac: bool = Fal
         textfont=dict(size=12, family='Inter, sans-serif'),
     )
     fig.update_layout(
-        title=dict(text=title, x=0.5, xanchor='center', font=dict(size=13), y=0.97),
-        height=460, showlegend=True,
-        legend=dict(orientation="h", yanchor="bottom", y=-0.18, x=0.5, xanchor="center"),
-        margin=dict(t=65, b=90, l=30, r=30),
+        title=dict(text=title, x=0.5, xanchor='center', font=dict(size=14), y=0.99, yanchor='top'),
+        height=470, showlegend=True,
+        legend=dict(orientation="h", yanchor="bottom", y=-0.12, x=0.5, xanchor="center"),
+        margin=dict(t=75, b=70, l=30, r=30),
     )
     st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
 
@@ -143,15 +153,21 @@ def show_pie_pair(piv_df: pd.DataFrame, title_prefix: str) -> None:
             f"{title_prefix} — Réalisés vs Non Réalisés",
         ),
     )
+    # Abaisser les sous-titres pour bien les separer des camemberts
+    for ann in fig.layout.annotations:
+        ann.y = 0.93
+        ann.font.size = 12
+        ann.font.color = "#334155"
 
     # Style unifie avec show_simple_pie : hole 0.4, labels exterieurs,
-    # bord blanc fin, hover normalise
+    # bord blanc fin, hover normalise — domaine reduit vers le bas
     fig.add_trace(go.Pie(
         labels=global_counts.index, values=global_counts.values,
         hole=0.4, sort=False,
         texttemplate="%{label}<br>%{percent:.1%} (%{value})",
         textposition="outside",
         marker=dict(colors=colors, line=dict(color="white", width=2)),
+        domain=dict(y=[0.0, 0.82]),
     ), 1, 1)
 
     pie2 = pd.Series(
@@ -164,6 +180,7 @@ def show_pie_pair(piv_df: pd.DataFrame, title_prefix: str) -> None:
         texttemplate="%{label}<br>%{percent:.1%} (%{value})",
         textposition="outside",
         marker=dict(colors=["#10b981", "#ef4444"], line=dict(color="white", width=2)),
+        domain=dict(y=[0.0, 0.82]),
     ), 1, 2)
 
     fig.update_traces(
@@ -171,9 +188,9 @@ def show_pie_pair(piv_df: pd.DataFrame, title_prefix: str) -> None:
         textfont=dict(size=12, family='Inter, sans-serif'),
     )
     fig.update_layout(
-        height=480, showlegend=True,
-        legend=dict(orientation="h", yanchor="bottom", y=-0.15, x=0.5, xanchor="center"),
-        margin=dict(t=55, b=80, l=40, r=40),
+        height=470, showlegend=True,
+        legend=dict(orientation="h", yanchor="bottom", y=-0.10, x=0.5, xanchor="center"),
+        margin=dict(t=45, b=70, l=40, r=40),
     )
     st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
 
@@ -188,17 +205,53 @@ S1_DEFAULT, S2_DEFAULT = 70, 90
 C_LOW, C_MID, C_HIGH = "#ef4444", "#f59e0b", "#10b981"
 
 
+def _bar_color_for(label, value, cible_map=None, lower_set=None, s1=S1_DEFAULT, s2=S2_DEFAULT):
+    """
+    Couleur d'une barre cohérente avec le coloriage des cellules du tableau :
+    - Si `label` est un KPI connu (present dans cible_map) : utilise sa VRAIE
+      cible et son sens (LOWER_BETTER ou non), comme dans components/tables.py.
+    - Sinon (ex: nom de poste, score) : utilise les seuils generiques s1/s2.
+    """
+    try:
+        v = float(value)
+    except (ValueError, TypeError):
+        return C_LOW
+
+    if cible_map and label in cible_map:
+        target = cible_map[label]
+        is_lower = bool(lower_set) and label in lower_set
+        if is_lower:
+            # Plus bas = mieux (ex: >3 mois cible <=5%, 1-3 mois cible <=15%)
+            return C_HIGH if v <= target else C_LOW
+        else:
+            # Plus haut = mieux (ex: <1 mois cible >=80%)
+            if v >= target:
+                return C_HIGH
+            return C_MID if v >= target * 0.9 else C_LOW
+
+    # Pas de cible connue (score global, poste...) → seuils generiques
+    return C_HIGH if v >= s2 else (C_MID if v >= s1 else C_LOW)
+
+
 def show_hbar_thresholds(labels, values, title, s1=S1_DEFAULT, s2=S2_DEFAULT,
-                          suffix="%") -> None:
+                          suffix="%", cible_map=None, lower_set=None) -> None:
     """
     Barres horizontales par element avec 2 lignes de seuil pointillees
     (s1 orange, s2 vert) — meme presentation que le rapport SAP PM OCP.
+
+    Si `cible_map` (ex: core.constants.CIBLE) et `lower_set` (ex: LOWER_BETTER)
+    sont fournis, la couleur de CHAQUE barre suit sa propre cible (coherent
+    avec le coloriage des cellules du tableau KPI), au lieu des seuils
+    generiques s1/s2 appliques uniformement.
     """
     if len(labels) == 0:
         st.markdown('<div class="es">Aucune donnee</div>', unsafe_allow_html=True)
         return
 
-    colors = [C_HIGH if v >= s2 else (C_MID if v >= s1 else C_LOW) for v in values]
+    colors = [
+        _bar_color_for(lbl, v, cible_map, lower_set, s1, s2)
+        for lbl, v in zip(labels, values)
+    ]
 
     fig = go.Figure(go.Bar(
         x=values, y=labels, orientation='h',
@@ -209,7 +262,7 @@ def show_hbar_thresholds(labels, values, title, s1=S1_DEFAULT, s2=S2_DEFAULT,
         hovertemplate="<b>%{y}</b><br>%{x:.1f}" + suffix + "<extra></extra>",
     ))
 
-    # Lignes de seuil pointillees + marqueurs
+    # Lignes de seuil pointillees + marqueurs (reperes visuels génériques)
     fig.add_vline(x=s1, line_dash="dash", line_color=C_MID, line_width=2)
     fig.add_vline(x=s2, line_dash="dash", line_color=C_HIGH, line_width=2)
     fig.add_annotation(x=s1, y=1.04, yref="paper", text=f"▼ {s1}{suffix}",
