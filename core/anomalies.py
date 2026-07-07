@@ -87,13 +87,13 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
     ].groupby("Poste travail princ.")["Ordre"].count()
 
     # ── 17. BACKLOG PLAN CARACTERISE ─────────────────────────────────────
-    # Base : LANC + Contient SOPL + Plan d'entretien != 0 (préventif)
+    # Base : LANC + hors SOPL + Plan d'entretien != 0 (préventif)
     # Anomalie = hors ATEI/ATAL/ATAS/AGAR/ATHS (NON caracterise)
     pat_atpl_kw = "ATEI|ATAL|ATAS|AGAR|ATHS"
     _df_plan_base = dfp[
         (~dfp["is_correctif"]) &
         (dfp["Statut OT"] == "LANC") &
-        (dfp["Contient SOPL"] == 1)
+        (dfp["Contient SOPL"] == 0)
     ]
     ano_map["Backlog planification caractérisé"] = _df_plan_base[
         ~_df_plan_base["Statut utilisateur"].str.contains(pat_atpl_kw, na=False)
@@ -169,7 +169,7 @@ def build_anomaly_dfs(dfp, avf, now_ts):
         "Taux d'approbation des Avis":       avf[avf["Statut utilisateur"]=="APRQ"].copy(),
         "OT LANC ESTIME":                    dfp[dfp["is_correctif"] & (dfp["Statut OT"]=="LANC") & (dfp["Contient SOPL"]==0) & (dfp["OT LANC ESTIME"]=="NON")].copy(),
         "Backlog préparation caractérisé":   dfp[(dfp["Statut OT"]=="CRÉÉ") & (~dfp["is_correctif"]) & ~dfp["Statut utilisateur"].str.contains("ATPD|ATMR|ATRS|ATMO|ATER",na=False)].copy(),
-        "Backlog planification caractérisé": dfp[(~dfp["is_correctif"]) & (dfp["Statut OT"]=="LANC") & (dfp["Contient SOPL"]==1) & ~dfp["Statut utilisateur"].str.contains("ATEI|ATAL|ATAS|AGAR|ATHS",na=False)].copy(),
+        "Backlog planification caractérisé": dfp[(~dfp["is_correctif"]) & (dfp["Statut OT"]=="LANC") & (dfp["Contient SOPL"]==0) & ~dfp["Statut utilisateur"].str.contains("ATEI|ATAL|ATAS|AGAR|ATHS",na=False)].copy(),
         "OT CONFIME":                        dfp[dfp["Statut OT"].isin(["CLOT","TCLO"]) & (dfp["OT CONFIME"]=="NON")].copy(),
         "OT_COR_EGAL": dfp[
             dfp["is_correctif"] &
