@@ -278,8 +278,8 @@ def calc_kpis(df_i, av_i, now_ts, posts):
         df["Statut OT"].isin(["CLOT","TCLO"]) &
         df["Statut système"].str.contains("CONF", na=False)
     ].copy()
-    _bud_c = pd.to_numeric(df_clot["Total coûts budgétés"], errors="coerce")
-    _reel_c = pd.to_numeric(df_clot["Total coûts réels"], errors="coerce")
+    _bud_c = pd.to_numeric(df_clot["Total coûts budgétés"], errors="coerce").astype(float)
+    _reel_c = pd.to_numeric(df_clot["Total coûts réels"], errors="coerce").astype(float)
     # KPI = |bud - reel| >= 1 → conforme (OUI pour KPI)
     df_clot["_egal"] = np.where(_bud_c == _reel_c, "OUI", "NON")
     pv_cor = pd.pivot_table(
