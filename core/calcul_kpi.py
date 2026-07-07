@@ -268,28 +268,49 @@ def calc_kpis(df_i, av_i, now_ts, posts):
     pv_conf["Total"]      = pv_conf["OUI"] + pv_conf["NON"]
     pv_conf["OT CONFIME"] = ckpi(pv_conf["OUI"], pv_conf["Total"])
     res["ot_confime"]     = pv_conf
+   # ── 19. OT_COR_EGAL ──────────────────────────────────────────────────
+# Base : OT correctifs clôturés (CLOT/TCLO) et confirmés (CONF)
+# KPI : (Budget = Réel) / Total -> maximiser (bonne imputation des coûts)
 
-    # ── 19. OT_COR_EGAL ──────────────────────────────────────────────────
-    # Base : Plan==0 + CLOT/TCLO + CONF (OT correctifs clotures confirmes)
-    # KPI  : bud != reel / total  -> maximiser (bonne imputation des couts)
-    # Calcul DIRECT sur colonnes couts, independant de toute colonne texte
-    df_clot = df[
-        df["is_correctif"] &
-        df["Statut OT"].isin(["CLOT","TCLO"]) &
-        df["Statut système"].str.contains("CONF", na=False)
-    ].copy()
-    _bud_c = pd.to_numeric(df_clot["Total coûts budgétés"], errors="coerce").astype(float)
-    _reel_c = pd.to_numeric(df_clot["Total coûts réels"], errors="coerce").astype(float)
-    # KPI = |bud - reel| >= 1 → conforme (OUI pour KPI)
-    df_clot["_egal"] = np.where(_bud_c == _reel_c, "OUI", "NON")
-    pv_cor = pd.pivot_table(
-        df_clot, index="Poste travail princ.", columns="_egal",
-        values="Ordre", aggfunc="count", fill_value=0
-    ).reindex(posts, fill_value=0)
-    for c in ["OUI","NON"]: pv_cor[c] = pv_cor.get(c, 0)
-    pv_cor["Total"]       = pv_cor["OUI"] + pv_cor["NON"]
-    pv_cor["OT_COR_EGAL"] = ckpi(pv_cor["OUI"], pv_cor["Total"])
-    res["ot_cor_egal"]    = pv_cor
+df_clot = df[
+    df["is_correctif"] &
+    df["Statut OT"].isin(["CLOT", "TCLO"]) &
+    df["Statut système"].str.contains("CONF", na=False)
+].copy()
+
+# Conversion des coûts en numérique
+_bud_c = pd.to_numeric(df_clot["Total coûts budgétés"], errors="coerce")
+_reel_c = pd.to_numeric(df_clot["Total coûts réels"], errors="coerce")
+
+# OUI si Budget = Réel (tolérance de 0,01)
+df_clot["_egal"] = np.where(
+    np.isclose(_bud_c, _reel_c, atol=0.01),
+    "OUI",
+    "NON"
+)
+
+pv_cor = (
+    pd.pivot_table(
+        df_clot,
+        index="Poste travail princ.",
+        columns="_egal",
+        values="Ordre",
+        aggfunc="count",
+        fill_value=0
+    )
+    .reindex(posts, fill_value=0)
+)
+
+for c in ["OUI", "NON"]:
+    if c not in pv_cor.columns:
+        pv_cor[c] = 0
+
+pv_cor["Total"] = pv_cor["OUI"] + pv_cor["NON"]
+
+# % des OT dont le coût budgété est égal au coût réel
+pv_cor["OT_COR_EGAL"] = ckpi(pv_cor["OUI"], pv_cor["Total"])
+
+res["ot_cor_egal"] = pv_cor
 
     fiab_s  = pd.Series(100.0, index=posts)
     avpan_s = pd.Series(100.0, index=posts)
