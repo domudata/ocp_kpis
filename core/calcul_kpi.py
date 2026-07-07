@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 import pandas as pd
-import numpy as np  # Indispensable pour np.abs
+import numpy as np  # Ajouté pour utiliser np.abs
 from core.constants import QK, PK
 
 TW_PREV = [350, 290, 300, 310, 360]
@@ -17,6 +17,7 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
     pat_atpl_kw = '|'.join(ATPL_KW)
 
     # ── 1. TAUX REALISATION CORRECTIF ───────────────────────────────────
+    # Anomalie = OT correctifs (Plan==0+SOPL) non clôturés
     ano_map["TAUX_REALISATION_CORRECTIF/PT"] = dfp[
         dfp["is_correctif"] &
         (dfp["Contient SOPL"] == 1) &
@@ -24,6 +25,7 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
     ].groupby("Poste travail princ.")["Ordre"].count()
 
     # ── 2/3/4. AGE PREP ─────────────────────────────────────────────────
+    # Base : CRÉÉ + Backlog prep NON CARAC
     filt_prep = (
         (dfp["Statut OT"] == "CRÉÉ") &
         (dfp["Backlog preparation"] == "NON CARACTERISE")
@@ -33,6 +35,7 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
     ano_map["OT préparation >3 mois"]       = dfp[filt_prep & (dfp["ap"] == ">3 mois")].groupby("Poste travail princ.")["Ordre"].count()
 
     # ── 5/6/7. AGE PLAN ─────────────────────────────────────────────────
+    # Base : LANC + hors SOPL + Backlog plan NON CARAC
     filt_plan = (
         (dfp["Statut OT"] == "LANC") &
         (dfp["Contient SOPL"] == 0) &
@@ -43,6 +46,7 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
     ano_map["OT planification >3 mois"]       = dfp[filt_plan & (dfp["alp"] == ">3 mois")].groupby("Poste travail princ.")["Ordre"].count()
 
     # ── 8/9/10. AGE EXEC ────────────────────────────────────────────────
+    # Base : LANC + SOPL (sans filtre TW preventifs)
     filt_exec = (
         (dfp["Statut OT"] == "LANC") &
         (dfp["Contient SOPL"] == 1)
@@ -52,6 +56,7 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
     ano_map["OT exécution >3 mois"]          = dfp[filt_exec & (dfp["aex"] == ">3 mois")].groupby("Poste travail princ.")["Ordre"].count()
 
     # ── 11/12/13. PERFORMANCE PREVENTIF ─────────────────────────────────
+    # Anomalie = SOPL non clôturé pour chaque TW
     filt_perf = (dfp["Contient SOPL"] == 1) & (~dfp["Statut OT"].isin(["CLOT","TCLO"]))
 
     ano_map["Performance Graissage"]     = dfp[filt_perf & (dfp["_tw_num"]==350)].groupby("Poste travail princ.")["Ordre"].count()
@@ -59,12 +64,14 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
     ano_map["Performance Systématiques"] = dfp[filt_perf & (dfp["_tw_num"]==360) & (dfp["Date de début planifiée"]<=now_ts)].groupby("Poste travail princ.")["Ordre"].count()
 
     # ── 14. TAUX APPROBATION AVIS ────────────────────────────────────────
+    # Anomalie = avis APRQ uniquement (en attente d approbation)
     ano_map["Taux d'approbation des Avis"] = (
         avf[avf["Statut utilisateur"] == "APRQ"]
         .groupby("Poste travail princ.")["Avis"].count()
     )
 
     # ── 15. OT LANC ESTIME ───────────────────────────────────────────────
+    # Anomalie = Plan==0 + LANC + hors SOPL + charge estimee == 0
     ano_map["OT LANC ESTIME"] = dfp[
         dfp["is_correctif"] &
         (dfp["Statut OT"] == "LANC") &
@@ -73,6 +80,8 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
     ].groupby("Poste travail princ.")["Ordre"].count()
 
     # ── 16. BACKLOG PREP CARACTERISE ─────────────────────────────────────
+    # Base : CRÉÉ + Plan d'entretien != 0 (préventif)
+    # Anomalie = hors ATPD/ATMR/ATRS/ATMO/ATER (NON caracterise)
     _df_prep_base = dfp[
         (dfp["Statut OT"] == "CRÉÉ") &
         (~dfp["is_correctif"])
@@ -82,6 +91,8 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
     ].groupby("Poste travail princ.")["Ordre"].count()
 
     # ── 17. BACKLOG PLAN CARACTERISE ─────────────────────────────────────
+    # Base : LANC + hors SOPL + Plan d'entretien != 0 (préventif)
+    # Anomalie = hors ATEI/ATAL/ATAS/AGAR/ATHS (NON caracterise)
     _df_plan_base = dfp[
         (~dfp["is_correctif"]) &
         (dfp["Statut OT"] == "LANC") &
@@ -92,25 +103,26 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
     ].groupby("Poste travail princ.")["Ordre"].count()
 
     # ── 18. OT CONFIME ───────────────────────────────────────────────────
+    # Anomalie = CLOT+TCLO sans confirmation CONF
     ano_map["OT CONFIME"] = dfp[
         dfp["Statut OT"].isin(["CLOT","TCLO"]) &
         (dfp["OT CONFIME"] == "NON")
     ].groupby("Poste travail princ.")["Ordre"].count()
 
     # ── 19. OT_COR_EGAL ──────────────────────────────────────────────────
-    # Anomalie = Plan==0 + CLOT+TCLO + CONF + |bud-reel| < 1 (quasi identiques)
+    # Anomalie = Plan==0 + CLOT+TCLO + CONF + |bud-reel| < 1 (quasi identiques ou manquants)
     _sub_cor = dfp[
         dfp["is_correctif"] &
         dfp["Statut OT"].isin(["CLOT","TCLO"]) &
         dfp["Statut système"].str.contains("CONF", na=False)
     ]
-    
-    # CONVERSION EXPLICITE EN FLOAT (essentiel pour les uls mathématiques)
+    # ALIGNEMENT AVEC LE CODE KPI : utilisation de pd.to_numeric et np.abs
     _bud_c  = pd.to_numeric(_sub_cor["Total coûts budgétés"], errors="coerce")
     _reel_c = pd.to_numeric(_sub_cor["Total coûts réels"], errors="coerce")
     
-    # Logique inverse du KPI : KPI "Bon" si >= 1, donc Anomalie si < 1
-    # Note: Les NaN (données manquantes) seront logiquement inclus dans les anomalies
+    # Si KPI "Bon" est (abs >= 1), alors l'Anomalie est l'inverse : < 1
+    # Note: np.abs(NaN - X) < 1 donne False, mais ~(NaN >= 1) donne True. 
+    # Pour être sûr de choper les NaN comme anomalies (données manquantes = suspect), on fait :
     _is_anomaly = ~(_bud_c.sub(_reel_c).abs() >= 1)
     
     ano_map["OT_COR_EGAL"] = _sub_cor[_is_anomaly].groupby(
@@ -150,20 +162,17 @@ def build_anomaly_dfs(dfp, avf, now_ts):
     filt_exec = (dfp["Statut OT"]=="LANC") & (dfp["Contient SOPL"]==1)
     filt_perf = (dfp["Contient SOPL"]==1) & (~dfp["Statut OT"].isin(["CLOT","TCLO"]))
 
-    # ul spécifique pour OT_COR_EGAL avec CONVERSION EN FLOAT
+    # Calcul spécifique pour OT_COR_EGAL en dehors du dictionnaire pour rester lisible
     _df_cor_base = dfp[
         dfp["is_correctif"] &
         dfp["Statut OT"].isin(["CLOT","TCLO"]) &
         dfp["Statut système"].str.contains("CONF", na=False)
     ].copy()
-    
-    # CONVERSION EXPLICITE EN FLOAT AVANT LE UL DE L'ECART
     _bud_c  = pd.to_numeric(_df_cor_base["Total coûts budgétés"], errors="coerce")
     _reel_c = pd.to_numeric(_df_cor_base["Total coûts réels"], errors="coerce")
-    _is_anomaly = ~(_bud_c.sub(_reel_c).abs() >= 1)
-    _ano_cor_egal = _df_cor_base[_is_anomaly].copy()
+    _ano_cor_egal = _df_cor_base[~(_bud_c.sub(_reel_c).abs() >= 1)].copy()
 
-    # Utilisation des constantes pour les mots-clés
+    # Utilisation des constantes pour les motifs
     pat_crpr_kw = '|'.join(CRPR_KW)
     pat_atpl_kw = '|'.join(ATPL_KW)
 
@@ -186,5 +195,5 @@ def build_anomaly_dfs(dfp, avf, now_ts):
         "Backlog préparation caractérisé":   dfp[(dfp["Statut OT"]=="CRÉÉ") & (~dfp["is_correctif"]) & ~dfp["Statut utilisateur"].str.contains(pat_crpr_kw, na=False)].copy(),
         "Backlog planification caractérisé": dfp[(~dfp["is_correctif"]) & (dfp["Statut OT"]=="LANC") & (dfp["Contient SOPL"]==0) & ~dfp["Statut utilisateur"].str.contains(pat_atpl_kw, na=False)].copy(),
         "OT CONFIME":                        dfp[dfp["Statut OT"].isin(["CLOT","TCLO"]) & (dfp["OT CONFIME"]=="NON")].copy(),
-        "OT_COR_EGAL":                       _ano_cor_egal,  # Utilisation de la dataframe filtrée avec les floats
+        "OT_COR_EGAL":                       _ano_cor_egal,  # Utilisation de la dataframe calculée proprement ci-dessus
     }
