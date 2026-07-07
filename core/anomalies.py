@@ -20,21 +20,21 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
     ].groupby("Poste travail princ.")["Ordre"].count()
 
     # ── 2/3/4. AGE PREP ─────────────────────────────────────────────────
-    # Base : CRÉÉ + CRPR + Backlog prep NON CARAC + Date planif ≤ aujourd'hui
+    # Base : CRÉÉ + Backlog prep NON CARAC
     filt_prep = (
         (dfp["Statut OT"] == "CRÉÉ") &
-        (dfp["Backlog preparation"] == "CARACTERISE")
+        (dfp["Backlog preparation"] == "NON CARACTERISE")
     )
     ano_map["OT préparation <1 mois"]       = dfp[filt_prep & (dfp["ap"] == "<1 mois")].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["OT préparation 1mois< <3mois"] = dfp[filt_prep & (dfp["ap"] == "1 mois < <3 mois")].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["OT préparation >3 mois"]       = dfp[filt_prep & (dfp["ap"] == ">3 mois")].groupby("Poste travail princ.")["Ordre"].count()
 
     # ── 5/6/7. AGE PLAN ─────────────────────────────────────────────────
-    # Base : LANC + hors SOPL + Backlog plan CARACTERISE
+    # Base : LANC + hors SOPL + Backlog plan NON CARAC
     filt_plan = (
         (dfp["Statut OT"] == "LANC") &
         (dfp["Contient SOPL"] == 0) &
-        (dfp["Backlog planification"] == "CARACTERISE")
+        (dfp["Backlog planification"] == "NON CARACTERISE")
     )
     ano_map["OT planification <1 mois"]      = dfp[filt_plan & (dfp["alp"] == "<1 mois")].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["OT planification 1mois< <3mois"] = dfp[filt_plan & (dfp["alp"] == "1 mois < <3 mois")].groupby("Poste travail princ.")["Ordre"].count()
@@ -147,8 +147,8 @@ def build_ano_rows(vp, ano_map, kpi_list, fixed_zero=None):
 
 
 def build_anomaly_dfs(dfp, avf, now_ts):
-    filt_prep = (dfp["Statut OT"]=="CRÉÉ") & (dfp["Backlog preparation"]=="CARACTERISE")
-    filt_plan = (dfp["Statut OT"]=="LANC") & (dfp["Contient SOPL"]==0) & (dfp["Backlog planification"]=="CARACTERISE")
+    filt_prep = (dfp["Statut OT"]=="CRÉÉ") & (dfp["Backlog preparation"]=="NON CARACTERISE")
+    filt_plan = (dfp["Statut OT"]=="LANC") & (dfp["Contient SOPL"]==0) & (dfp["Backlog planification"]=="NON CARACTERISE")
     filt_exec = (dfp["Statut OT"]=="LANC") & (dfp["Contient SOPL"]==1)
     filt_perf = (dfp["Contient SOPL"]==1) & (~dfp["Statut OT"].isin(["CLOT","TCLO"]))
 
