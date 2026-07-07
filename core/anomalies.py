@@ -27,7 +27,7 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
         (dfp["Backlog preparation"] == "NON CARACTERISE") &
         (dfp["Date de début planifiée"] <= now_ts)
     )
-    ano_map["OT préparation <1 mois"]       = dfp[filt_prep & (dfp["ap"] != "<1 mois")].groupby("Poste travail princ.")["Ordre"].count()
+    ano_map["OT préparation <1 mois"]       = dfp[filt_prep & (dfp["ap"] == "<1 mois")].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["OT préparation 1mois< <3mois"] = dfp[filt_prep & (dfp["ap"] == "1 mois < <3 mois")].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["OT préparation >3 mois"]       = dfp[filt_prep & (dfp["ap"] == ">3 mois")].groupby("Poste travail princ.")["Ordre"].count()
 
@@ -39,7 +39,7 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
         (dfp["Backlog planification"] == "NON CARACTERISE") &
         (dfp["Date de début planifiée"] <= now_ts)
     )
-    ano_map["OT planification <1 mois"]      = dfp[filt_plan & (dfp["alp"] != "<1 mois")].groupby("Poste travail princ.")["Ordre"].count()
+    ano_map["OT planification <1 mois"]      = dfp[filt_plan & (dfp["alp"] == "<1 mois")].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["OT planification 1mois< <3mois"] = dfp[filt_plan & (dfp["alp"] == "1 mois < <3 mois")].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["OT planification >3 mois"]       = dfp[filt_plan & (dfp["alp"] == ">3 mois")].groupby("Poste travail princ.")["Ordre"].count()
 
@@ -49,7 +49,7 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
         (dfp["Statut OT"] == "LANC") &
         (dfp["Contient SOPL"] == 1)
     )
-    ano_map["OT exécution <1 mois"]          = dfp[filt_exec & (dfp["aex"] != "<1 mois")].groupby("Poste travail princ.")["Ordre"].count()
+    ano_map["OT exécution <1 mois"]          = dfp[filt_exec & (dfp["aex"] == "<1 mois")].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["OT exécution 1mois< <3mois"]    = dfp[filt_exec & (dfp["aex"] == "1 mois < <3 mois")].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["OT exécution >3 mois"]          = dfp[filt_exec & (dfp["aex"] == ">3 mois")].groupby("Poste travail princ.")["Ordre"].count()
 
@@ -163,13 +163,13 @@ def build_anomaly_dfs(dfp, avf, now_ts):
 
     return {
         "TAUX_REALISATION_CORRECTIF/PT":     dfp[dfp["is_correctif"] & (dfp["Contient SOPL"]==1) & (~dfp["Statut OT"].isin(["CLOT","TCLO"]))].copy(),
-        "OT préparation <1 mois":            dfp[filt_prep & (dfp["ap"] != "<1 mois")].copy(),
+        "OT préparation <1 mois":            dfp[filt_prep & (dfp["ap"] == "<1 mois")].copy(),
         "OT préparation >3 mois":            dfp[filt_prep & (dfp["ap"] == ">3 mois")].copy(),
         "OT préparation 1mois< <3mois":      dfp[filt_prep & (dfp["ap"] == "1 mois < <3 mois")].copy(),
-        "OT planification <1 mois":          dfp[filt_plan & (dfp["alp"] != "<1 mois")].copy(),
+        "OT planification <1 mois":          dfp[filt_plan & (dfp["alp"] == "<1 mois")].copy(),
         "OT planification >3 mois":          dfp[filt_plan & (dfp["alp"] == ">3 mois")].copy(),
         "OT planification 1mois< <3mois":    dfp[filt_plan & (dfp["alp"] == "1 mois < <3 mois")].copy(),
-        "OT exécution <1 mois":              dfp[filt_exec & (dfp["aex"] != "<1 mois")].copy(),
+        "OT exécution <1 mois":              dfp[filt_exec & (dfp["aex"] == "<1 mois")].copy(),
         "OT exécution >3 mois":              dfp[filt_exec & (dfp["aex"] == ">3 mois")].copy(),
         "OT exécution 1mois< <3mois":        dfp[filt_exec & (dfp["aex"] == "1 mois < <3 mois")].copy(),
         "Performance Graissage":             dfp[filt_perf & (dfp["_tw_num"]==350)].copy(),
