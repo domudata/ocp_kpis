@@ -101,7 +101,7 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
 
     _bud_c = pd.to_numeric(_sub_cor["Total coûts budgétés"], errors="coerce").fillna(0.0)
     _reel_c = pd.to_numeric(_sub_cor["Total coûts réels"], errors="coerce").fillna(0.0)
-    _mask_egal = (_bud_c - _reel_c).abs() < 1
+    _mask_egal = _bud_c.eq(_reel_c)
 
     ano_map["OT_COR_EGAL"] = _sub_cor[_mask_egal].groupby("Poste travail princ.")["Ordre"].count()
 
