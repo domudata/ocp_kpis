@@ -239,13 +239,13 @@ def calc_kpis(df_i, av_i, now_ts, posts):
     pc["Backlog préparation caractérisé"] = ckpi(pc["CARACTERISE"], pc["Total"])
 
     # ── 17. BACKLOG PLAN CARACTERISE ─────────────────────────────────────
-    # Base = Statut LANC + Contient SOPL + Plan d'entretien != 0 (préventif)
+    # Base = Statut LANC + hors SOPL + Plan d'entretien != 0 (préventif)
     # Caracterise = contient ATEI/ATAL/ATAS/AGAR/ATHS
     pat_plan = '|'.join(ATPL_KW)
     df_lancp = df[
         (~df["is_correctif"]) &          # Plan d'entretien != 0
         (df["Statut OT"] == "LANC") &
-        (df["Contient SOPL"] == 1)
+        (df["Contient SOPL"] == 0)
     ].copy()
     df_lancp["_carac"] = df_lancp["Statut utilisateur"].str.contains(
         pat_plan, na=False
