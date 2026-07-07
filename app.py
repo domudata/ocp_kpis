@@ -43,19 +43,33 @@ from pages.plan_action import render_plan_action_tab
 # Pour que TOUTE modification de ces fichiers invalide le cache automatiquement,
 # on calcule un hash de leur contenu et on l injecte dans la cle de cache.
 import hashlib as _hashlib
+import os as _os
 
 def _calc_signature():
-    """Hash du contenu des fichiers de calcul → invalide le cache si modifies."""
+    """
+    Hash du contenu des fichiers de calcul → invalide le cache si modifies.
+    Utilise le chemin ABSOLU (base = dossier de app.py) pour fonctionner
+    quel que soit le repertoire de travail au demarrage de Streamlit Cloud.
+    """
     h = _hashlib.md5()
+    base_dir = _os.path.dirname(_os.path.abspath(__file__))
+    found_any = False
     for _f in ("core/calcul_kpi.py", "core/anomalies.py", "core/prepare_data.py"):
+        _path = _os.path.join(base_dir, _f)
         try:
-            with open(_f, "rb") as _fh:
+            with open(_path, "rb") as _fh:
                 h.update(_fh.read())
+                found_any = True
         except Exception:
             pass
-    return h.hexdigest()[:12]
+    if not found_any:
+        # Aucun fichier trouve : ne jamais renvoyer un hash "silencieusement
+        # constant" -> utiliser un hash base sur mtime comme filet de securite
+        # pour au moins detecter un changement de deploiement/reboot.
+        h.update(str(_os.path.getmtime(_os.path.abspath(__file__))).encode())
+    return h.hexdigest()[:12], found_any
 
-CALC_VERSION = _calc_signature()
+CALC_VERSION, _CALC_SIG_OK = _calc_signature()
 
 
 @st.cache_data(show_spinner="Calcul des KPIs en cours...")
@@ -86,6 +100,28 @@ def main() -> None:
         '<style>[data-testid="stSidebarNav"] { display: none; }</style>',
         unsafe_allow_html=True
     )
+
+    # ── Diagnostic cache + bouton de recalcul forcé (barre latérale) ────────
+    with st.sidebar:
+        with st.expander("🔧 Diagnostic calcul", expanded=False):
+            if _CALC_SIG_OK:
+                st.success(f"Signature fichiers calcul : `{CALC_VERSION}`")
+                st.caption(
+                    "Cette signature change automatiquement des que vous "
+                    "modifiez calcul_kpi.py, anomalies.py ou prepare_data.py. "
+                    "Si elle ne change PAS apres une modification + commit, "
+                    "utilisez le bouton ci-dessous."
+                )
+            else:
+                st.warning(
+                    "⚠️ Fichiers core/*.py introuvables pour le hash "
+                    f"(signature de secours: `{CALC_VERSION}`). "
+                    "Utilisez le bouton ci-dessous a chaque modification."
+                )
+            if st.button("🔄 Forcer le recalcul complet", use_container_width=True):
+                st.cache_data.clear()
+                st.rerun()
+
     # Masquer la barre d'outils Streamlit (Share/étoile/crayon/GitHub/menu),
     # le bandeau "Manage app", le menu principal et le footer
     st.markdown("""
