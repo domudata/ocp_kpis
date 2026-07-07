@@ -3,6 +3,7 @@ import locale
 import os
 import random
 import time
+import traceback
 
 import numpy as np
 import pandas as pd
@@ -10,30 +11,36 @@ import streamlit as st
 
 st.set_page_config(layout="wide", page_title="Dashboard KPI", initial_sidebar_state="expanded")
 
-from core.constants import (
-    QK, PK, ALL_KPI, CIBLE, ACT_MAP, KPI_RESP_MAP,
-    LOWER_BETTER, CONSIGNES_HSE,
-)
-from core.prepare_data import prepare_data, get_date_from_file
-from core.calcul_kpi import calc_kpis, gscore, is_lb
-from core.anomalies import build_ano_map, build_ano_rows, build_anomaly_dfs
-from core.historique import (
-    load_historical_kpis, calculate_variations,
-    generate_journal, calculate_rankings,
-)
-from core.export_excel import save_kpis_to_excel
+# ── Imports proteges : affiche l erreur REELLE dans l app si un import
+# echoue, au lieu du message generique "redacted" de Streamlit Cloud.
+try:
+    from core.constants import (
+        QK, PK, ALL_KPI, CIBLE, ACT_MAP, KPI_RESP_MAP,
+        LOWER_BETTER, CONSIGNES_HSE,
+    )
+    from core.prepare_data import prepare_data, get_date_from_file
+    from core.calcul_kpi import calc_kpis, gscore, is_lb
+    from core.anomalies import build_ano_map, build_ano_rows, build_anomaly_dfs
+    from core.historique import (
+        load_historical_kpis, calculate_variations,
+        generate_journal, calculate_rankings,
+    )
+    from core.export_excel import save_kpis_to_excel
 
-from components.styles import inject_custom_css
-from components.header import render_header
-from components.cards import get_previous_card_values, render_cards
-from components.sidebar import render_sidebar
+    from components.styles import inject_custom_css
+    from components.header import render_header
+    from components.cards import get_previous_card_values, render_cards
+    from components.sidebar import render_sidebar
 
-from pages.dashboard import render_dashboard_tab
-from pages.performance import render_performance_tab
-from pages.qualite import render_qualite_tab
-from pages.backlog import render_backlog_page
-from pages.evolution import render_evolution_tab
-from pages.plan_action import render_plan_action_tab
+    from pages.dashboard import render_dashboard_tab
+    from pages.performance import render_performance_tab
+    from pages.qualite import render_qualite_tab
+    from pages.backlog import render_backlog_page
+    from pages.evolution import render_evolution_tab
+    from pages.plan_action import render_plan_action_tab
+    _IMPORT_ERROR = None
+except Exception as _e:
+    _IMPORT_ERROR = traceback.format_exc()
 
 
 # ── VERSION DE CALCUL (automatique) ──────────────────────────────────────────
@@ -87,6 +94,11 @@ def calc_kpis_cached(df_period, avdf_period, now_ts, apm_tuple, fichier_date, sd
 
 
 def main() -> None:
+    if _IMPORT_ERROR is not None:
+        st.error("❌ Erreur lors du chargement des modules (import). Copiez ce texte :")
+        st.code(_IMPORT_ERROR, language="python")
+        st.stop()
+
     try:
         locale.setlocale(locale.LC_ALL, 'fr_FR.UTF-8')
     except Exception:
