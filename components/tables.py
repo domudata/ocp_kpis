@@ -355,14 +355,20 @@ def html_plan_actions_table(rows: list, title: str, accent_color: str,
 
             h += '<td style="text-align:left;font-weight:600;color:#2d3748;">%s</td>' % r["kpi"]
 
-            if r["needs_action"]:
+            _st = r.get("status", "oui_rouge" if r["needs_action"] else "non_vert")
+            if _st == "oui_rouge":
                 h += '<td><span style="background:#e53e3e;color:#fff;padding:2px 10px;border-radius:12px;font-size:10px;font-weight:700;">OUI</span></td>'
+            elif _st == "oui_vert":
+                h += '<td><span style="background:#38a169;color:#fff;padding:2px 10px;border-radius:12px;font-size:10px;font-weight:700;">OUI</span></td>'
             else:
                 h += '<td><span style="background:#38a169;color:#fff;padding:2px 10px;border-radius:12px;font-size:10px;font-weight:700;">NON</span></td>'
 
+            # Ecart deja SIGNE dans app.py (positif = conforme, negatif = non
+            # conforme, sens deja adapte pour les KPI LOWER_BETTER). NE PAS
+            # reappliquer le test LOWER_BETTER ici -> cela inversait le signe
+            # une seconde fois et affichait en rouge des ecarts positifs (OK).
             ecart  = r["ecart"]
-            lower  = r["kpi"] in LOWER_BETTER
-            is_bad = (ecart < 0 and not lower) or (ecart > 0 and lower)
+            is_bad = ecart < 0
             ec_clr = "#dc2626" if is_bad else "#059669"
             h += '<td style="font-weight:800;color:%s;">%+.1f%%</td>' % (ec_clr, ecart)
 
