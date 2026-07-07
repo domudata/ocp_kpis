@@ -113,10 +113,13 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
         dfp["Statut OT"].isin(["CLOT","TCLO"]) &
         dfp["Statut système"].str.contains("CONF", na=False)
     ]
-    _bud  = _sub_cor["Total coûts budgétés"].fillna(0)
-    _reel = _sub_cor["Total coûts réels"].fillna(0)
-    ano_map["OT_COR_EGAL"] = _sub_cor[(_bud - _reel).abs() < 1].groupby(
-        "Poste travail princ.")["Ordre"].count()
+    ano_map["OT_COR_EGAL"] = _sub_cor[
+    (
+        pd.to_numeric(_sub_cor["Total coûts budgétés"], errors="coerce").fillna(0.0).astype(float)
+        -
+        pd.to_numeric(_sub_cor["Total coûts réels"], errors="coerce").fillna(0.0).astype(float)
+    ).abs() < 1
+].groupby("Poste travail princ.")["Ordre"].count()
 
     return ano_map
 
