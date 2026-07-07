@@ -74,13 +74,6 @@ def _age_kpis(df, filt, col_age, posts, prefix):
     - <1m  : N_inf1m / Total * 100   (maximiser, cible >= 80%)
     - 1-3m : N_1-3m  / Total * 100   (minimiser, cible <= 15%)
     - >3m  : N_sup3m / Total * 100   (minimiser, cible <= 5%)
-
-    Base vide (Total==0) → NaN (PAS de valeur par defaut a 100%).
-    Un poste sans aucun OT correspondant au filtre n a "rien a montrer"
-    -> ce n est pas la meme chose qu un poste "parfait". Afficher NaN
-    permet de distinguer clairement "pas de donnees" de "0% de retard".
-    NaN est automatiquement exclu des moyennes (pandas skipna) et des
-    scores (deja gere via pd.notna dans app.py).
     """
     pv = cpiv(df, filt, col_age, posts)
     for c in ["<1 mois", ">3 mois", "1 mois < <3 mois", "Inconnu"]:
@@ -94,10 +87,10 @@ def _age_kpis(df, filt, col_age, posts, prefix):
     for idx in pv.index:
         tot = pv.loc[idx, "Total"]
         if tot == 0:
-            # Base vide = aucun OT pour ce poste avec ce filtre -> pas de donnees
-            kpis.setdefault(f"OT {prefix} <1 mois",       {})[idx] = np.nan
-            kpis.setdefault(f"OT {prefix} 1mois< <3mois", {})[idx] = np.nan
-            kpis.setdefault(f"OT {prefix} >3 mois",       {})[idx] = np.nan
+            # Base vide = aucun OT en retard → <1m parfait, 1-3m et >3m à 0
+            kpis.setdefault(f"OT {prefix} <1 mois",       {})[idx] = 100.0
+            kpis.setdefault(f"OT {prefix} 1mois< <3mois", {})[idx] = 0.0
+            kpis.setdefault(f"OT {prefix} >3 mois",       {})[idx] = 0.0
         else:
             t1 = pv.loc[idx, "<1 mois"]           / tot * 100
             t2 = pv.loc[idx, "1 mois < <3 mois"]  / tot * 100
@@ -108,7 +101,8 @@ def _age_kpis(df, filt, col_age, posts, prefix):
 
     result = {}
     for k, d in kpis.items():
-        result[k] = pd.Series(d).reindex(posts, fill_value=np.nan)
+        default = 100.0 if "<1 mois" in k else 0.0
+        result[k] = pd.Series(d).reindex(posts, fill_value=default)
 
     return result, pv
 
@@ -130,21 +124,21 @@ def calc_kpis(df_i, av_i, now_ts, posts):
     )
 
     # ── 2-4. AGE PREP ────────────────────────────────────────────────────
-    # Base : CRÉÉ + CRPR + Backlog prep NON CARAC + Date planif ≤ aujourd'hui
+    # Base : CRÉÉ + Backlog prep NON CARAC
     # Age  : |now - Créé le| (dans prepare_data.py, avec abs)
     filt_prep = (
         (df["Statut OT"] == "CRÉÉ") &
-        (df["Backlog preparation"] == "CARACTERISE")
+        (df["Backlog preparation"] == "NON CARACTERISE")
     )
     kpis_prep, pv_prep = _age_kpis(df, filt_prep, "ap", posts, "préparation")
 
     # ── 5-7. AGE PLAN ────────────────────────────────────────────────────
-    # Base : LANC + hors SOPL + Backlog plan CARACTERISE
+    # Base : LANC + hors SOPL + Backlog plan NON CARAC
     # Age  : |now - Date planifiée| (dans prepare_data.py, avec abs)
     filt_plan = (
         (df["Statut OT"] == "LANC") &
         (df["Contient SOPL"] == 0) &
-        (df["Backlog planification"] == "CARACTERISE")
+        (df["Backlog planification"] == "NON CARACTERISE")
     )
     kpis_plan, pv_plan = _age_kpis(df, filt_plan, "alp", posts, "planification")
 
