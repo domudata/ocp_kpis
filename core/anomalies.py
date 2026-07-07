@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 import pandas as pd
+import numpy as np  # Ajouté pour utiliser np.abs
 from core.constants import QK, PK
 
 TW_PREV = [350, 290, 300, 310, 360]
@@ -10,6 +11,10 @@ ATPL_KW = ['ATEI','ATAL','ATAS','AGAR','ATHS']
 def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
 
     ano_map = {}
+    
+    # Préparation des motifs regex à partir des constantes
+    pat_crpr_kw = '|'.join(CRPR_KW)
+    pat_atpl_kw = '|'.join(ATPL_KW)
 
     # ── 1. TAUX REALISATION CORRECTIF ───────────────────────────────────
     # Anomalie = OT correctifs (Plan==0+SOPL) non clôturés
@@ -77,7 +82,6 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
     # ── 16. BACKLOG PREP CARACTERISE ─────────────────────────────────────
     # Base : CRÉÉ + Plan d'entretien != 0 (préventif)
     # Anomalie = hors ATPD/ATMR/ATRS/ATMO/ATER (NON caracterise)
-    pat_crpr_kw = "ATPD|ATMR|ATRS|ATMO|ATER"
     _df_prep_base = dfp[
         (dfp["Statut OT"] == "CRÉÉ") &
         (~dfp["is_correctif"])
@@ -89,7 +93,6 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
     # ── 17. BACKLOG PLAN CARACTERISE ─────────────────────────────────────
     # Base : LANC + hors SOPL + Plan d'entretien != 0 (préventif)
     # Anomalie = hors ATEI/ATAL/ATAS/AGAR/ATHS (NON caracterise)
-    pat_atpl_kw = "ATEI|ATAL|ATAS|AGAR|ATHS"
     _df_plan_base = dfp[
         (~dfp["is_correctif"]) &
         (dfp["Statut OT"] == "LANC") &
@@ -107,15 +110,22 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
     ].groupby("Poste travail princ.")["Ordre"].count()
 
     # ── 19. OT_COR_EGAL ──────────────────────────────────────────────────
-    # Anomalie = Plan==0 + CLOT+TCLO + CONF + |bud-reel| < 1 (quasi identiques)
+    # Anomalie = Plan==0 + CLOT+TCLO + CONF + |bud-reel| < 1 (quasi identiques ou manquants)
     _sub_cor = dfp[
         dfp["is_correctif"] &
         dfp["Statut OT"].isin(["CLOT","TCLO"]) &
         dfp["Statut système"].str.contains("CONF", na=False)
     ]
-    _bud  = _sub_cor["Total coûts budgétés"].fillna(0)
-    _reel = _sub_cor["Total coûts réels"].fillna(0)
-    ano_map["OT_COR_EGAL"] = _sub_cor[(_bud - _reel).abs() < 1].groupby(
+    # ALIGNEMENT AVEC LE CODE KPI : utilisation de pd.to_numeric et np.abs
+    _bud_c  = pd.to_numeric(_sub_cor["Total coûts budgétés"], errors="coerce")
+    _reel_c = pd.to_numeric(_sub_cor["Total coûts réels"], errors="coerce")
+    
+    # Si KPI "Bon" est (abs >= 1), alors l'Anomalie est l'inverse : < 1
+    # Note: np.abs(NaN - X) < 1 donne False, mais ~(NaN >= 1) donne True. 
+    # Pour être sûr de choper les NaN comme anomalies (données manquantes = suspect), on fait :
+    _is_anomaly = ~(_bud_c.sub(_reel_c).abs() >= 1)
+    
+    ano_map["OT_COR_EGAL"] = _sub_cor[_is_anomaly].groupby(
         "Poste travail princ.")["Ordre"].count()
 
     return ano_map
@@ -152,6 +162,20 @@ def build_anomaly_dfs(dfp, avf, now_ts):
     filt_exec = (dfp["Statut OT"]=="LANC") & (dfp["Contient SOPL"]==1)
     filt_perf = (dfp["Contient SOPL"]==1) & (~dfp["Statut OT"].isin(["CLOT","TCLO"]))
 
+    # Calcul spécifique pour OT_COR_EGAL en dehors du dictionnaire pour rester lisible
+    _df_cor_base = dfp[
+        dfp["is_correctif"] &
+        dfp["Statut OT"].isin(["CLOT","TCLO"]) &
+        dfp["Statut système"].str.contains("CONF", na=False)
+    ].copy()
+    _bud_c  = pd.to_numeric(_df_cor_base["Total coûts budgétés"], errors="coerce")
+    _reel_c = pd.to_numeric(_df_cor_base["Total coûts réels"], errors="coerce")
+    _ano_cor_egal = _df_cor_base[~(_bud_c.sub(_reel_c).abs() >= 1)].copy()
+
+    # Utilisation des constantes pour les motifs
+    pat_crpr_kw = '|'.join(CRPR_KW)
+    pat_atpl_kw = '|'.join(ATPL_KW)
+
     return {
         "TAUX_REALISATION_CORRECTIF/PT":     dfp[dfp["is_correctif"] & (dfp["Contient SOPL"]==1) & (~dfp["Statut OT"].isin(["CLOT","TCLO"]))].copy(),
         "OT préparation <1 mois":            dfp[filt_prep & (dfp["ap"] == "<1 mois")].copy(),
@@ -168,13 +192,8 @@ def build_anomaly_dfs(dfp, avf, now_ts):
         "Performance Systématiques":         dfp[filt_perf & (dfp["_tw_num"]==360) & (dfp["Date de début planifiée"]<=now_ts)].copy(),
         "Taux d'approbation des Avis":       avf[avf["Statut utilisateur"]=="APRQ"].copy(),
         "OT LANC ESTIME":                    dfp[dfp["is_correctif"] & (dfp["Statut OT"]=="LANC") & (dfp["Contient SOPL"]==0) & (dfp["OT LANC ESTIME"]=="NON")].copy(),
-        "Backlog préparation caractérisé":   dfp[(dfp["Statut OT"]=="CRÉÉ") & (~dfp["is_correctif"]) & ~dfp["Statut utilisateur"].str.contains("ATPD|ATMR|ATRS|ATMO|ATER",na=False)].copy(),
-        "Backlog planification caractérisé": dfp[(~dfp["is_correctif"]) & (dfp["Statut OT"]=="LANC") & (dfp["Contient SOPL"]==0) & ~dfp["Statut utilisateur"].str.contains("ATEI|ATAL|ATAS|AGAR|ATHS",na=False)].copy(),
+        "Backlog préparation caractérisé":   dfp[(dfp["Statut OT"]=="CRÉÉ") & (~dfp["is_correctif"]) & ~dfp["Statut utilisateur"].str.contains(pat_crpr_kw, na=False)].copy(),
+        "Backlog planification caractérisé": dfp[(~dfp["is_correctif"]) & (dfp["Statut OT"]=="LANC") & (dfp["Contient SOPL"]==0) & ~dfp["Statut utilisateur"].str.contains(pat_atpl_kw, na=False)].copy(),
         "OT CONFIME":                        dfp[dfp["Statut OT"].isin(["CLOT","TCLO"]) & (dfp["OT CONFIME"]=="NON")].copy(),
-        "OT_COR_EGAL": dfp[
-            dfp["is_correctif"] &
-            dfp["Statut OT"].isin(["CLOT","TCLO"]) &
-            dfp["Statut système"].str.contains("CONF", na=False) &
-            ((dfp["Total coûts budgétés"].fillna(0) - dfp["Total coûts réels"].fillna(0)).abs() < 1)
-        ].copy(),
+        "OT_COR_EGAL":                       _ano_cor_egal,  # Utilisation de la dataframe calculée proprement ci-dessus
     }
