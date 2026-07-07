@@ -73,6 +73,8 @@ def cs(v) -> str:
 
 
 def kas(v) -> str:
+    if v == "N/A" or v is None:
+        return "background:#f1f5f9;color:#94a3b8;font-style:italic"
     try:
         val = int(v)
     except Exception:
