@@ -36,25 +36,36 @@ from pages.evolution import render_evolution_tab
 from pages.plan_action import render_plan_action_tab
 
 
-# ── VERSION DE CALCUL ────────────────────────────────────────────────────────
-# IMPORTANT : incrementer ce numero a CHAQUE modification de core/calcul_kpi.py,
-# core/prepare_data.py ou core/anomalies.py.
-# Streamlit ne hash que le code de la fonction decoree par @st.cache_data,
-# PAS les fonctions internes appelees — sans ce numero, le cache continuerait
-# de servir les valeurs calculees avec l ANCIEN code apres un deploiement.
-CALC_VERSION = "v2.0"
+# ── VERSION DE CALCUL (automatique) ──────────────────────────────────────────
+# Le cache @st.cache_data ne hash QUE le code de calc_kpis_cached (1 ligne),
+# PAS le code interne de calc_kpis() / _age_kpis() / build_ano_map() ni les
+# filtres filt_prep/plan/exec definis dans calcul_kpi.py et anomalies.py.
+# Pour que TOUTE modification de ces fichiers invalide le cache automatiquement,
+# on calcule un hash de leur contenu et on l injecte dans la cle de cache.
+import hashlib as _hashlib
+
+def _calc_signature():
+    """Hash du contenu des fichiers de calcul → invalide le cache si modifies."""
+    h = _hashlib.md5()
+    for _f in ("core/calcul_kpi.py", "core/anomalies.py", "core/prepare_data.py"):
+        try:
+            with open(_f, "rb") as _fh:
+                h.update(_fh.read())
+        except Exception:
+            pass
+    return h.hexdigest()[:12]
+
+CALC_VERSION = _calc_signature()
 
 
 @st.cache_data(show_spinner="Calcul des KPIs en cours...")
 def calc_kpis_cached(df_period, avdf_period, now_ts, apm_tuple, fichier_date, sdt, edt, calc_version=CALC_VERSION):
     """
     Wrapper cache autour de calc_kpis().
-    Cle de cache = (contenu de df_period/avdf_period, now_ts, apm_tuple, fichier_date, sdt, edt, calc_version).
-    Le recalcul ne se declenche que si :
-      - date.txt change (fichier_date change -> prepare_data change -> df_full change)
-      - la periode (sdt/edt) change
-      - les donnees sources (ot.xlsx / avis.xlsx) changent
-      - CALC_VERSION est incremente (nouvelle version des formules)
+    Cle de cache = (df_period, avdf_period, now_ts, apm_tuple, fichier_date, sdt, edt, calc_version).
+    calc_version = hash du contenu de calcul_kpi.py / anomalies.py / prepare_data.py,
+    donc TOUTE modification de ces fichiers (filtres, formules) invalide le cache
+    automatiquement au redemarrage — plus besoin d incrementer un numero a la main.
     Changer la SELECTION DE POSTES (vp) ne redeclenche PAS ce calcul,
     car on calcule ici sur TOUS les postes (apm) puis on filtre ensuite dans main().
     """
