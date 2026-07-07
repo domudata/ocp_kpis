@@ -281,11 +281,7 @@ def calc_kpis(df_i, av_i, now_ts, posts):
     _bud_c  = df_clot["Total coûts budgétés"].fillna(0)
     _reel_c = df_clot["Total coûts réels"].fillna(0)
     # KPI = |bud - reel| >= 1 → conforme (OUI pour KPI)
-    df_clot["_egal"] = np.where(
-    np.isclose(_bud_c, _reel_c, atol=1e-6),
-    "OUI",
-    "NON"
-    )
+    df_clot["_egal"] = np.where(_bud_c == _reel_c, "OUI", "NON")
     pv_cor = pd.pivot_table(
         df_clot, index="Poste travail princ.", columns="_egal",
         values="Ordre", aggfunc="count", fill_value=0
