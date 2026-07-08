@@ -76,6 +76,31 @@ def _age_kpis(df, col_age, tranche_1m, tranche_1m3m, tranche_3m):
     }
 
 
+def build_statut_pivot(df, filt, posts, col_name="Statut OT"):
+    """
+    PLACEHOLDER: Construit une table pivot pour les statuts.
+    Similaire à cpiv, mais potentiellement avec des spécificités pour les statuts.
+    À adapter selon l'usage réel dans backlog_widgets.py.
+    """
+    return pd.pivot_table(
+        df[filt],
+        index="Poste travail princ.",
+        columns=col_name,
+        values="Ordre",
+        aggfunc="count",
+        fill_value=0,
+    ).reindex(posts, fill_value=0)
+
+def get_text_col(df, col_name, row_idx=0, default=""):
+    """
+    PLACEHOLDER: Récupère une valeur textuelle d'une colonne.
+    À adapter selon l'usage réel dans backlog_widgets.py.
+    """
+    if col_name in df.columns and row_idx < len(df):
+        return str(df.iloc[row_idx][col_name])
+    return default
+
+
 def gscore(val, cible, lower_is_better=False):
     """Calcule un score de performance entre 0 et 100."""
     if cible == 0:  # Eviter la division par zéro
