@@ -190,36 +190,43 @@ def _perf_kpi(df, posts, tw_nums, now_ts, label, require_sopl=True):
 # ─── Backlog caractérisé ─────────────────────────────────────────────────────
 def _backlog_carac(df, posts, statut, require_no_sopl, keywords, label):
     """
-    Calcule le taux de backlog caractérisé.
-
-    Base = Statut donné + (hors SOPL si require_no_sopl) + Plan d'entretien != 0.
-    Caractérisé = contient un des mots-clés dans 'Statut utilisateur'.
+    Calcule le KPI : Nombre d'OT CARACTÉRISÉS / Nombre total d'OT pour le statut donné.
+    (Plus le KPI est haut, mieux c'est).
     """
     pat = '|'.join(keywords)
-    mask = (~df["is_correctif"]) & (df["Statut OT"] == statut)
+    
+    # 1. Base des OT pour le statut donné (ex: CRÉÉ et non correctif)
+    mask_base = (~df["is_correctif"]) & (df["Statut OT"] == statut)
     if require_no_sopl:
-        mask &= (df["Contient SOPL"] == 0)
-
-    df_sub = df[mask].copy()
-    df_sub["_carac"] = df_sub["Statut utilisateur"].str.contains(
-        pat, na=False
-    ).map({True: "CARACTERISE", False: "NON CARACTERISE"})
-
-    pv = pd.pivot_table(
-        df_sub,
-        index="Poste travail princ.",
-        columns="_carac",
-        values="Ordre",
-        aggfunc="count",
-        fill_value=0,
-    ).reindex(posts, fill_value=0)
-
-    pv = _ensure_columns(pv, ["CARACTERISE", "NON CARACTERISE"])
-    pv["Total"] = pv["CARACTERISE"] + pv["NON CARACTERISE"]
-    pv[label]   = ckpi(pv["CARACTERISE"], pv["Total"])
-
+        mask_base &= (df["Contient SOPL"] == 0)
+        
+    df_base = df[mask_base]
+    
+    # 2. Nombre total d'OT par poste (Dénominateur)
+    total_par_poste = df_base.groupby("Poste travail princ.")["Ordre"].count().reindex(posts, fill_value=0)
+    
+    # 3. Nombre d'OT CARACTÉRISÉS par poste (Numérateur)
+    # Un OT est caractérisé s'il contient un des mots-clés dans "Statut utilisateur"
+    # Ajout de case=False pour ignorer la casse (majuscules/minuscules) qui cause souvent des 0
+    is_carac = df_base["Statut utilisateur"].str.contains(pat, case=False, na=False)
+    carac_par_poste = df_base[is_carac].groupby("Poste travail princ.")["Ordre"].count().reindex(posts, fill_value=0)
+    
+    # 4. Nombre d'OT NON CARACTÉRISÉS (utile pour le tableau détaillé)
+    non_carac_par_poste = total_par_poste - carac_par_poste
+    
+    # 5. Calcul du KPI : (Caractérisé / Total) * 100
+    # Si Total = 0 (pas d'OT), on renvoie 100% (situation parfaite, pas de backlog)
+    kpi_values = ckpi(carac_par_poste, total_par_poste, sz=100.0)
+    
+    # 6. Création du DataFrame de résultat (pour rester compatible avec le reste de votre code)
+    pv = pd.DataFrame({
+        "CARACTERISE": carac_par_poste,
+        "NON CARACTERISE": non_carac_par_poste,
+        "Total": total_par_poste,
+        label: kpi_values
+    })
+    
     return pv
-
 
 # ─── KPI OT coûts égaux ──────────────────────────────────────────────────────
 
