@@ -255,7 +255,7 @@ def _calc_ot_cor_egal(df, posts):
 
     pv = _ensure_columns(pv, ["OUI", "NON"])
     pv["Total"]       = pv["OUI"] + pv["NON"]
-    pv["OT_COR_EGAL"] = ckpi(pv["OUI"], pv["Total"])
+    pv["OT_COR_EGAL"] = ckpi(pv["NON"], pv["Total"])
     return pv
 
 
