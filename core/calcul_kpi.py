@@ -188,11 +188,12 @@ def _perf_kpi(df, posts, tw_nums, now_ts, label, require_sopl=True):
 
 
 # ─── Backlog caractérisé ─────────────────────────────────────────────────────
-
 def _backlog_carac(df, posts, statut, require_no_sopl, keywords, label):
     """
-    Calcule le taux de backlog NON caractérisé (Taux d'anomalies).
-    KPI "Lower is better" : 0% = Aucune anomalie, 100% = 100% d'anomalies.
+    Calcule le taux de backlog caractérisé.
+
+    Base = Statut donné + (hors SOPL si require_no_sopl) + Plan d'entretien != 0.
+    Caractérisé = contient un des mots-clés dans 'Statut utilisateur'.
     """
     pat = '|'.join(keywords)
     mask = (~df["is_correctif"]) & (df["Statut OT"] == statut)
@@ -200,26 +201,25 @@ def _backlog_carac(df, posts, statut, require_no_sopl, keywords, label):
         mask &= (df["Contient SOPL"] == 0)
 
     df_sub = df[mask].copy()
-    
-    # True si CARACTÉRISÉ (contient le mot-clé), False si NON CARACTÉRISÉ
-    df_sub["_is_carac"] = df_sub["Statut utilisateur"].str.contains(pat, na=False)
-    
-    # Comptage direct et sécurisé par poste
-    counts = df_sub.groupby("Poste travail princ.")["_is_carac"].agg(
-        CARACTERISE='sum',      # Les True
-        TOTAL='count'           # Le nombre total de lignes
+    df_sub["_carac"] = df_sub["Statut utilisateur"].str.contains(
+        pat, na=False
+    ).map({True: "CARACTERISE", False: "NON CARACTERISE"})
+
+    pv = pd.pivot_table(
+        df_sub,
+        index="Poste travail princ.",
+        columns="_carac",
+        values="Ordre",
+        aggfunc="count",
+        fill_value=0,
     ).reindex(posts, fill_value=0)
-    
-    # Calcul du nombre de NON CARACTÉRISÉ
-    counts["NON_CARACTERISE"] = counts["TOTAL"] - counts["CARACTERISE"]
-    
-    # ── LE CHANGEMENT ICI ──────────────────────────────────────
-    # On calcule le taux de NON CARACTÉRISÉ (les anomalies)
-    # Si 33 NON CARACTÉRISÉ sur 33 au total -> Taux = 100%
-    # Si 0 OT au total (TOTAL=0) -> Taux = 0% (sz=0.0, situation parfaite)
-    counts[label] = ckpi(counts["NON_CARACTERISE"], counts["TOTAL"], sz=0.0)
-    
-    return counts
+
+    pv = _ensure_columns(pv, ["CARACTERISE", "NON CARACTERISE"])
+    pv["Total"] = pv["CARACTERISE"] + pv["NON CARACTERISE"]
+    pv[label]   = ckpi(pv["CARACTERISE"], pv["Total"])
+
+    return pv
+
 
 # ─── KPI OT coûts égaux ──────────────────────────────────────────────────────
 
