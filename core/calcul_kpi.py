@@ -218,6 +218,8 @@ def _backlog_carac(df, posts, statut, require_no_sopl, keywords, label):
     pv = _ensure_columns(pv, ["CARACTERISE", "NON CARACTERISE"])
     pv["Total"] = pv["CARACTERISE"] + pv["NON CARACTERISE"]
     pv[label]   = ckpi(pv["CARACTERISE"], pv["Total"])
+    print(df_sub["Statut utilisateur"].value_counts())
+print(pv)
     return pv
 
 
