@@ -100,16 +100,23 @@ def build_statut_pivot(df_sub, posts):
 
 
 def gscore(k, a, t):
-    """
-    Score binaire par KPI :
-    - KPI normal (plus haut = mieux)      : 1 si a >= t, sinon 0
-    - KPI LOWER_BETTER (plus bas = mieux) : 1 si a <= t, sinon 0
-    """
-    if pd.isna(a) or pd.isna(t):
+    if pd.isna(a):
         return 0
+
     if k in LOWER_BETTER:
-        return 1 if a <= t else 0
-    return 1 if a >= t else 0
+        if a <= t:          # Vert
+            return 1
+        elif a <= t * 1.05: # Jaune (à adapter selon tes seuils)
+            return 1
+        else:               # Rouge
+            return 0
+    else:
+        if a >= t:          # Vert
+            return 1
+        elif a >= t * 0.95: # Jaune (à adapter selon tes seuils)
+            return 1
+        else:               # Rouge
+            return 0
 
 
 def is_lb(k):
