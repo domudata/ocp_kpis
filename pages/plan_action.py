@@ -5,6 +5,48 @@ import streamlit.components.v1 as components
 from components.tables import html_plan_actions_table
 
 
+def _stars_html(stars: int, score) -> str:
+    """5 etoiles pleines/vides selon le score global du poste (0-100% -> 0-5)."""
+    stars = max(0, min(5, int(stars)))
+    full = "★" * stars
+    empty = "☆" * (5 - stars)
+    score_txt = f"{score:.0f}%" if score is not None else "—"
+    return (
+        f'<span style="color:#f59e0b;font-size:16px;letter-spacing:1px">{full}</span>'
+        f'<span style="color:#cbd5e1;font-size:16px;letter-spacing:1px">{empty}</span>'
+        f'<span style="color:#64748b;font-size:11px;margin-left:6px">({score_txt})</span>'
+    )
+
+
+def html_poste_scores_table(vp: list, poste_stars: dict) -> str:
+    """Tableau recapitulatif : Score global (5 etoiles) par poste de travail."""
+    if not poste_stars:
+        return '<div class="es">Aucune donnee de score</div>'
+
+    rows_sorted = sorted(
+        vp, key=lambda p: (poste_stars.get(p, {}).get("score") or 0), reverse=True
+    )
+
+    h = (
+        '<div class="ca" style="margin-bottom:14px;">'
+        '<div class="ct" style="color:#1e3a5f">⭐ Score global par poste de travail</div>'
+        '<table class="plan-action-table"><thead><tr>'
+        '<th>Poste de travail</th><th>Score global</th>'
+        '</tr></thead><tbody>'
+    )
+    for i, poste in enumerate(rows_sorted):
+        info = poste_stars.get(poste, {"score": None, "stars": 0})
+        bg = "#ffffff" if i % 2 == 0 else "#f8fafc"
+        h += (
+            f'<tr style="background:{bg};">'
+            f'<td style="text-align:left;font-weight:700;color:#1e293b;">{poste}</td>'
+            f'<td>{_stars_html(info["stars"], info["score"])}</td>'
+            f'</tr>'
+        )
+    h += '</tbody></table></div>'
+    return h
+
+
 # ── CSS embarqué pour la page d'impression ────────────────────────────────
 _PRINT_CSS = """
 <style>
@@ -39,6 +81,7 @@ _PRINT_CSS = """
 
   .badge-oui { background:#e53e3e; color:#fff; padding:1px 8px; border-radius:10px; font-size:9px; font-weight:700; }
   .badge-non { background:#38a169; color:#fff; padding:1px 8px; border-radius:10px; font-size:9px; font-weight:700; }
+  .badge-oui-vert { background:#38a169; color:#fff; padding:1px 8px; border-radius:10px; font-size:9px; font-weight:700; }
   .red   { color: #dc2626; font-weight: 800; }
   .green { color: #059669; font-weight: 800; }
   .grey  { color: #94a3b8; }
@@ -82,11 +125,16 @@ def _build_print_table(rows: list, title: str, accent: str, anomaly_dfs: dict) -
                 h += f'<td rowspan="{rowspan}" class="left" style="font-weight:700;color:{accent};border-right:3px solid {accent}">{poste}</td>'
                 first = False
             h += f'<td class="left">{r["kpi"]}</td>'
-            h += f'<td><span class="{"badge-oui" if r["needs_action"] else "badge-non"}">{"OUI" if r["needs_action"] else "NON"}</span></td>'
+            _st = r.get("status", "oui_rouge" if r["needs_action"] else "non_vert")
+            if _st == "oui_rouge":
+                h += '<td><span class="badge-oui">OUI</span></td>'
+            elif _st == "oui_vert":
+                h += '<td><span class="badge-oui-vert">OUI</span></td>'
+            else:
+                h += '<td><span class="badge-non">NON</span></td>'
 
             ecart = r["ecart"]
-            lower = r["kpi"] in LOWER_BETTER
-            is_bad = (ecart < 0 and not lower) or (ecart > 0 and lower)
+            is_bad = ecart < 0
             clr_cls = "red" if is_bad else "green"
             h += f'<td class="{clr_cls}">{ecart:+.1f}%</td>'
             h += f'<td>{"<span class=red>" + str(r["nb_anom"]) + "</span>" if r["nb_anom"] > 0 else "<span class=green>0</span>"}</td>'
@@ -135,7 +183,7 @@ def _build_full_html(sf1_rows, sf2_rows, anomaly_dfs, fichier_date="") -> str:
 
 def render_plan_action_tab(plan_actions_rows: list, sf1_rows: list,
                             sf2_rows: list, anomaly_dfs: dict,
-                            fichier_date: str = "") -> None:
+                            fichier_date: str = "", poste_stars: dict = None) -> None:
     st.markdown('<div class="stl a">📋 Plan d\'action</div>', unsafe_allow_html=True)
 
     # ── Métriques ──
@@ -145,6 +193,11 @@ def render_plan_action_tab(plan_actions_rows: list, sf1_rows: list,
     with col_metrics[2]: st.metric("🏭 Actions SF2", len(sf2_rows))
 
     st.write("")
+
+    # ── Score global par poste (5 étoiles) ──
+    if poste_stars:
+        vp_all = sorted(poste_stars.keys())
+        st.markdown(html_poste_scores_table(vp_all, poste_stars), unsafe_allow_html=True)
 
     # ── Tableaux dans l'app ──
     st.markdown(
