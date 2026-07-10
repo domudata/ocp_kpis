@@ -315,8 +315,23 @@ def html_grouped_bars(posts: list, pscores: dict, qscores: dict, title: str) -> 
     return h + '</div>'
 
 
+def _stars_html_inline(stars, score) -> str:
+    """5 etoiles compactes pour affichage inline dans la cellule Poste."""
+    if stars is None:
+        return ""
+    stars = max(0, min(5, int(stars)))
+    full = "★" * stars
+    empty = "☆" * (5 - stars)
+    return (
+        '<div style="margin-top:3px;font-size:12px;letter-spacing:1px;">'
+        f'<span style="color:#f59e0b;">{full}</span>'
+        f'<span style="color:#cbd5e1;">{empty}</span>'
+        '</div>'
+    )
+
+
 def html_plan_actions_table(rows: list, title: str, accent_color: str,
-                             anomaly_dfs: dict) -> str:
+                             anomaly_dfs: dict, poste_stars: dict = None) -> str:
     if not rows:
         return (
             '<div class="ca" style="margin-bottom:10px;">'
@@ -351,8 +366,12 @@ def html_plan_actions_table(rows: list, title: str, accent_color: str,
 
             if first:
                 poste_bg = "#eff6ff" if accent_color == "#3b82f6" else "#f0fdf4"
-                h += ('<td rowspan="%d" style="color:%s;background:%s;border-right:3px solid %s;">%s</td>'
-                      ) % (rowspan, accent_color, poste_bg, accent_color, poste)
+                _stars_cell = ""
+                if poste_stars and poste in poste_stars:
+                    _info = poste_stars[poste]
+                    _stars_cell = _stars_html_inline(_info.get("stars"), _info.get("score"))
+                h += ('<td rowspan="%d" style="color:%s;background:%s;border-right:3px solid %s;">%s%s</td>'
+                      ) % (rowspan, accent_color, poste_bg, accent_color, poste, _stars_cell)
                 first = False
 
             h += '<td style="text-align:left;font-weight:600;color:#2d3748;">%s</td>' % r["kpi"]
