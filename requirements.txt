@@ -22,3 +22,4 @@ openai>=1.0.0
 python-pptx
 anthropic
 groq
+requests
