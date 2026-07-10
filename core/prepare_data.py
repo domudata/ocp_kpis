@@ -159,7 +159,7 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
     # NON = |bud - reel| >= 1 → conforme (ecart significatif = bonne imputation)
     # Note : formule validee sur SF1 (58.7% calc vs 60.9% ref ✅)
     _diff_abs = (df["Total coûts budgétés"].fillna(0) - df["Total coûts réels"].fillna(0)).abs()
-    df["OT_COR_EGAL"] = np.where(_diff_abs < 1, "OUI", "NON")
+    df["OT_COR_EGAL"] = np.where(_diff_abs == 0, "OUI", "NON")
 
     # ── Backlog preparation (pour graphiques) ───────────────────────────
     pat_prep = '|'.join(CRPR_KW)
