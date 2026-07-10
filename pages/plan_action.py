@@ -195,14 +195,9 @@ def render_plan_action_tab(plan_actions_rows: list, sf1_rows: list,
 
     st.write("")
 
-    # ── Score global par poste (5 étoiles) ──
-    if poste_stars:
-        vp_all = sorted(poste_stars.keys())
-        st.markdown(html_poste_scores_table(vp_all, poste_stars), unsafe_allow_html=True)
-
-    # ── Tableaux dans l'app (bien séparés visuellement) ──
+    # ── Tableaux dans l'app (étoiles intégrées dans la colonne Poste) ──
     st.markdown(
-        html_plan_actions_table(sf1_rows, "SF1 — Plan d'Actions", "#3b82f6", anomaly_dfs),
+        html_plan_actions_table(sf1_rows, "SF1 — Plan d'Actions", "#3b82f6", anomaly_dfs, poste_stars),
         unsafe_allow_html=True,
     )
     st.markdown(
@@ -210,7 +205,7 @@ def render_plan_action_tab(plan_actions_rows: list, sf1_rows: list,
         unsafe_allow_html=True,
     )
     st.markdown(
-        html_plan_actions_table(sf2_rows, "SF2 — Plan d'Actions", "#10b981", anomaly_dfs),
+        html_plan_actions_table(sf2_rows, "SF2 — Plan d'Actions", "#10b981", anomaly_dfs, poste_stars),
         unsafe_allow_html=True,
     )
 
