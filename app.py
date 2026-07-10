@@ -19,7 +19,7 @@ try:
         LOWER_BETTER, CONSIGNES_HSE,
     )
     from core.prepare_data import prepare_data, get_date_from_file
-    from core.calcul_kpi import calc_kpis, gscore, is_lb                                                   
+    from core.calcul_kpi import calc_kpis, gscore, is_lb
     from core.anomalies import build_ano_map, build_ano_rows, build_anomaly_dfs
     from core.historique import (
         load_historical_kpis, calculate_variations,
@@ -393,8 +393,9 @@ def main() -> None:
                     status = "oui_vert"
                 else:
                     status = "oui_rouge"
-                # Inclure la ligne si anomalies OU si sous cible
-                if nb_anom > 0 or not conforme:
+                # N'inclure une ligne QUE s'il y a au moins 1 anomalie.
+                # 0 anomalie = rien a signaler, la ligne n'apparait pas.
+                if nb_anom > 0:
                     plan_actions_rows.append({
                         "poste":       poste,
                         "kpi":         kpi,
@@ -409,6 +410,23 @@ def main() -> None:
 
         sf1_rows = [r for r in plan_actions_rows if str(r["poste"]).startswith("SF1")]
         sf2_rows = [r for r in plan_actions_rows if str(r["poste"]).startswith("SF2")]
+
+        # ── Score étoiles par poste (0 à 5 ★) ────────────────────────────
+        # Score global = moyenne(Score Performance, Score Qualite) du poste,
+        # converti sur une echelle de 5 etoiles (100% = 5 etoiles).
+        poste_stars = {}
+        for poste in vp:
+            ps = pscores.get(poste)
+            qs = qscores.get(poste)
+            vals = [v for v in (ps, qs) if v is not None and pd.notna(v)]
+            if vals:
+                score_global = sum(vals) / len(vals)
+                stars = round(score_global / 20)  # 0-100% -> 0-5
+                stars = max(0, min(5, stars))
+            else:
+                score_global = None
+                stars = 0
+            poste_stars[poste] = {"score": score_global, "stars": stars}
 
         _pa_valid = [v for v in pa.values() if pd.notna(v)]
         _qa_valid = [v for v in qa.values() if pd.notna(v)]
@@ -501,7 +519,7 @@ def main() -> None:
             except Exception as _e:
                 st.caption(f"Export PowerPoint indisponible : {_e}")
 
-            render_plan_action_tab(plan_actions_rows, sf1_rows, sf2_rows, anomaly_dfs)
+            render_plan_action_tab(plan_actions_rows, sf1_rows, sf2_rows, anomaly_dfs, fichier_date=fichier_date, poste_stars=poste_stars)
 
         with tabs[6]:
             try:
