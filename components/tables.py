@@ -337,7 +337,7 @@ def html_plan_actions_table(rows: list, title: str, accent_color: str,
          '</div>') % (accent_color, accent_color, title, len(rows))
 
     h += '<table class="plan-action-table"><thead><tr>'
-    for hdr in ["Poste de travail", "KPI", "Nécessite Action", "Écart", "Nb Anomalies", "Responsable", "Action Recommandée", "Délai"]:
+    for hdr in ["Poste de travail", "KPI", "Cible", "Nécessite Action", "Écart", "Nb Anomalies", "Responsable", "Action Recommandée", "Délai"]:
         h += '<th>%s</th>' % hdr
     h += '</tr></thead><tbody>'
 
@@ -356,6 +356,10 @@ def html_plan_actions_table(rows: list, title: str, accent_color: str,
                 first = False
 
             h += '<td style="text-align:left;font-weight:600;color:#2d3748;">%s</td>' % r["kpi"]
+
+            _target = r.get("target")
+            _target_txt = ("%.0f%%" % _target) if _target is not None else "—"
+            h += '<td style="font-weight:700;color:#475569;">%s</td>' % _target_txt
 
             _st = r.get("status", "oui_rouge" if r["needs_action"] else "non_vert")
             if _st == "oui_rouge":
