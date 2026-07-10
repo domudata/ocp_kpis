@@ -10,11 +10,9 @@ def _stars_html(stars: int, score) -> str:
     stars = max(0, min(5, int(stars)))
     full = "★" * stars
     empty = "☆" * (5 - stars)
-    score_txt = f"{score:.0f}%" if score is not None else "—"
     return (
         f'<span style="color:#f59e0b;font-size:16px;letter-spacing:1px">{full}</span>'
         f'<span style="color:#cbd5e1;font-size:16px;letter-spacing:1px">{empty}</span>'
-        f'<span style="color:#64748b;font-size:11px;margin-left:6px">({score_txt})</span>'
     )
 
 
@@ -111,7 +109,7 @@ def _build_print_table(rows: list, title: str, accent: str, anomaly_dfs: dict) -
 
     h = f'<div class="section-header" style="background:{accent};margin-top:20px">{title} <span class="badge">{len(rows)} action(s)</span></div>'
     h += '<table><thead><tr>'
-    for col in ["Poste de travail", "KPI", "Action requise", "Écart", "Nb anomalies", "Responsable", "Action recommandée"]:
+    for col in ["Poste de travail", "KPI", "Cible", "Action requise", "Écart", "Nb anomalies", "Responsable", "Action recommandée"]:
         h += f'<th>{col}</th>'
     h += '</tr></thead><tbody>'
 
@@ -125,6 +123,9 @@ def _build_print_table(rows: list, title: str, accent: str, anomaly_dfs: dict) -
                 h += f'<td rowspan="{rowspan}" class="left" style="font-weight:700;color:{accent};border-right:3px solid {accent}">{poste}</td>'
                 first = False
             h += f'<td class="left">{r["kpi"]}</td>'
+            _target = r.get("target")
+            _target_txt = f"{_target:.0f}%" if _target is not None else "—"
+            h += f'<td>{_target_txt}</td>'
             _st = r.get("status", "oui_rouge" if r["needs_action"] else "non_vert")
             if _st == "oui_rouge":
                 h += '<td><span class="badge-oui">OUI</span></td>'
@@ -199,9 +200,13 @@ def render_plan_action_tab(plan_actions_rows: list, sf1_rows: list,
         vp_all = sorted(poste_stars.keys())
         st.markdown(html_poste_scores_table(vp_all, poste_stars), unsafe_allow_html=True)
 
-    # ── Tableaux dans l'app ──
+    # ── Tableaux dans l'app (bien séparés visuellement) ──
     st.markdown(
         html_plan_actions_table(sf1_rows, "SF1 — Plan d'Actions", "#3b82f6", anomaly_dfs),
+        unsafe_allow_html=True,
+    )
+    st.markdown(
+        '<div style="height:28px;border-bottom:2px dashed #cbd5e1;margin-bottom:24px;"></div>',
         unsafe_allow_html=True,
     )
     st.markdown(
