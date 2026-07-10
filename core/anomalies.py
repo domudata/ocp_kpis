@@ -115,7 +115,7 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
     ]
     _bud  = _sub_cor["Total coûts budgétés"].fillna(0)
     _reel = _sub_cor["Total coûts réels"].fillna(0)
-    ano_map["OT_COR_EGAL"] = _sub_cor[(_bud - _reel).abs() < 1].groupby(
+    ano_map["OT_COR_EGAL"] = _sub_cor[(_bud - _reel).abs() == 0].groupby(
         "Poste travail princ.")["Ordre"].count()
 
     return ano_map
@@ -175,6 +175,6 @@ def build_anomaly_dfs(dfp, avf, now_ts):
             dfp["is_correctif"] &
             dfp["Statut OT"].isin(["CLOT","TCLO"]) &
             dfp["Statut système"].str.contains("CONF", na=False) &
-            ((dfp["Total coûts budgétés"].fillna(0) - dfp["Total coûts réels"].fillna(0)).abs() < 1)
+            ((dfp["Total coûts budgétés"].fillna(0) - dfp["Total coûts réels"].fillna(0)).abs() == 0)
         ].copy(),
     }
