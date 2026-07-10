@@ -52,6 +52,15 @@ def render_sidebar(fichier_date: str, apm: list, df_full, av_full, now_ts):
                     ot_f = st.file_uploader("Fichier OT",   type=["xlsx"], key="uot")
                     av_f = st.file_uploader("Fichier AVIS", type=["xlsx"], key="uav")
                     new_date = st.text_input("Entrez la date (JJ/MM/AAAA)", value=fichier_date)
+
+                    from core.github_sync import is_configured as _gh_ok
+                    push_gh = st.checkbox(
+                        "☁️ Enregistrer aussi sur GitHub (écrase l'ancien fichier)",
+                        value=_gh_ok(), disabled=not _gh_ok(),
+                        help="Nécessite GITHUB_TOKEN et GITHUB_REPO dans les Secrets."
+                        if not _gh_ok() else "Committe ot.xlsx/avis.xlsx/date.txt sur GitHub.",
+                    )
+
                     if st.button("💾 Sauvegarder et Appliquer"):
                         try:
                             datetime.strptime(new_date, "%d/%m/%Y")
@@ -63,7 +72,23 @@ def render_sidebar(fichier_date: str, apm: list, df_full, av_full, now_ts):
                                     f.write(av_f.getbuffer())
                             with open("date.txt", "w", encoding="utf-8") as f:
                                 f.write(new_date)
-                            st.success("Fichiers et date mis à jour avec succès !")
+                            st.success("Fichiers et date mis à jour localement !")
+
+                            if push_gh:
+                                from core.github_sync import push_multiple_files
+                                files_to_push = {"date.txt": new_date.encode("utf-8")}
+                                if ot_f is not None:
+                                    files_to_push["ot.xlsx"] = ot_f.getvalue()
+                                if av_f is not None:
+                                    files_to_push["avis.xlsx"] = av_f.getvalue()
+                                with st.spinner("☁️ Envoi vers GitHub..."):
+                                    results = push_multiple_files(
+                                        files_to_push,
+                                        f"Mise a jour donnees KPI - {new_date}",
+                                    )
+                                for path, ok, msg in results:
+                                    (st.success if ok else st.error)(msg)
+
                             time.sleep(2)
                             st.cache_data.clear()
                             st.rerun()
