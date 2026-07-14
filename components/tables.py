@@ -410,8 +410,13 @@ def html_plan_actions_table(rows: list, title: str, accent_color: str,
                         df_anom = anomaly_dfs[kpi_name]
                         df_poste = df_anom[df_anom["Poste travail princ."] == poste_name] if "Poste travail princ." in df_anom.columns else df_anom
                         if not df_poste.empty:
+                            # utf-8-sig ajoute le BOM (\ufeff) : Excel Windows
+                            # detecte alors correctement l'UTF-8 et affiche les
+                            # accents sans les corrompre (é, è, à...). Sans le
+                            # BOM, Excel ouvre le CSV en Latin-1/CP1252 par
+                            # defaut -> caracteres accentues corrompus (Ã©...).
                             csv_data = df_poste.to_csv(index=False, sep=';')
-                            b64 = base64.b64encode(csv_data.encode('utf-8')).decode()
+                            b64 = base64.b64encode(csv_data.encode('utf-8-sig')).decode()
                             safe_fn = (f"{poste_name}_{kpi_name}"
                                        .replace("/", "-").replace("\\", "-")
                                        .replace(" ", "_").replace("<", "").replace(">", "")[:50])
