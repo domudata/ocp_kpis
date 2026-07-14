@@ -279,6 +279,30 @@ def main() -> None:
         ano_q_cols = ["Poste de travail"] + PK + ["Total Anomalies"]
         anomaly_dfs = build_anomaly_dfs(dfp, avf, now_ts)
 
+        # ── Export sidebar : classeur complet des anomalies (OT + Avis) ──
+        # Respecte automatiquement le perimetre filtre courant (periode,
+        # poste, atelier, division) car anomaly_dfs est construit a partir
+        # de dfp/avf deja restreints a la selection active.
+        with st.sidebar:
+            with st.expander("📥 Export anomalies (OT + Avis)", expanded=False):
+                try:
+                    from core.export_anomalies import build_anomalies_workbook
+                    _xlsx_bytes = build_anomalies_workbook(anomaly_dfs, KPI_RESP_MAP, ACT_MAP)
+                    st.download_button(
+                        "⬇️ Télécharger le fichier anomalies (.xlsx)",
+                        data=_xlsx_bytes,
+                        file_name=f"anomalies_OT_Avis_{fichier_date.replace('/','-')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True,
+                    )
+                    st.caption(
+                        "Contient 2 feuilles : Anomalies OT et Anomalies Avis, "
+                        "avec Responsable et Action recommandée, filtrées selon "
+                        "la période / poste / atelier / division sélectionnés."
+                    )
+                except Exception as _e:
+                    st.caption(f"Export indisponible : {_e}")
+
         pcols = ["Poste de travail"] + QK + ["Score Performance"]
         qcols = ["Poste de travail"] + PK + ["Score Qualite"]
         prows = []
@@ -403,6 +427,8 @@ def main() -> None:
                         "status":      status,
                         "ecart":       ecart,
                         "nb_anom":     nb_anom,
+                        "actual":      actual,
+                        "target":      target,
                         "responsable": KPI_RESP_MAP.get(kpi, "Non assigne"),
                         "action":      ACT_MAP.get(kpi, ""),
                         "delai":       "",
