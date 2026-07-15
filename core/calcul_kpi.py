@@ -50,16 +50,48 @@ def build_statut_pivot(df_sub, posts):
     return piv.reindex(posts, fill_value=0).fillna(0).astype(int)
 
 
+# Seuil ROUGE (limite basse du jaune) par KPI — DOIT rester identique aux
+# seuils de coloriage des cellules dans components/tables.py (fonction ks())
+# et components/charts.py (_bar_color_for). En dessous de ce seuil = rouge.
+_RED_THRESHOLD = {
+    "OT préparation <1 mois": 75, "OT planification <1 mois": 75, "OT exécution <1 mois": 75,
+    "TAUX_REALISATION_CORRECTIF/PT": 80,
+    "Taux d'approbation des Avis": 90,
+    "OT LANC ESTIME": 95, "Backlog préparation caractérisé": 95,
+    "Backlog planification caractérisé": 95, "OT CONFIME": 95, "OT_COR_EGAL": 95,
+    "Performance Graissage": 90, "Performance Inspection": 90, "Performance Systématiques": 90,
+    "OT Fiabilité": None, "Total Avis de Panne": None,  # jamais rouge
+}
+# KPIs LOWER_BETTER a 2 etats seulement (vert/rouge, pas de jaune) :
+# le seuil rouge = la cible elle-meme (pas de zone intermediaire).
+_RED_THRESHOLD_LOWER = {
+    "OT préparation 1mois< <3mois": 15, "OT planification 1mois< <3mois": 15, "OT exécution 1mois< <3mois": 15,
+    "OT préparation >3 mois": 5, "OT planification >3 mois": 5, "OT exécution >3 mois": 5,
+}
+
+
 def gscore(k, a, t):
     """
-    Score binaire par KPI :
-    - KPI normal (plus haut = mieux)      : 1 si a >= t, sinon 0
-    - KPI LOWER_BETTER (plus bas = mieux) : 1 si a <= t, sinon 0
+    Score binaire aligne sur le coloriage des cellules :
+        - Cellule ROUGE (sous le seuil rouge)      -> 0
+        - Cellule VERTE ou JAUNE (>= seuil rouge)   -> 1
+        - Valeur non applicable (NaN)               -> 0 (exclue du compte
+          par l'appelant via pd.notna avant l'appel)
 
     Score global d une categorie (Performance / Qualite) :
-        = somme(gscore) / nb_kpis × 100
+        = somme(gscore) / nb_kpis_valides × 100
     """
-    if pd.isna(a) or pd.isna(t): return 0
+    if pd.isna(a) or pd.isna(t):
+        return 0
+    if k in _RED_THRESHOLD_LOWER:
+        # plus bas = mieux, seuil unique (pas de jaune)
+        return 1 if a <= _RED_THRESHOLD_LOWER[k] else 0
+    if k in _RED_THRESHOLD:
+        red = _RED_THRESHOLD[k]
+        if red is None:
+            return 1  # jamais rouge (OT Fiabilité / Total Avis de Panne)
+        return 1 if a >= red else 0
+    # KPI non repertorie : fallback sur la cible (ancien comportement)
     if k in LOWER_BETTER:
         return 1 if a <= t else 0
     return 1 if a >= t else 0
