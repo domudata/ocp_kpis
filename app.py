@@ -272,6 +272,42 @@ def main() -> None:
         sf2_p = np.nanmean([pscores[p] for p in sf2_posts]) if sf2_posts else 0
         sf2_q = np.nanmean([qscores[p] for p in sf2_posts]) if sf2_posts else 0
 
+        # ── Diagnostic detail du calcul de score, poste par poste ─────────
+        # Affiche EN DIRECT dans l'app le detail KPI -> valeur -> gscore(0/1)
+        # -> score final, pour verifier que la regle rouge=0/sinon=1 est
+        # bien celle utilisee, sans avoir a comparer manuellement.
+        with st.sidebar:
+            with st.expander("🔬 Diagnostic score par poste", expanded=False):
+                _diag_poste = st.selectbox(
+                    "Choisir un poste", options=sorted(ckdf.index.tolist()),
+                    key="diag_poste_select",
+                )
+                if _diag_poste:
+                    _r = ckdf.loc[_diag_poste]
+                    _rows = []
+                    for _k in QK:
+                        if _k in _r.index and pd.notna(_r[_k]):
+                            _s = gscore(_k, _r[_k], CIBLE[_k])
+                            _rows.append({
+                                "KPI": _k, "Valeur": round(float(_r[_k]), 1),
+                                "Cible": CIBLE[_k], "Score (0/1)": _s,
+                            })
+                    _df_diag = pd.DataFrame(_rows)
+                    st.dataframe(_df_diag, use_container_width=True, height=300)
+                    _tot = _df_diag["Score (0/1)"].sum() if not _df_diag.empty else 0
+                    _cnt = len(_df_diag)
+                    _final = (_tot / _cnt * 100) if _cnt else 0
+                    st.markdown(
+                        f"**Score Performance calculé = {_tot}/{_cnt} × 100 = {_final:.1f}%**"
+                    )
+                    st.markdown(
+                        f"**Score affiché dans l'app (pscores) = {pscores.get(_diag_poste, 0):.1f}%**"
+                    )
+                    if abs(_final - pscores.get(_diag_poste, 0)) > 0.5:
+                        st.error("⚠️ MISMATCH détecté entre le calcul direct et pscores !")
+                    else:
+                        st.success("✅ Cohérent : le calcul direct correspond au score affiché.")
+
         ano_map    = build_ano_map(dfp, avf, now_ts)
         ano_p_rows = build_ano_rows(vp, ano_map, QK)
         ano_q_rows = build_ano_rows(vp, ano_map, PK, fixed_zero=["OT Fiabilité","Total Avis de Panne"])
