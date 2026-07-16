@@ -271,10 +271,10 @@ def show_hbar_thresholds(labels, values, title, s1=S1_DEFAULT, s2=S2_DEFAULT,
                        showarrow=False, font=dict(color=C_HIGH, size=14, family='Inter'))
 
     fig.update_layout(
-        title=dict(text=title, x=0.5, xanchor='center', font=dict(size=16)),
+        title=dict(text=title, x=0.5, xanchor='center', font=dict(size=16, color='#1e293b')),
         height=max(300, 40 * len(labels) + 120),
         xaxis=dict(range=[0, 115], showgrid=False, showticklabels=False, zeroline=False, fixedrange=True),
-        yaxis=dict(autorange="reversed", tickfont=dict(size=12, family='Inter'), fixedrange=True, automargin=True),
+        yaxis=dict(autorange="reversed", tickfont=dict(size=12, family='Inter', color='#1e293b'), fixedrange=True, automargin=True),
         plot_bgcolor='white', paper_bgcolor='white',
         margin=dict(t=90, b=20, l=20, r=50),
         showlegend=False,
@@ -347,11 +347,11 @@ def show_grouped_hbar(vp, pscores: dict, qscores: dict, title: str,
                        showarrow=False, font=dict(color=C_HIGH, size=14, family='Inter'))
 
     fig.update_layout(
-        title=dict(text=title, x=0.5, xanchor='center', font=dict(size=16)),
+        title=dict(text=title, x=0.5, xanchor='center', font=dict(size=16, color='#1e293b')),
         barmode='group', bargap=0.25, bargroupgap=0.08,
         height=max(350, 52 * len(postes) + 130),
         xaxis=dict(range=[0, 115], showgrid=False, showticklabels=False, zeroline=False, fixedrange=True),
-        yaxis=dict(autorange="reversed", tickfont=dict(size=12, family='Inter'), fixedrange=True, automargin=True),
+        yaxis=dict(autorange="reversed", tickfont=dict(size=12, family='Inter', color='#1e293b'), fixedrange=True, automargin=True),
         plot_bgcolor='white', paper_bgcolor='white',
         legend=dict(orientation="h", yanchor="bottom", y=-0.08, x=0.5, xanchor="center"),
         margin=dict(t=90, b=60, l=20, r=50),
