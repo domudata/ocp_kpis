@@ -257,6 +257,10 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list) -> di
     res["ot_confime"] = pv_conf
 
     # ── OT_COR_EGAL (pivot dédié, colonne "OT_COR_EGAL" uniquement) ──
+    # Formule (corrigée) : NON / (OUI+NON) × 100.
+    # OUI = écart de coût détecté (anomalie, cf. anomalies.py), donc c'est
+    # NON qui doit être récompensé dans le score — cohérent avec la
+    # définition de l'anomalie (OUI compté comme anomalie).
     pv_cor = pd.pivot_table(
         df[df["Statut OT"].isin(["CLOT", "TCLO"])],
         index="Poste travail princ.", columns="OT_COR_EGAL",
@@ -265,7 +269,7 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list) -> di
     for c in ["OUI", "NON"]:
         pv_cor[c] = pv_cor.get(c, 0)
     pv_cor["Total"] = pv_cor["OUI"] + pv_cor["NON"]
-    pv_cor["OT_COR_EGAL"] = ckpi(pv_cor["OUI"], pv_cor["Total"])
+    pv_cor["OT_COR_EGAL"] = ckpi(pv_cor["NON"], pv_cor["Total"])
     res["ot_cor_egal"] = pv_cor
 
     # ── Taux approbation avis ──
