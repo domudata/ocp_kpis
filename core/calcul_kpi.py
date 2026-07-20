@@ -2,7 +2,7 @@
 import numpy as np
 import pandas as pd
 
-from core.constants import MP_KW, MPLAN_KW, QK, PK, CIBLE, LOWER_BETTER
+from core.constants import MP_KW, MPLAN_KW, QK, PK, ALL_KPI, CIBLE, LOWER_BETTER
 
 # ──────────────────────────────────────────────
 # Utilitaires de calcul
@@ -99,6 +99,54 @@ def is_lb(k: str) -> bool:
     return k in LOWER_BETTER
 
 # ──────────────────────────────────────────────
+# Score Global (Points 6 & 7)
+# Reutilise STRICTEMENT gscore() -> memes seuils que ks() / get_bar_color().
+#   Rouge  = 0
+#   Orange = 1
+#   Vert   = 1
+# Score Global (%) = (somme des gscore) / (nb de KPI evalues) * 100
+# ──────────────────────────────────────────────
+
+def score_global(values, kpi_list: list = None) -> float:
+    """Calcule le Score Global (%) a partir d'un jeu de valeurs de KPI.
+
+    values    : dict ou pd.Series {nom_kpi: valeur}
+                Peut etre soit la ligne d'un poste (ckdf.loc[poste],
+                valeurs brutes du KPI), soit la ligne "Total general"
+                (valeurs deja agregees en %, memes unites 0-100 donc
+                comparables aux memes seuils gscore/ks/get_bar_color).
+    kpi_list  : liste des KPI a inclure (defaut = ALL_KPI = QK + PK).
+
+    Utilisation :
+      - Par poste       : score_global(ckdf.loc[poste])
+      - Total General   : score_global(tot_general_dict)  # cf. app.py
+    """
+    if kpi_list is None:
+        kpi_list = ALL_KPI
+
+    pts = 0
+    tc = 0
+    for k in kpi_list:
+        if k not in values:
+            continue
+        v = values[k]
+        if v is None:
+            continue
+        try:
+            if pd.isna(v):
+                continue
+        except (TypeError, ValueError):
+            pass
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            continue
+        pts += gscore(k, v, CIBLE.get(k, 100))
+        tc += 1
+
+    return round((pts / tc) * 100, 2) if tc > 0 else 0.0
+
+# ──────────────────────────────────────────────
 # Calcul principal des KPI
 # ──────────────────────────────────────────────
 
@@ -171,8 +219,11 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list) -> di
     la["OT LANC ESTIME"] = ckpi(la["OUI"], la["Total"])
 
     # ── Backlog préparation ──
+    # Filtre : Statut OT = CRÉÉ ET Statut utilisateur contient CRPR
     pc = pd.pivot_table(
-        df[df["Statut OT"] == "CRÉÉ"], index="Poste travail princ.",
+        df[(df["Statut OT"] == "CRÉÉ")
+           & (df["Statut utilisateur"].str.contains("CRPR", case=False, na=False))],
+        index="Poste travail princ.",
         columns="Backlog preparation", values="Ordre", aggfunc="count", fill_value=0
     ).reindex(posts, fill_value=0)
     for c in ["CARACTERISE", "NON CARACTERISE"]:
@@ -181,8 +232,10 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list) -> di
     pc["Backlog préparation caractérisé"] = ckpi(pc["CARACTERISE"], pc["Total"])
 
     # ── Backlog planification ──
+    # Filtre : Statut OT = LANC ET Statut utilisateur contient ATPL
     plc = pd.pivot_table(
-        df[(df["Statut OT"] == "LANC") & (df["Contient SOPL"] == 0)],
+        df[(df["Statut OT"] == "LANC")
+           & (df["Statut utilisateur"].str.contains("ATPL", case=False, na=False))],
         index="Poste travail princ.", columns="Backlog planification",
         values="Ordre", aggfunc="count", fill_value=0
     ).reindex(posts, fill_value=0)
@@ -191,18 +244,29 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list) -> di
     plc["Total"] = plc["CARACTERISE"] + plc["NON CARACTERISE"]
     plc["Backlog planification caractérisé"] = ckpi(plc["CARACTERISE"], plc["Total"])
 
-    # ── OT confirmé / coûts égaux ──
-    for kn, cn in [("OT CONFIME", "OT CONFIME"), ("OT_COR_EGAL", "OT_COR_EGAL")]:
-        pv = pd.pivot_table(
-            df[df["Statut OT"].isin(["CLOT", "TCLO"])],
-            index="Poste travail princ.", columns="OT_COR_EGAL",
-            values="Ordre", aggfunc="count", fill_value=0
-        ).reindex(posts, fill_value=0)
-        for c in ["OUI", "NON"]:
-            pv[c] = pv.get(c, 0)
-        pv["Total"] = pv["OUI"] + pv["NON"]
-        pv[cn] = ckpi(pv["OUI"], pv["Total"])
-        res[kn.lower().replace(" ", "_")] = pv
+    # ── OT CONFIME (pivot dédié, colonne "OT CONFIME" uniquement) ──
+    pv_conf = pd.pivot_table(
+        df[df["Statut OT"].isin(["CLOT", "TCLO"])],
+        index="Poste travail princ.", columns="OT CONFIME",
+        values="Ordre", aggfunc="count", fill_value=0
+    ).reindex(posts, fill_value=0)
+    for c in ["OUI", "NON"]:
+        pv_conf[c] = pv_conf.get(c, 0)
+    pv_conf["Total"] = pv_conf["OUI"] + pv_conf["NON"]
+    pv_conf["OT CONFIME"] = ckpi(pv_conf["OUI"], pv_conf["Total"])
+    res["ot_confime"] = pv_conf
+
+    # ── OT_COR_EGAL (pivot dédié, colonne "OT_COR_EGAL" uniquement) ──
+    pv_cor = pd.pivot_table(
+        df[df["Statut OT"].isin(["CLOT", "TCLO"])],
+        index="Poste travail princ.", columns="OT_COR_EGAL",
+        values="Ordre", aggfunc="count", fill_value=0
+    ).reindex(posts, fill_value=0)
+    for c in ["OUI", "NON"]:
+        pv_cor[c] = pv_cor.get(c, 0)
+    pv_cor["Total"] = pv_cor["OUI"] + pv_cor["NON"]
+    pv_cor["OT_COR_EGAL"] = ckpi(pv_cor["OUI"], pv_cor["Total"])
+    res["ot_cor_egal"] = pv_cor
 
     # ── Taux approbation avis ──
     avf = av.copy()
@@ -214,9 +278,17 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list) -> di
     for c in ["APRQ", "APRV", "APRV AVAU", "REJT"]:
         tca[c] = tca.get(c, 0)
     tca["Total"] = tca[["APRQ", "APRV", "APRV AVAU", "REJT"]].sum(axis=1)
-    tca["Taux d'approbation des Avis"] = ckpi(tca["APRV"], tca["Total"])
+    # Avis approuvés = APRV + APRV AVAU (cohérent avec build_ano_map dans anomalies.py,
+    # qui traite ces deux statuts comme "approuvé"). L'ancienne formule ne comptait
+    # que APRV et sous-évaluait le taux.
+    tca["Taux d'approbation des Avis"] = ckpi(tca["APRV"] + tca["APRV AVAU"], tca["Total"])
 
     # ── Performance Graissage ──
+    # Vérifié (Point 5) : dénominateur = OT type 350 avec Contient SOPL == 1
+    # (origine préventive/planifiée). Cette règle est strictement identique à
+    # celle utilisée pour Performance Inspection et Performance Systématiques
+    # ci-dessous (même filtre Contient SOPL == 1) : cohérence confirmée dans
+    # les 3 KPI de préventif. Aucune correction appliquée.
     g_num = df[(df["Statut OT"].isin(["CLOT", "TCLO"])) & (df["_tw_num"] == 350)].groupby(
         "Poste travail princ.")["Ordre"].count()
     g_den = df[(df["Contient SOPL"] == 1) & (df["_tw_num"] == 350)].groupby(
