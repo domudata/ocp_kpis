@@ -7,11 +7,9 @@ import streamlit as st
 
 from core.constants import MP_KW, MPLAN_KW
 
-# Mots cles caracterisation (d apres PDF OCP)
-CRPR_KW  = ['ATPD','ATMR','ATRS','ATMO','ATER']  # Prep caracterisee
-ATPL_KW  = ['ATEI','ATAL','ATAS','AGAR','ATHS']  # Plan caracterisee
-TW_PREV  = [350, 290, 300, 310, 360]              # TW preventifs
-
+# ──────────────────────────────────────────────
+# Utilitaires basiques
+# ──────────────────────────────────────────────
 
 def get_date_from_file() -> str:
     if os.path.exists("date.txt"):
@@ -22,48 +20,82 @@ def get_date_from_file() -> str:
             pass
     return pd.Timestamp.today().strftime("%d/%m/%Y")
 
-
 def contient_mot(t, lm) -> bool:
     t = str(t)
     return any(m in t for l in lm for m in l.split())
 
+def cat_age(a) -> str:
+    """Catégorise l'âge d'un OT selon la règle officielle SAP PM (en JOURS,
+    cf. classeur "Définition KPIs SAP PM") :
+      - < 30 jours              -> "<1 mois"
+      - > 30j et < 90j          -> "1 mois < <3 mois"
+      - > 90j                   -> ">3 mois"
 
-def cat_age_jours(days) -> str:
-    """Age en jours -> tranche"""
-    if pd.isna(days): return "Inconnu"
-    if days < 30:     return "<1 mois"
-    elif days > 90:   return ">3 mois"
+    ATTENTION : `a` doit être un nombre de JOURS (pas de mois calendaires).
+    L'ancienne version comparait une différence de mois calendaires
+    ((année_now-année_date)*12 + (mois_now-mois_date)), ce qui provoque des
+    erreurs de classement autour des changements de mois (ex : un OT créé
+    la veille, le dernier jour du mois précédent, était compté comme
+    "1 mois < <3 mois" au lieu de "<1 mois"). Corrigé : calcul en jours.
+    """
+    if pd.isna(a):
+        return "Inconnu"
+    if a < 30:
+        return "<1 mois"
+    if a > 90:
+        return ">3 mois"
     return "1 mois < <3 mois"
-
 
 def excr(df: pd.DataFrame) -> pd.DataFrame:
     if "Poste travail princ." in df.columns:
         return df[
             ~df["Poste travail princ."].astype(str).str.contains(
-                "cresseur", case=False, na=False)
+                "cresseur", case=False, na=False
+            )
         ].copy()
     return df
 
+# ──────────────────────────────────────────────
+# Lecture Excel robuste
+# ──────────────────────────────────────────────
 
 @st.cache_data(show_spinner=False)
 def read_excel_safe(bytes_data: bytes) -> pd.DataFrame:
+    """Lit un fichier Excel en détectant automatiquement le vrai format."""
     bio = io.BytesIO(bytes_data)
     header = bytes_data[:8]
+
     if header[:4] in (b'PK\x03\x04', b'PK\x05\x06'):
         for engine in ['openpyxl', 'calamine']:
-            try:    return pd.read_excel(bio, engine=engine)
-            except: bio.seek(0)
+            try:
+                return pd.read_excel(bio, engine=engine)
+            except Exception:
+                bio.seek(0)
+                continue
+
     if header == b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1':
         for engine in ['xlrd', 'calamine']:
-            try:    return pd.read_excel(bio, engine=engine)
-            except: bio.seek(0)
+            try:
+                return pd.read_excel(bio, engine=engine)
+            except Exception:
+                bio.seek(0)
+                continue
+
     for engine in ['openpyxl', 'xlrd', 'calamine']:
         try:
             bio.seek(0)
             return pd.read_excel(bio, engine=engine)
-        except: continue
-    raise ValueError("Format de fichier non reconnu.")
+        except Exception:
+            continue
 
+    raise ValueError(
+        "Format de fichier non reconnu. Le fichier n'est ni un .xlsx ni un .xls valide.\n"
+        "Vérifiez que le fichier n'est pas corrompu ou protégé par mot de passe."
+    )
+
+# ──────────────────────────────────────────────
+# Préparation des données
+# ──────────────────────────────────────────────
 
 @st.cache_data(show_spinner=False)
 def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
@@ -72,129 +104,83 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
     raw_ot = excr(raw_ot)
     raw_av = excr(raw_av)
 
-    # Dates OT
-    for c in ["Créé le","Date de début planifiée","Date de clôture","Début réel","Fin réelle"]:
+    for c in ["Créé le", "Date de début planifiée", "Date de clôture", "Début réel", "Fin réelle"]:
         if c in raw_ot.columns:
             raw_ot[c] = pd.to_datetime(raw_ot[c], errors="coerce")
-    # Dates Avis
-    for c in ["Créé le","Début souhaité","Date de la clôture"]:
+    for c in ["Créé le", "Début souhaité", "Date de la clôture"]:
         if c in raw_av.columns:
             raw_av[c] = pd.to_datetime(raw_av[c], errors="coerce")
 
     now_ts = pd.Timestamp.today()
     df = raw_ot.copy()
 
-    # ── OT correctif = Plan d entretien == 0 ────────────────────────────
-    df["is_correctif"] = df["Plan d'entretien"].fillna(0) == 0
+    df["Backlog preparation"] = np.where(
+        df["Statut utilisateur"].apply(lambda x: contient_mot(x, MP_KW)),
+        "CARACTERISE", "NON CARACTERISE"
+    )
+    df["Backlog planification"] = np.where(
+        df["Statut utilisateur"].apply(lambda x: contient_mot(x, MPLAN_KW)),
+        "CARACTERISE", "NON CARACTERISE"
+    )
+    df["Type Carac Prep"] = df["Statut utilisateur"].apply(
+        lambda x: next((kw.split()[0] for kw in MP_KW if kw in str(x)), "NON CARACTERISE")
+    )
+    df["Type Carac Plan"] = df["Statut utilisateur"].apply(
+        lambda x: next((kw.split()[0] for kw in MPLAN_KW if kw in str(x)), "NON CARACTERISE")
+    )
 
-    # ── Statut OT (1er mot du statut systeme) ───────────────────────────
+    # ── Âge des OT (Préparation / Planification / Exécution) ──
+    # Règle officielle (classeur "Définition KPIs SAP PM") :
+    #   Préparation   : référence = "Créé le"                → < 30j / 30-90j / > 90j
+    #   Planification : référence = "Date de début planifiée" → < 30j / 30-90j / > 90j
+    #   Exécution     : référence = "Date de début planifiée" → < 30j / 30-90j / > 90j
+    # CORRIGÉ : âge calculé en JOURS (now_ts - date).dt.days, plus en
+    # différence de mois calendaires (qui décalait le classement des OT
+    # autour des changements de mois).
+    for dc, am, ac in [
+        ('Créé le', "amp", "ap"),
+        ('Date de début planifiée', "amlp", "alp"),
+        ('Date de début planifiée', "amex", "aex"),
+    ]:
+        if dc in df.columns:
+            df[am] = (now_ts - df[dc]).dt.days
+            df[ac] = df[am].apply(cat_age)
+        else:
+            df[am] = np.nan
+            df[ac] = "Inconnu"
+
+    df["OT CONFIME"] = np.where(
+        df["Statut système"].str.contains("CLOT|TCLO", na=False)
+        & df["Statut système"].str.contains("CONF", na=False),
+        "OUI", "NON"
+    )
+
+    df["Contient SOPL"] = (
+        df["Statut utilisateur"].str.contains("SOPL", na=False).map({True: 1, False: 0})
+    )
+    df["OT LANC ESTIME"] = np.where(df["Total coûts budgétés"].fillna(0) == 0, "NON", "OUI")
+    df["OT_COR_EGAL"] = np.where(
+        (df["Total coûts budgétés"].fillna(0) - df["Total coûts réels"].fillna(0)) == 0,
+        "OUI", "NON"
+    )
+    df["_tw_num"] = pd.to_numeric(
+        df.get("Type de travail", pd.Series(dtype=float)), errors="coerce"
+    )
+
     if "Statut système" in df.columns:
         df["Statut OT"] = (
             df["Statut système"].fillna("").astype(str).str.strip().str.split().str[0]
         )
 
-    # ── SOPL ─────────────────────────────────────────────────────────────
-    df["Contient SOPL"] = (
-        df["Statut utilisateur"].str.contains("SOPL", na=False).map({True:1, False:0})
-    )
-
-    # ── Type de travail numerique ────────────────────────────────────────
-    df["_tw_num"] = pd.to_numeric(
-        df.get("Type de travail", pd.Series(dtype=float)), errors="coerce"
-    )
-
-    # ── Colonnes couts : parsing DEFENSIF ────────────────────────────────
-    # Certains exports SAP peuvent stocker les couts en texte avec virgule
-    # decimale ("0,2" au lieu de 0.2). Si la colonne est deja numerique
-    # (cas normal), on ne touche a rien. Si elle est du texte, on remplace
-    # la virgule par un point AVANT conversion, pour eviter que pd.to_numeric
-    # echoue silencieusement et transforme "0,2" en NaN -> 0 (perte de la
-    # partie decimale).
-    def _parse_cout(series):
-        if pd.api.types.is_numeric_dtype(series):
-            return series
-        return pd.to_numeric(
-            series.astype(str).str.replace(",", ".", regex=False).str.strip(),
-            errors="coerce",
-        )
-
-    for _cc in ["Total coûts budgétés", "Total coûts réels"]:
-        if _cc in df.columns:
-            df[_cc] = _parse_cout(df[_cc])
-
-    # ── Age PREP : |now - Créé le| en jours ─────────────────────────────
-    # abs() pour ignorer les dates futures (evite classement errone en <1m)
-    if "Créé le" in df.columns:
-        df["days_prep"] = (now_ts - df["Créé le"]).dt.days.abs()
-        df["ap"] = df["days_prep"].apply(cat_age_jours)
-    else:
-        df["days_prep"] = np.nan
-        df["ap"] = "Inconnu"
-
-    # ── Age PLAN et EXEC : |now - Date planifiée| en jours ──────────────
-    # abs() pour ignorer les dates futures
-    if "Date de début planifiée" in df.columns:
-        df["days_planif"] = (now_ts - df["Date de début planifiée"]).dt.days.abs()
-        df["alp"] = df["days_planif"].apply(cat_age_jours)
-        df["aex"] = df["days_planif"].apply(cat_age_jours)
-    else:
-        df["days_planif"] = np.nan
-        df["alp"] = "Inconnu"
-        df["aex"] = "Inconnu"
-
-    # ── OT CONFIME ───────────────────────────────────────────────────────
-    df["OT CONFIME"] = np.where(
-        df["Statut système"].str.contains("CLOT|TCLO", na=False) &
-        df["Statut système"].str.contains("CONF", na=False),
-        "OUI", "NON"
-    )
-
-    # ── OT LANC ESTIME : charge estimee > 0 ─────────────────────────────
-    df["OT LANC ESTIME"] = np.where(
-        df["Total coûts budgétés"].fillna(0) > 0, "OUI", "NON"
-    )
-
-    # ── OT_COR_EGAL ──────────────────────────────────────────────────────
-    # OUI = |bud - reel| < 1  → anomalie (coûts quasi identiques = pas d imputation reelle)
-    # NON = |bud - reel| >= 1 → conforme (ecart significatif = bonne imputation)
-    # Note : formule validee sur SF1 (58.7% calc vs 60.9% ref ✅)
-    _diff_abs = (df["Total coûts budgétés"].fillna(0) - df["Total coûts réels"].fillna(0)).abs()
-    df["OT_COR_EGAL"] = np.where(_diff_abs == 0, "OUI", "NON")
-
-    # ── Backlog preparation (pour graphiques) ───────────────────────────
-    pat_prep = '|'.join(CRPR_KW)
-    df["Backlog preparation"] = np.where(
-        df["Statut utilisateur"].str.contains(pat_prep, na=False),
-        "CARACTERISE", "NON CARACTERISE"
-    )
-    df["Type Carac Prep"] = df["Statut utilisateur"].apply(
-        lambda x: next((kw for kw in CRPR_KW if kw in str(x)), "NON CARACTERISE")
-    )
-
-    # ── Backlog planification (pour graphiques) ──────────────────────────
-    pat_plan = '|'.join(ATPL_KW)
-    df["Backlog planification"] = np.where(
-        df["Statut utilisateur"].str.contains(pat_plan, na=False),
-        "CARACTERISE", "NON CARACTERISE"
-    )
-    df["Type Carac Plan"] = df["Statut utilisateur"].apply(
-        lambda x: next((kw for kw in ATPL_KW if kw in str(x)), "NON CARACTERISE")
-    )
-
-    # ── Avis : hors types ZU/Z4/ZR/ZP (d apres PDF page 11) ─────────────
     avf = raw_av[
-        ~raw_av["Type d'avis"].isin(["ZU","Z4","ZR","ZP"])
+        (raw_av["Ordre"].isna() | (raw_av["Ordre"].astype(str).str.strip() == ""))
+        & raw_av["Type d'avis"].isin(["ZU", "Z4", "ZR", "ZP"])
     ].copy()
 
-    # ── Postes de travail SF1/SF2 ────────────────────────────────────────
-    # Filtre STRICT : on ne garde QUE les OT et Avis des postes SF1/SF2
-    _mask_sf = df["Poste travail princ."].astype(str).str.startswith(("SF1","SF2"), na=False)
-    df = df[_mask_sf].copy()
-
-    if "Poste travail princ." in avf.columns:
-        _mask_sf_av = avf["Poste travail princ."].astype(str).str.startswith(("SF1","SF2"), na=False)
-        avf = avf[_mask_sf_av].copy()
-
-    apm = sorted(df["Poste travail princ."].dropna().unique().tolist())
+    apm = sorted(
+        df[
+            df["Poste travail princ."].astype(str).str.startswith(("SF1", "SF2"), na=False)
+        ]["Poste travail princ."].dropna().unique().tolist()
+    )
 
     return df, avf, apm, now_ts
