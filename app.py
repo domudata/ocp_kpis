@@ -200,26 +200,37 @@ def main() -> None:
         cible_q["Score Qualite"] = "100"
         qrows.append(cible_q)
 
-        # ── Ligne Total general (CORRIGÉ) ──────────────────────────────────
-        # AVANT : chaque colonne KPI comptait le % de postes conformes
-        # (vert/orange) via gscore -> une "compliance rate", pas la vraie
-        # valeur du KPI. Résultat incohérent avec pa/qa (utilisés pour les
-        # cartes et le tableau de bord) : deux nombres différents pour le
-        # même KPI selon l'onglet consulté.
-        # APRÈS : chaque colonne KPI reprend directement pa[k]/qa[k], la
-        # moyenne réelle du KPI sur les postes affichés -> même valeur
-        # partout dans l'application pour un même KPI.
-        # Le Score Performance / Score Qualite du Total general reste
-        # inchangé : moyenne des scores par poste (pscores/qscores).
+        # ── Ligne Total general (rouge=0, sinon=1 — même règle que gscore(),
+        # appliquée ici verticalement) ─────────────────────────────────────
+        # Ni une moyenne simple (pa/qa), ni un total pondéré (somme des
+        # numérateurs/dénominateurs) : pour chaque colonne KPI, on compte
+        # le nombre de POSTES non-rouges (gscore = 1) parmi tous les
+        # postes évalués, divisé par le nombre de postes -> % de postes
+        # non-rouges sur ce KPI. Exactement la même règle rouge=0/sinon=1
+        # que celle utilisée horizontalement pour pscores/qscores
+        # (par poste, à travers les KPI) — juste appliquée verticalement
+        # ici (par KPI, à travers les postes).
         tot_p = {"Poste de travail": "Total general", "_t": "total"}
         for k in QK:
-            tot_p[k] = "%.1f" % pa.get(k, 0)
+            cc = tc = 0
+            for poste in ckdf.index:
+                r = ckdf.loc[poste]
+                if k in r.index:
+                    cc += gscore(k, r[k], CIBLE.get(k, 100))
+                    tc += 1
+            tot_p[k] = "%.1f" % ((cc / tc) * 100 if tc > 0 else 0)
         tot_p["Score Performance"] = "%.2f" % (sum(pscores.values()) / len(pscores)) if pscores else "0.00"
         prows.append(tot_p)
 
         tot_q = {"Poste de travail": "Total general", "_t": "total"}
         for k in PK:
-            tot_q[k] = "%.1f" % qa.get(k, 0)
+            cc = tc = 0
+            for poste in ckdf.index:
+                r = ckdf.loc[poste]
+                if k in r.index:
+                    cc += gscore(k, r[k], CIBLE.get(k, 100))
+                    tc += 1
+            tot_q[k] = "%.1f" % ((cc / tc) * 100 if tc > 0 else 0)
         tot_q["Score Qualite"] = "%.2f" % (sum(qscores.values()) / len(qscores)) if qscores else "0.00"
         qrows.append(tot_q)
 
