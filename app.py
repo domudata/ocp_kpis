@@ -369,19 +369,22 @@ def main() -> None:
         cible_q["Score Qualite"] = "100"
         qrows.append(cible_q)
 
-        # Total general = moyenne directe des valeurs par KPI (NaN exclus)
+        # Total general par KPI (CORRIGÉ) : rouge=0/sinon=1 (gscore), pas une
+        # moyenne. Pour chaque KPI, on compte le % de postes non-rouges
+        # parmi les postes où la valeur n'est pas NaN.
         tot_p = {"Poste de travail": "Total general", "_t": "total"}
         for k in QK:
-            vals = []
+            cc = tc = 0
             for rw in prows:
-                if k in rw and rw.get("_t") not in ("cible","total"):
+                if k in rw and rw.get("_t") not in ("cible", "total"):
                     try:
                         fv = float(rw[k])
-                        if pd.notna(fv):        # exclure les NaN
-                            vals.append(fv)
+                        if pd.notna(fv):
+                            cc += gscore(k, fv, CIBLE.get(k, 100))
+                            tc += 1
                     except Exception:
                         pass
-            tot_p[k] = "%.1f" % (sum(vals) / len(vals)) if vals else "nan"
+            tot_p[k] = ("%.1f" % ((cc / tc) * 100)) if tc > 0 else "nan"
 
         # ── Score Performance du Total general (CORRIGÉ) ───────────────────
         # AVANT : moyenne des pscores par poste (sum(pscores.values())/len(pscores)).
@@ -405,16 +408,17 @@ def main() -> None:
 
         tot_q = {"Poste de travail": "Total general", "_t": "total"}
         for k in PK:
-            vals = []
+            cc = tc = 0
             for rw in qrows:
-                if k in rw and rw.get("_t") not in ("cible","total"):
+                if k in rw and rw.get("_t") not in ("cible", "total"):
                     try:
                         fv = float(rw[k])
-                        if pd.notna(fv):        # exclure les NaN
-                            vals.append(fv)
+                        if pd.notna(fv):
+                            cc += gscore(k, fv, CIBLE.get(k, 100))
+                            tc += 1
                     except Exception:
                         pass
-            tot_q[k] = "%.1f" % (sum(vals) / len(vals)) if vals else "nan"
+            tot_q[k] = ("%.1f" % ((cc / tc) * 100)) if tc > 0 else "nan"
 
         # ── Score Qualite du Total general (CORRIGÉ) ───────────────────────
         # Même principe que Score Performance ci-dessus : calculé
