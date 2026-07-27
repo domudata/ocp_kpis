@@ -382,7 +382,25 @@ def main() -> None:
                     except Exception:
                         pass
             tot_p[k] = "%.1f" % (sum(vals) / len(vals)) if vals else "nan"
-        tot_p["Score Performance"] = "%.2f" % (sum(pscores.values()) / len(pscores)) if pscores else "0.00"
+
+        # ── Score Performance du Total general (CORRIGÉ) ───────────────────
+        # AVANT : moyenne des pscores par poste (sum(pscores.values())/len(pscores)).
+        # APRÈS : calculé DIRECTEMENT sur les valeurs de la ligne Total general
+        # (tot_p[k]) via gscore (rouge=0/sinon=1), sans passer par la moyenne
+        # des scores par poste.
+        score_total = 0
+        nb_kpi = 0
+
+        for k in QK:
+            try:
+                val = float(tot_p[k])
+                if pd.notna(val):
+                    score_total += gscore(k, val, CIBLE[k])
+                    nb_kpi += 1
+            except Exception:
+                pass
+
+        tot_p["Score Performance"] = "%.2f" % ((score_total / nb_kpi) * 100 if nb_kpi else 0)
         prows.append(tot_p)
 
         tot_q = {"Poste de travail": "Total general", "_t": "total"}
@@ -397,7 +415,24 @@ def main() -> None:
                     except Exception:
                         pass
             tot_q[k] = "%.1f" % (sum(vals) / len(vals)) if vals else "nan"
-        tot_q["Score Qualite"] = "%.2f" % (sum(qscores.values()) / len(qscores)) if qscores else "0.00"
+
+        # ── Score Qualite du Total general (CORRIGÉ) ───────────────────────
+        # Même principe que Score Performance ci-dessus : calculé
+        # directement sur les valeurs de la ligne Total general (tot_q[k])
+        # via gscore, sans passer par la moyenne des qscores par poste.
+        score_total = 0
+        nb_kpi = 0
+
+        for k in PK:
+            try:
+                val = float(tot_q[k])
+                if pd.notna(val):
+                    score_total += gscore(k, val, CIBLE[k])
+                    nb_kpi += 1
+            except Exception:
+                pass
+
+        tot_q["Score Qualite"] = "%.2f" % ((score_total / nb_kpi) * 100 if nb_kpi else 0)
         qrows.append(tot_q)
 
         save_kpis_to_excel(
