@@ -551,10 +551,19 @@ def main() -> None:
                 stars = 0
             poste_stars[poste] = {"score": score_global, "stars": stars}
 
-        _pa_valid = [v for v in pa.values() if pd.notna(v)]
-        _qa_valid = [v for v in qa.values() if pd.notna(v)]
-        avg_p_score  = sum(_pa_valid) / len(_pa_valid) if _pa_valid else 0
-        avg_q_score  = sum(_qa_valid) / len(_qa_valid) if _qa_valid else 0
+        # CORRIGÉ : avg_p_score/avg_q_score (cartes) utilisaient encore la
+        # moyenne simple de pa/qa. Pour être cohérent avec tot_p/tot_q
+        # (déjà basés sur gscore), on reprend directement le Score
+        # Performance/Qualite du Total general déjà calculé ci-dessus —
+        # même chiffre affiché dans les cartes et dans les tableaux.
+        try:
+            avg_p_score = float(tot_p["Score Performance"])
+        except Exception:
+            avg_p_score = 0
+        try:
+            avg_q_score = float(tot_q["Score Qualite"])
+        except Exception:
+            avg_q_score = 0
         total_ano_p  = sum(r["Total Anomalies"] for r in ano_p_rows if r.get("Poste de travail") != "Total")
         total_ano_q  = sum(r["Total Anomalies"] for r in ano_q_rows if r.get("Poste de travail") != "Total")
         total_ot     = len(df)
