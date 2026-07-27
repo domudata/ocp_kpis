@@ -369,53 +369,34 @@ def main() -> None:
         cible_q["Score Qualite"] = "100"
         qrows.append(cible_q)
 
-        # ── Total general (CORRIGÉ) ─────────────────────────────────────────
-        # AVANT : moyenne directe des valeurs par KPI (sum(vals)/len(vals)).
-        # APRÈS : même règle rouge=0/sinon=1 que gscore() (déjà utilisée
-        # ci-dessus pour pscores/qscores, horizontalement par poste) —
-        # appliquée ici VERTICALEMENT : pour chaque KPI, on compte le nombre
-        # de postes non-rouges (gscore=1) parmi les postes où la valeur
-        # n'est pas NaN, divisé par ce nombre de postes évalués.
+        # Total general = moyenne directe des valeurs par KPI (NaN exclus)
         tot_p = {"Poste de travail": "Total general", "_t": "total"}
         for k in QK:
-            cc = tc = 0
-            for poste in ckdf.index:
-                r = ckdf.loc[poste]
-                if k in r.index and pd.notna(r[k]):
-                    cc += gscore(k, r[k], CIBLE.get(k, 100))
-                    tc += 1
-            tot_p[k] = ("%.1f" % ((cc / tc) * 100)) if tc > 0 else "nan"
-
-        # Age Préparation/Planification/Exécution : les 3 tranches (<1 mois,
-        # 1-3 mois, >3 mois) se complètent à 100% (tout OT en backlog est
-        # dans l'une des 3). Le Total general de "1-3 mois" et ">3 mois"
-        # est donc dérivé comme 100 - Total("<1 mois") de la même
-        # catégorie, plutôt que recompté indépendamment via gscore.
-        _age_groups = [
-            ("OT préparation <1 mois", "OT préparation 1mois< <3mois", "OT préparation >3 mois"),
-            ("OT planification <1 mois", "OT planification 1mois< <3mois", "OT planification >3 mois"),
-            ("OT exécution <1 mois", "OT exécution 1mois< <3mois", "OT exécution >3 mois"),
-        ]
-        for _k1, _k2, _k3 in _age_groups:
-            if _k1 in tot_p and tot_p[_k1] != "nan":
-                _complement = 100.0 - float(tot_p[_k1])
-                if _k2 in QK:
-                    tot_p[_k2] = "%.1f" % _complement
-                if _k3 in QK:
-                    tot_p[_k3] = "%.1f" % _complement
-
+            vals = []
+            for rw in prows:
+                if k in rw and rw.get("_t") not in ("cible","total"):
+                    try:
+                        fv = float(rw[k])
+                        if pd.notna(fv):        # exclure les NaN
+                            vals.append(fv)
+                    except Exception:
+                        pass
+            tot_p[k] = "%.1f" % (sum(vals) / len(vals)) if vals else "nan"
         tot_p["Score Performance"] = "%.2f" % (sum(pscores.values()) / len(pscores)) if pscores else "0.00"
         prows.append(tot_p)
 
         tot_q = {"Poste de travail": "Total general", "_t": "total"}
         for k in PK:
-            cc = tc = 0
-            for poste in ckdf.index:
-                r = ckdf.loc[poste]
-                if k in r.index and pd.notna(r[k]):
-                    cc += gscore(k, r[k], CIBLE.get(k, 100))
-                    tc += 1
-            tot_q[k] = ("%.1f" % ((cc / tc) * 100)) if tc > 0 else "nan"
+            vals = []
+            for rw in qrows:
+                if k in rw and rw.get("_t") not in ("cible","total"):
+                    try:
+                        fv = float(rw[k])
+                        if pd.notna(fv):        # exclure les NaN
+                            vals.append(fv)
+                    except Exception:
+                        pass
+            tot_q[k] = "%.1f" % (sum(vals) / len(vals)) if vals else "nan"
         tot_q["Score Qualite"] = "%.2f" % (sum(qscores.values()) / len(qscores)) if qscores else "0.00"
         qrows.append(tot_q)
 
