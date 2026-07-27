@@ -135,14 +135,18 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
     # mot de l'entrée. kw.split()[-1] fonctionne aussi bien pour les
     # entrées composées ("CRPR ATPD" -> "ATPD") que pour les entrées à un
     # seul mot ("ATPD" -> "ATPD"), sans risque d'IndexError.
-    # CORRIGÉ : meme probleme de casse que contient_mot() -> comparaison
-    # insensible a la casse (.upper() des deux cotes) pour etre coherent.
-    _su_upper = df["Statut utilisateur"].astype(str).str.upper()
-    df["Type Carac Prep"] = _su_upper.apply(
-        lambda x: next((kw.split()[-1] for kw in MP_KW if kw.upper() in x), "NON CARACTERISE")
+    # CORRIGÉ (TypeError) : l'étape intermédiaire "_su_upper = ...astype(str)
+    # .str.upper()" plantait car avec le dtype Arrow/string de pandas
+    # récent, une valeur vide (NaN) reste un objet NA (pas une vraie chaîne
+    # Python) même après .astype(str) -> "kw.upper() in x" levait un
+    # TypeError sur ces valeurs. Fix : str(x).upper() directement dans le
+    # lambda (comme contient_mot() ci-dessus), qui convertit TOUJOURS en
+    # chaîne Python native quel que soit le type d'entrée (NaN, NA, etc.).
+    df["Type Carac Prep"] = df["Statut utilisateur"].apply(
+        lambda x: next((kw.split()[-1] for kw in MP_KW if kw.upper() in str(x).upper()), "NON CARACTERISE")
     )
-    df["Type Carac Plan"] = _su_upper.apply(
-        lambda x: next((kw.split()[-1] for kw in MPLAN_KW if kw.upper() in x), "NON CARACTERISE")
+    df["Type Carac Plan"] = df["Statut utilisateur"].apply(
+        lambda x: next((kw.split()[-1] for kw in MPLAN_KW if kw.upper() in str(x).upper()), "NON CARACTERISE")
     )
 
     # ── Âge des OT (Préparation / Planification / Exécution) ──
