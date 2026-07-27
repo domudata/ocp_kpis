@@ -267,10 +267,31 @@ def main() -> None:
 
         sf1_posts = [p for p in vp if str(p).startswith("SF1")]
         sf2_posts = [p for p in vp if str(p).startswith("SF2")]
-        sf1_p = np.nanmean([pscores[p] for p in sf1_posts]) if sf1_posts else 0
-        sf1_q = np.nanmean([qscores[p] for p in sf1_posts]) if sf1_posts else 0
-        sf2_p = np.nanmean([pscores[p] for p in sf2_posts]) if sf2_posts else 0
-        sf2_q = np.nanmean([qscores[p] for p in sf2_posts]) if sf2_posts else 0
+
+        def calc_score_division(postes, liste_kpi):
+            score = 0
+            nb = 0
+
+            for kpi in liste_kpi:
+                valeurs = []
+
+                for poste in postes:
+                    if poste in ckdf.index:
+                        val = ckdf.loc[poste, kpi]
+                        if pd.notna(val):
+                            valeurs.append(float(val))
+
+                if valeurs:
+                    moyenne = sum(valeurs) / len(valeurs)
+                    score += gscore(kpi, moyenne, CIBLE[kpi])
+                    nb += 1
+
+            return round(score / nb * 100, 2) if nb else 0
+
+        sf1_p = calc_score_division(sf1_posts, QK)
+        sf1_q = calc_score_division(sf1_posts, PK)
+        sf2_p = calc_score_division(sf2_posts, QK)
+        sf2_q = calc_score_division(sf2_posts, PK)
 
         # ── Diagnostic detail du calcul de score, poste par poste ─────────
         # Affiche EN DIRECT dans l'app le detail KPI -> valeur -> gscore(0/1)
