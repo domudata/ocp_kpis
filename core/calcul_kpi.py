@@ -192,6 +192,12 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list) -> di
     )
 
     # ── Préparation ──
+    # REVERT : le test empirique face au fichier système montre que retirer
+    # la condition Statut OT==CRÉÉ fait EXPLOSER la tranche >3 mois (des OT
+    # deja clotures gardant "CRPR" dans leur historique se retrouvent
+    # comptés) — largement pire que la version originale. On garde donc
+    # Statut OT==CRÉÉ malgré l'illustration officielle (probablement des
+    # exemples pédagogiques non représentatifs du filtre réel de production).
     pr = cpiv(
         df,
         (df["Statut OT"] == "CRÉÉ")
@@ -243,10 +249,11 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list) -> di
     la["OT LANC ESTIME"] = ckpi(la["OUI"], la["Total"])
 
     # ── Backlog préparation ──
-    # Filtre : Statut OT = CRÉÉ ET Statut utilisateur contient CRPR
+    # REVERT : meme constat que Age Preparation ci-dessus, on garde
+    # Statut OT==CRÉÉ (cf. commentaire plus haut).
     pc = pd.pivot_table(
         df[(df["Statut OT"] == "CRÉÉ")
-           & (df["Statut utilisateur"].str.contains("CRPR", case=False, na=False))],
+           & (df["Statut utilisateur"].str.contains(r"\bCRPR\b", case=False, na=False))],
         index="Poste travail princ.",
         columns="Backlog preparation", values="Ordre", aggfunc="count", fill_value=0
     ).reindex(posts, fill_value=0)
