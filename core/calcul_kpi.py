@@ -291,12 +291,14 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list) -> di
     res["ot_confime"] = pv_conf
 
     # ── OT_COR_EGAL (pivot dédié, colonne "OT_COR_EGAL" uniquement) ──
-    # Formule (corrigée) : NON / (OUI+NON) × 100.
+    # Formule (corrigée) : NON / (OUI+NON) × 100, restreint aux OT
+    # CORRECTIFS (Type d'ordre == "ZCOR") — la formule officielle dit
+    # explicitement "OT correctifs clôturés", pas tous les OT clôturés.
     # OUI = écart de coût détecté (anomalie, cf. anomalies.py), donc c'est
     # NON qui doit être récompensé dans le score — cohérent avec la
     # définition de l'anomalie (OUI compté comme anomalie).
     pv_cor = pd.pivot_table(
-        df[df["Statut OT"].isin(["CLOT", "TCLO"])],
+        df[(df["Statut OT"].isin(["CLOT", "TCLO"])) & (df["Type d'ordre"] == "ZCOR")],
         index="Poste travail princ.", columns="OT_COR_EGAL",
         values="Ordre", aggfunc="count", fill_value=0
     ).reindex(posts, fill_value=0)
