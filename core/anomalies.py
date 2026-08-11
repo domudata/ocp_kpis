@@ -69,7 +69,9 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
     # OT CONFIME et OT_COR_EGAL : déjà indépendants (chacun sa propre colonne),
     # cohérents avec la séparation appliquée dans calcul_kpi.py. Inchangé.
     ano_map["OT CONFIME"] = dfp[(dfp["Statut OT"].isin(["CLOT", "TCLO"])) & (dfp["OT CONFIME"] == "NON")].groupby("Poste travail princ.")["Ordre"].count()
-    ano_map["OT_COR_EGAL"] = dfp[(dfp["Statut OT"].isin(["CLOT", "TCLO"])) & (dfp["OT_COR_EGAL"] == "OUI")].groupby("Poste travail princ.")["Ordre"].count()
+    # OT_COR_EGAL restreint aux OT correctifs (Type d'ordre == "ZCOR"),
+    # conforme a la formule officielle "OT correctifs clotures".
+    ano_map["OT_COR_EGAL"] = dfp[(dfp["Statut OT"].isin(["CLOT", "TCLO"])) & (dfp["Type d'ordre"] == "ZCOR") & (dfp["OT_COR_EGAL"] == "OUI")].groupby("Poste travail princ.")["Ordre"].count()
 
     return ano_map
 
@@ -137,5 +139,5 @@ def build_anomaly_dfs(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
         "Backlog préparation caractérisé": dfp[prep_filt & (dfp["Backlog preparation"] == "NON CARACTERISE")].copy(),
         "Backlog planification caractérisé": dfp[(dfp["Statut OT"] == "LANC") & (dfp["Contient SOPL"] == 0) & (dfp["Backlog planification"] == "NON CARACTERISE")].copy(),
         "OT CONFIME": dfp[(dfp["Statut OT"].isin(["CLOT", "TCLO"])) & (dfp["OT CONFIME"] == "NON")].copy(),
-        "OT_COR_EGAL": dfp[(dfp["Statut OT"].isin(["CLOT", "TCLO"])) & (dfp["OT_COR_EGAL"] == "OUI")].copy(),
+        "OT_COR_EGAL": dfp[(dfp["Statut OT"].isin(["CLOT", "TCLO"])) & (dfp["Type d'ordre"] == "ZCOR") & (dfp["OT_COR_EGAL"] == "OUI")].copy(),
     }
