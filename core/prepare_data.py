@@ -21,14 +21,19 @@ def get_date_from_file() -> str:
     return pd.Timestamp.today().strftime("%d/%m/%Y")
 
 def contient_mot(t, lm) -> bool:
-    """CORRIGÉ : comparaison insensible à la casse (.upper() des deux côtés).
-    Avant : comparaison sensible à la casse -> un Statut utilisateur
-    contenant le code en minuscule/casse mixte (ex: "atpd" au lieu de
-    "ATPD") n'était PAS détecté comme caractérisé, alors que le critère
-    existait bel et bien. Incohérent avec le reste du fichier, où CRPR/
-    ATPL/SOPL sont déjà comparés en case=False."""
+    """CORRIGÉ (bug majeur) : l'ancienne version vérifiait TOUS les mots de
+    chaque entrée de lm, y compris le préfixe générique "CRPR"/"ATPL" des
+    entrées composées ("CRPR ATPD".split() -> ["CRPR","ATPD"]). Résultat :
+    un Statut utilisateur = "CRPR" SEUL (sans aucun code de
+    caractérisation) déclenchait quand même CARACTERISE, simplement parce
+    que "CRPR" matchait le premier mot d'une entrée composée. Sur données
+    réelles : 176 OT avec CRPR, dont seulement 59 (33,5%) ont un vrai code
+    (ATPD/ATMR/ATER/ATRS/ATMO) -> les 117 autres ("CRPR" seul) étaient
+    quand même comptés CARACTERISE à tort (100% au lieu de ~34%).
+    Fix : ne vérifier que le CODE SPÉCIFIQUE (dernier mot de chaque
+    entrée), jamais le préfixe générique seul."""
     t = str(t).upper()
-    return any(m.upper() in t for l in lm for m in l.split())
+    return any(l.split()[-1].upper() in t for l in lm)
 
 def cat_age(a) -> str:
     """Catégorise l'âge d'un OT selon la règle officielle SAP PM (en JOURS,
@@ -192,10 +197,12 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
             df["Statut système"].fillna("").astype(str).str.strip().str.split().str[0]
         )
 
-    avf = raw_av[
-        (raw_av["Ordre"].isna() | (raw_av["Ordre"].astype(str).str.strip() == ""))
-        & raw_av["Type d'avis"].isin(["ZU", "Z4", "ZR", "ZP"])
-    ].copy()
+    # CORRIGÉ (formule officielle SAP PM) : "Taux d'approbation des Avis" =
+    # avis approuvés (APRV) / TOTAL DES AVIS CRÉÉS — sans aucun filtre sur
+    # Ordre ni Type d'avis. L'ancien filtre (Ordre vide + Type d'avis dans
+    # une liste restreinte) éliminait ~93% des avis réels (23 114 sur
+    # 24 716 pour un périmètre test), ce qui faussait complètement le taux.
+    avf = raw_av.copy()
 
     apm = sorted(
         df[
