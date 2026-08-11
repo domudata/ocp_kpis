@@ -8,7 +8,9 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
     Construit le dictionnaire ano_map :
     {kpi_name → pd.Series(index=poste, values=nb_anomalies)}
     """
-    prep_filt = (dfp["Statut OT"] == "CRÉÉ") & (dfp["Statut utilisateur"].str.contains("CRPR", na=False))
+    # REVERT : test empirique defavorable a la version "CRPR n'importe ou"
+    # (cf. calcul_kpi.py) -> on garde Statut OT==CRÉÉ.
+    prep_filt = (dfp["Statut OT"] == "CRÉÉ") & (dfp["Statut utilisateur"].str.contains(r"\bCRPR\b", case=False, na=False))
     plan_filt = (dfp["Statut OT"] == "LANC") & (dfp["Statut utilisateur"].str.contains("ATPL", case=False, na=False))
     exec_filt = (dfp["Statut OT"] == "LANC") & (dfp["Contient SOPL"] == 1)
     perf_filt = (dfp["Contient SOPL"] == 1) & (~dfp["Statut OT"].isin(["CLOT", "TCLO"]))
@@ -108,7 +110,9 @@ def build_anomaly_dfs(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
     Construit les DataFrames détaillés des anomalies (pour liens téléchargement CSV
     dans le plan d'action).
     """
-    prep_filt = (dfp["Statut OT"] == "CRÉÉ") & (dfp["Statut utilisateur"].str.contains("CRPR", na=False))
+    # REVERT : test empirique defavorable a la version "CRPR n'importe ou"
+    # (cf. calcul_kpi.py) -> on garde Statut OT==CRÉÉ.
+    prep_filt = (dfp["Statut OT"] == "CRÉÉ") & (dfp["Statut utilisateur"].str.contains(r"\bCRPR\b", case=False, na=False))
     plan_filt = (dfp["Statut OT"] == "LANC") & (dfp["Statut utilisateur"].str.contains("ATPL", case=False, na=False))
     exec_filt = (dfp["Statut OT"] == "LANC") & (dfp["Contient SOPL"] == 1)
     perf_filt = (dfp["Contient SOPL"] == 1) & (~dfp["Statut OT"].isin(["CLOT", "TCLO"]))
