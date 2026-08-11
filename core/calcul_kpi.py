@@ -239,8 +239,16 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list) -> di
     ex["OT exécution 1mois< <3mois"] = ckpi(ex["1 mois < <3 mois"], ex["Total"], 0)
 
     # ── OT lancé estimé ──
+    # ⚠️ Filtre restreint aux OT correctifs (Type d'ordre == "ZCOR"), sur
+    # demande explicite. ATTENTION : testé empiriquement face au fichier
+    # système SAP, ce filtre ÉLOIGNE le résultat de la réalité (dénominateur
+    # 334 au lieu des ~2016 attendus, taux 89.5% au lieu de 97.7% attendu).
+    # La version SANS ce filtre (tous les LANC) était plus proche du système
+    # réel et correspond à l'illustration du document officiel PDF (p.9,
+    # "Total des OT lancés"). Gardé tel quel sur demande malgré cet écart.
     la = pd.pivot_table(
-        df[df["Statut OT"] == "LANC"], index="Poste travail princ.",
+        df[(df["Statut OT"] == "LANC") & (df["Type d'ordre"] == "ZCOR")],
+        index="Poste travail princ.",
         columns="OT LANC ESTIME", values="Ordre", aggfunc="count", fill_value=0
     ).reindex(posts, fill_value=0)
     for c in ["OUI", "NON"]:
