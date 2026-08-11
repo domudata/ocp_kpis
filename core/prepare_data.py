@@ -198,11 +198,16 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
         )
 
     # CORRIGÉ (formule officielle SAP PM) : "Taux d'approbation des Avis" =
-    # avis approuvés (APRV) / TOTAL DES AVIS CRÉÉS — sans aucun filtre sur
-    # Ordre ni Type d'avis. L'ancien filtre (Ordre vide + Type d'avis dans
-    # une liste restreinte) éliminait ~93% des avis réels (23 114 sur
-    # 24 716 pour un périmètre test), ce qui faussait complètement le taux.
-    avf = raw_av.copy()
+    # avis approuvés (APRV) / TOTAL DES AVIS CRÉÉS — sans filtre sur Ordre.
+    # L'ancien filtre (Ordre vide + Type d'avis dans une liste restreinte)
+    # éliminait ~93% des avis réels (23 114 sur 24 716 pour un périmètre
+    # test), ce qui faussait complètement le taux.
+    # Le document officiel OCP ("Reporting SAP PM - Définition KPIs",
+    # p.11) précise : "NB: hors les avis types: ZU, Z4, ZR, ZP" — ces avis
+    # sont donc EXCLUS du calcul du Taux d'approbation des Avis (vérifié
+    # face aux vraies données : dénominateur 3632 vs 3640 chez SAP, très
+    # proche).
+    avf = raw_av[~raw_av["Type d'avis"].isin(["ZU", "Z4", "ZR", "ZP"])].copy()
 
     apm = sorted(
         df[
