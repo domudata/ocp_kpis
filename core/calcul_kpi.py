@@ -81,14 +81,20 @@ def gscore(k: str, a, t) -> int:
         return 0 if a > 15 else 1
     if k in ["OT préparation >3 mois", "OT planification >3 mois", "OT exécution >3 mois"]:
         return 0 if a > 5 else 1
-    if k == "TAUX_REALISATION_CORRECTIF/PT":
+    if k in ["TAUX_REALISATION_CORRECTIF/PT", "Performance Systématiques"]:
+        # Performance Systématiques utilise le MÊME seuil que le Taux de
+        # réalisation correctif (rouge<80, sinon 1) — confirmé par le
+        # fichier système SAP (KPI_PERFORMANCE_QUALITE) : une entité à
+        # 87% en Performance Systématiques y est comptée conforme pour un
+        # score global de 100%, ce qui n'est mathématiquement possible
+        # qu'avec un seuil ~80-85%, pas 90-95% (groupe Graissage/Inspection).
         return 0 if a < 80 else 1
     if k == "Taux d'approbation des Avis":
         return 0 if a < 90 else 1
     if k in ["OT LANC ESTIME", "Backlog préparation caractérisé",
              "Backlog planification caractérisé", "OT CONFIME", "OT_COR_EGAL"]:
         return 0 if a < 95 else 1
-    if k in ["Performance Graissage", "Performance Inspection", "Performance Systématiques"]:
+    if k in ["Performance Graissage", "Performance Inspection"]:
         return 0 if a <= 90 else 1
     if k in ["OT Fiabilité", "Total Avis de Panne"]:
         return 1
@@ -97,6 +103,24 @@ def gscore(k: str, a, t) -> int:
 
 def is_lb(k: str) -> bool:
     return k in LOWER_BETTER
+
+# ──────────────────────────────────────────────
+# Total pondéré (VRAI total, pas une moyenne)
+# Le "Total general" par KPI doit refléter le volume réel de chaque
+# poste (un poste avec 2000 OT ne pèse pas comme un poste avec 5 OT).
+# Une simple moyenne des % par poste pondère chaque poste également,
+# ce qui fausse le résultat. Ici : somme(numérateurs) / somme(dénominateurs).
+# ──────────────────────────────────────────────
+
+def weighted_total(num, den, default: float = 100.0) -> float:
+    """Total pondéré = somme(num) / somme(den) × 100 (100 si somme(den)=0).
+    num/den : Series ou array-like indexés par poste (mêmes KPI que ckdf)."""
+    try:
+        ns = float(pd.Series(num).sum())
+        ds = float(pd.Series(den).sum())
+    except Exception:
+        return default
+    return default if ds == 0 else (ns / ds) * 100.0
 
 # ──────────────────────────────────────────────
 # Score Global (Points 6 & 7)
@@ -232,10 +256,13 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list) -> di
     pc["Backlog préparation caractérisé"] = ckpi(pc["CARACTERISE"], pc["Total"])
 
     # ── Backlog planification ──
-    # Filtre : Statut OT = LANC ET Statut utilisateur contient ATPL
+    # Filtre : Statut OT = LANC ET Contient SOPL == 0 (pas encore en exécution).
+    # Vérifié numériquement face au fichier système SAP : LANC+SOPL==0 donne
+    # un dénominateur (532) très proche de NB_OT_BCKLG_PLANIF (590, écart
+    # probablement dû au décalage d'instant de mesure) ; LANC+ATPL (essayé
+    # précédemment) donnait un dénominateur bien trop grand (1966).
     plc = pd.pivot_table(
-        df[(df["Statut OT"] == "LANC")
-           & (df["Statut utilisateur"].str.contains("ATPL", case=False, na=False))],
+        df[(df["Statut OT"] == "LANC") & (df["Contient SOPL"] == 0)],
         index="Poste travail princ.", columns="Backlog planification",
         values="Ordre", aggfunc="count", fill_value=0
     ).reindex(posts, fill_value=0)
@@ -279,13 +306,17 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list) -> di
         avf, index="Poste travail princ.", columns="Statut utilisateur",
         values="Avis", aggfunc="count", fill_value=0
     ).reindex(posts, fill_value=0)
+    # Total = somme des avis avec un Statut utilisateur pertinent
+    # (APRQ/APRV/APRV AVAU/REJT) — PAS toutes les lignes brutes de avf, qui
+    # contient énormément d'avis avec Statut utilisateur vide (déjà transformés
+    # en OT ou dans un autre workflow, hors périmètre du taux d'approbation).
     for c in ["APRQ", "APRV", "APRV AVAU", "REJT"]:
         tca[c] = tca.get(c, 0)
     tca["Total"] = tca[["APRQ", "APRV", "APRV AVAU", "REJT"]].sum(axis=1)
-    # Avis approuvés = APRV + APRV AVAU (cohérent avec build_ano_map dans anomalies.py,
-    # qui traite ces deux statuts comme "approuvé"). L'ancienne formule ne comptait
-    # que APRV et sous-évaluait le taux.
-    tca["Taux d'approbation des Avis"] = ckpi(tca["APRV"] + tca["APRV AVAU"], tca["Total"])
+    # CORRIGÉ (formule officielle) : numérateur = APRV SEUL, pas APRV+APRV AVAU.
+    # La doc SAP PM dit explicitement "(statut utilisateur \"APRV\")", sans mention
+    # de APRV AVAU.
+    tca["Taux d'approbation des Avis"] = ckpi(tca["APRV"], tca["Total"])
 
     # ── Performance Graissage ──
     # Vérifié (Point 5) : dénominateur = OT type 350 avec Contient SOPL == 1
@@ -297,7 +328,13 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list) -> di
         "Poste travail princ.")["Ordre"].count()
     g_den = df[(df["Contient SOPL"] == 1) & (df["_tw_num"] == 350)].groupby(
         "Poste travail princ.")["Ordre"].count()
-    g_df = pd.DataFrame({"_n": g_num, "_d": g_den}).reindex(posts, fill_value=0)
+    # CORRIGÉ : .reindex(fill_value=0) ne comble que les postes ABSENTS de
+    # l'index, pas les NaN internes à une ligne déjà présente. Si un poste
+    # a des OT au numérateur mais aucun au dénominateur (ou l'inverse),
+    # pd.DataFrame({"_n":.., "_d":..}) aligne par index et laisse un NaN
+    # côté manquant -> Performance Graissage = NaN au lieu de 0%/100%.
+    # .fillna(0) après reindex corrige ce cas.
+    g_df = pd.DataFrame({"_n": g_num, "_d": g_den}).reindex(posts, fill_value=0).fillna(0)
     g_df["Performance Graissage"] = np.where(
         g_df["_d"] == 0, 100.0, (g_df["_n"] / g_df["_d"]) * 100
     )
@@ -313,7 +350,8 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list) -> di
         "Poste travail princ.")["Ordre"].count()
     ins_den = df[(df["Contient SOPL"] == 1) & ins_base].groupby(
         "Poste travail princ.")["Ordre"].count()
-    ins_df = pd.DataFrame({"_n": ins_num, "_d": ins_den}).reindex(posts, fill_value=0)
+    # CORRIGÉ : même problème que g_df ci-dessus (voir commentaire).
+    ins_df = pd.DataFrame({"_n": ins_num, "_d": ins_den}).reindex(posts, fill_value=0).fillna(0)
     ins_df["Performance Inspection"] = np.where(
         ins_df["_d"] == 0, 100.0, (ins_df["_n"] / ins_df["_d"]) * 100
     )
@@ -328,13 +366,43 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list) -> di
         "Poste travail princ.")["Ordre"].count()
     sys_den = df[(df["Contient SOPL"] == 1) & sys_base].groupby(
         "Poste travail princ.")["Ordre"].count()
-    sys_df = pd.DataFrame({"_n": sys_num, "_d": sys_den}).reindex(posts, fill_value=0)
+    # CORRIGÉ : même problème que g_df ci-dessus (voir commentaire).
+    sys_df = pd.DataFrame({"_n": sys_num, "_d": sys_den}).reindex(posts, fill_value=0).fillna(0)
     sys_df["Performance Systématiques"] = np.where(
         sys_df["_d"] == 0, 100.0, (sys_df["_n"] / sys_df["_d"]) * 100
     )
 
     fiab_s = pd.Series(100.0, index=posts)
     avpan_s = pd.Series(100.0, index=posts)
+
+    # ── Numérateurs/dénominateurs bruts par KPI (pour le total pondéré) ──
+    # Utilisé par app.py pour calculer le "Total general" comme
+    # somme(num)/somme(den)×100 sur TOUS les postes, au lieu d'une
+    # moyenne simple des % (qui pondère chaque poste également peu
+    # importe son volume réel).
+    res['nd'] = {
+        "TAUX_REALISATION_CORRECTIF/PT":      (an["OT_CLOTURES"], an["TOTAL_OT"]),
+        "OT préparation <1 mois":             (pr["<1 mois"], pr["Total"]),
+        "OT préparation 1mois< <3mois":       (pr["1 mois < <3 mois"], pr["Total"]),
+        "OT préparation >3 mois":             (pr[">3 mois"], pr["Total"]),
+        "OT planification <1 mois":           (pl["<1 mois"], pl["Total"]),
+        "OT planification 1mois< <3mois":     (pl["1 mois < <3 mois"], pl["Total"]),
+        "OT planification >3 mois":           (pl[">3 mois"], pl["Total"]),
+        "OT exécution <1 mois":               (ex["<1 mois"], ex["Total"]),
+        "OT exécution 1mois< <3mois":         (ex["1 mois < <3 mois"], ex["Total"]),
+        "OT exécution >3 mois":               (ex[">3 mois"], ex["Total"]),
+        "Performance Graissage":              (g_df["_n"], g_df["_d"]),
+        "Performance Inspection":              (ins_df["_n"], ins_df["_d"]),
+        "Performance Systématiques":           (sys_df["_n"], sys_df["_d"]),
+        "Taux d'approbation des Avis":         (tca["APRV"], tca["Total"]),
+        "OT LANC ESTIME":                     (la["OUI"], la["Total"]),
+        "Backlog préparation caractérisé":    (pc["CARACTERISE"], pc["Total"]),
+        "Backlog planification caractérisé":  (plc["CARACTERISE"], plc["Total"]),
+        "OT CONFIME":                         (pv_conf["OUI"], pv_conf["Total"]),
+        "OT_COR_EGAL":                        (pv_cor["NON"], pv_cor["Total"]),
+        "OT Fiabilité":                       (fiab_s, fiab_s),
+        "Total Avis de Panne":                (avpan_s, avpan_s),
+    }
 
     res['ckdf'] = pd.DataFrame({
         "TAUX_REALISATION_CORRECTIF/PT":      an["TAUX_REALISATION_CORRECTIF/PT"],
