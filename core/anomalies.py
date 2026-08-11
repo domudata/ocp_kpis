@@ -38,10 +38,14 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
     ano_map["Performance Inspection"] = dfp[perf_filt & (dfp["_tw_num"].isin([290, 300, 310])) & (dfp["Date de début planifiée"] <= now_ts)].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["Performance Systématiques"] = dfp[perf_filt & (dfp["_tw_num"] == 360) & (dfp["Date de début planifiée"] <= now_ts)].groupby("Poste travail princ.")["Ordre"].count()
 
-    # Avis approuvés = APRV + APRV AVAU (cohérent avec la formule corrigée
-    # de "Taux d'approbation des Avis" dans calcul_kpi.py)
-    avf_tot = avf.groupby("Poste travail princ.")["Avis"].count()
-    avf_aprv = avf[avf["Statut utilisateur"].isin(["APRV", "APRV AVAU"])].groupby("Poste travail princ.")["Avis"].count()
+    # Avis approuvés = APRV SEUL (formule officielle SAP PM : "Nombre d'avis
+    # approuvés (statut utilisateur APRV) / Total des avis créés"). Total =
+    # avis avec un Statut utilisateur pertinent (APRQ/APRV/APRV AVAU/REJT)
+    # uniquement — exclut les avis à Statut utilisateur vide (déjà transformés
+    # en OT ou hors périmètre du workflow d'approbation).
+    avf_pertinent = avf[avf["Statut utilisateur"].isin(["APRQ", "APRV", "APRV AVAU", "REJT"])]
+    avf_tot = avf_pertinent.groupby("Poste travail princ.")["Avis"].count()
+    avf_aprv = avf[avf["Statut utilisateur"] == "APRV"].groupby("Poste travail princ.")["Avis"].count()
     ano_map["Taux d'approbation des Avis"] = avf_tot.sub(avf_aprv, fill_value=0)
 
     ano_map["OT LANC ESTIME"] = dfp[(dfp["Statut OT"] == "LANC") & (dfp["OT LANC ESTIME"] == "NON")].groupby("Poste travail princ.")["Ordre"].count()
@@ -58,7 +62,7 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
     # Statut OT = LANC ET Statut utilisateur contient ATPL (= plan_filt).
     # Avant : filtrait sur Contient SOPL == 0, ce qui ne correspond pas
     # à la règle métier et faussait le Total.
-    ano_map["Backlog planification caractérisé"] = dfp[plan_filt & (dfp["Backlog planification"] == "NON CARACTERISE")].groupby("Poste travail princ.")["Ordre"].count()
+    ano_map["Backlog planification caractérisé"] = dfp[(dfp["Statut OT"] == "LANC") & (dfp["Contient SOPL"] == 0) & (dfp["Backlog planification"] == "NON CARACTERISE")].groupby("Poste travail princ.")["Ordre"].count()
 
     # OT CONFIME et OT_COR_EGAL : déjà indépendants (chacun sa propre colonne),
     # cohérents avec la séparation appliquée dans calcul_kpi.py. Inchangé.
@@ -123,11 +127,11 @@ def build_anomaly_dfs(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
         "Performance Graissage": dfp[perf_filt & (dfp["_tw_num"] == 350)].copy(),
         "Performance Inspection": dfp[perf_filt & (dfp["_tw_num"].isin([290, 300, 310])) & (dfp["Date de début planifiée"] <= now_ts)].copy(),
         "Performance Systématiques": dfp[perf_filt & (dfp["_tw_num"] == 360) & (dfp["Date de début planifiée"] <= now_ts)].copy(),
-        "Taux d'approbation des Avis": avf[~avf["Statut utilisateur"].isin(["APRV", "APRV AVAU"])].copy(),
+        "Taux d'approbation des Avis": avf[avf["Statut utilisateur"].isin(["APRQ", "APRV AVAU", "REJT"])].copy(),
         "OT LANC ESTIME": dfp[(dfp["Statut OT"] == "LANC") & (dfp["OT LANC ESTIME"] == "NON")].copy(),
         # CORRIGÉ : mêmes filtres prep_filt / plan_filt que ci-dessus (cf. build_ano_map)
         "Backlog préparation caractérisé": dfp[prep_filt & (dfp["Backlog preparation"] == "NON CARACTERISE")].copy(),
-        "Backlog planification caractérisé": dfp[plan_filt & (dfp["Backlog planification"] == "NON CARACTERISE")].copy(),
+        "Backlog planification caractérisé": dfp[(dfp["Statut OT"] == "LANC") & (dfp["Contient SOPL"] == 0) & (dfp["Backlog planification"] == "NON CARACTERISE")].copy(),
         "OT CONFIME": dfp[(dfp["Statut OT"].isin(["CLOT", "TCLO"])) & (dfp["OT CONFIME"] == "NON")].copy(),
         "OT_COR_EGAL": dfp[(dfp["Statut OT"].isin(["CLOT", "TCLO"])) & (dfp["OT_COR_EGAL"] == "OUI")].copy(),
     }
