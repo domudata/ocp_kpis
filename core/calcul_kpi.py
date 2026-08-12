@@ -328,13 +328,13 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list) -> di
         avf, index="Poste travail princ.", columns="Statut utilisateur",
         values="Avis", aggfunc="count", fill_value=0
     ).reindex(posts, fill_value=0)
-    # Total = somme des avis avec un Statut utilisateur pertinent
-    # (APRQ/APRV/APRV AVAU/REJT) — PAS toutes les lignes brutes de avf, qui
-    # contient énormément d'avis avec Statut utilisateur vide (déjà transformés
-    # en OT ou dans un autre workflow, hors périmètre du taux d'approbation).
+    # CORRIGÉ (sur demande explicite) : REJT exclu complètement du calcul —
+    # ni numérateur, ni dénominateur. Total = APRQ + APRV + APRV AVAU
+    # uniquement. On garde la colonne REJT dans tca (utile ailleurs / pour
+    # inspection) mais elle n'entre plus dans le Total.
     for c in ["APRQ", "APRV", "APRV AVAU", "REJT"]:
         tca[c] = tca.get(c, 0)
-    tca["Total"] = tca[["APRQ", "APRV", "APRV AVAU", "REJT"]].sum(axis=1)
+    tca["Total"] = tca[["APRQ", "APRV", "APRV AVAU"]].sum(axis=1)
     # CORRIGÉ (formule officielle) : numérateur = APRV SEUL, pas APRV+APRV AVAU.
     # La doc SAP PM dit explicitement "(statut utilisateur \"APRV\")", sans mention
     # de APRV AVAU.
