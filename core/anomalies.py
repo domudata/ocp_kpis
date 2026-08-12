@@ -50,7 +50,7 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
     avf_aprv = avf[avf["Statut utilisateur"] == "APRV"].groupby("Poste travail princ.")["Avis"].count()
     ano_map["Taux d'approbation des Avis"] = avf_tot.sub(avf_aprv, fill_value=0)
 
-    ano_map["OT LANC ESTIME"] = dfp[(dfp["Statut OT"] == "LANC") & (dfp["Type d'ordre"] == "ZCOR") & (dfp["OT LANC ESTIME"] == "NON")].groupby("Poste travail princ.")["Ordre"].count()
+    ano_map["OT LANC ESTIME"] = dfp[(dfp["Statut OT"] == "LANC") & (dfp["Type d'ordre"] == "ZCOR") & (dfp["Contient SOPL"] == 1) & (dfp["OT LANC ESTIME"] == "NON")].groupby("Poste travail princ.")["Ordre"].count()
 
     # ── Backlog préparation caractérisé (CORRIGÉ) ──
     # Filtre aligné sur le pivot `pc` de calcul_kpi.py :
@@ -134,7 +134,7 @@ def build_anomaly_dfs(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
         "Performance Inspection": dfp[perf_filt & (dfp["_tw_num"].isin([290, 300, 310])) & (dfp["Date de début planifiée"] <= now_ts)].copy(),
         "Performance Systématiques": dfp[perf_filt & (dfp["_tw_num"] == 360) & (dfp["Date de début planifiée"] <= now_ts)].copy(),
         "Taux d'approbation des Avis": avf[avf["Statut utilisateur"].isin(["APRQ", "APRV AVAU", "REJT"])].copy(),
-        "OT LANC ESTIME": dfp[(dfp["Statut OT"] == "LANC") & (dfp["Type d'ordre"] == "ZCOR") & (dfp["OT LANC ESTIME"] == "NON")].copy(),
+        "OT LANC ESTIME": dfp[(dfp["Statut OT"] == "LANC") & (dfp["Type d'ordre"] == "ZCOR") & (dfp["Contient SOPL"] == 1) & (dfp["OT LANC ESTIME"] == "NON")].copy(),
         # CORRIGÉ : mêmes filtres prep_filt / plan_filt que ci-dessus (cf. build_ano_map)
         "Backlog préparation caractérisé": dfp[prep_filt & (dfp["Backlog preparation"] == "NON CARACTERISE")].copy(),
         "Backlog planification caractérisé": dfp[(dfp["Statut OT"] == "LANC") & (dfp["Contient SOPL"] == 0) & (dfp["Backlog planification"] == "NON CARACTERISE")].copy(),
