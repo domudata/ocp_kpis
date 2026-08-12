@@ -42,10 +42,12 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
 
     # Avis approuvés = APRV SEUL (formule officielle SAP PM : "Nombre d'avis
     # approuvés (statut utilisateur APRV) / Total des avis créés"). Total =
-    # avis avec un Statut utilisateur pertinent (APRQ/APRV/APRV AVAU/REJT)
+    # avis avec un Statut utilisateur pertinent (APRQ/APRV/APRV AVAU)
     # uniquement — exclut les avis à Statut utilisateur vide (déjà transformés
-    # en OT ou hors périmètre du workflow d'approbation).
-    avf_pertinent = avf[avf["Statut utilisateur"].isin(["APRQ", "APRV", "APRV AVAU", "REJT"])]
+    # en OT ou hors périmètre du workflow d'approbation), ET exclut REJT
+    # (sur demande explicite : un avis rejeté n'est ni une anomalie ni pris
+    # en compte dans le taux d'approbation).
+    avf_pertinent = avf[avf["Statut utilisateur"].isin(["APRQ", "APRV", "APRV AVAU"])]
     avf_tot = avf_pertinent.groupby("Poste travail princ.")["Avis"].count()
     avf_aprv = avf[avf["Statut utilisateur"] == "APRV"].groupby("Poste travail princ.")["Avis"].count()
     ano_map["Taux d'approbation des Avis"] = avf_tot.sub(avf_aprv, fill_value=0)
@@ -133,7 +135,7 @@ def build_anomaly_dfs(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
         "Performance Graissage": dfp[perf_filt & (dfp["_tw_num"] == 350)].copy(),
         "Performance Inspection": dfp[perf_filt & (dfp["_tw_num"].isin([290, 300, 310])) & (dfp["Date de début planifiée"] <= now_ts)].copy(),
         "Performance Systématiques": dfp[perf_filt & (dfp["_tw_num"] == 360) & (dfp["Date de début planifiée"] <= now_ts)].copy(),
-        "Taux d'approbation des Avis": avf[avf["Statut utilisateur"].isin(["APRQ", "APRV AVAU", "REJT"])].copy(),
+        "Taux d'approbation des Avis": avf[avf["Statut utilisateur"].isin(["APRQ", "APRV AVAU"])].copy(),
         "OT LANC ESTIME": dfp[(dfp["Statut OT"] == "LANC") & (dfp["Type d'ordre"] == "ZCOR") & (dfp["Contient SOPL"] == 1) & (dfp["OT LANC ESTIME"] == "NON")].copy(),
         # CORRIGÉ : mêmes filtres prep_filt / plan_filt que ci-dessus (cf. build_ano_map)
         "Backlog préparation caractérisé": dfp[prep_filt & (dfp["Backlog preparation"] == "NON CARACTERISE")].copy(),
