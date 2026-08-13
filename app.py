@@ -113,8 +113,39 @@ def main() -> None:
         unsafe_allow_html=True
     )
 
-    # ── Diagnostic cache + bouton de recalcul forcé (barre latérale) ────────
+    # ── Mode administrateur (mot de passe) ──────────────────────────────────
+    # Protège les éléments de diagnostic (Diagnostic calcul, bouton de
+    # recalcul, Diagnostic score par poste) : masqués pour tout le monde
+    # sauf après saisie du bon mot de passe. Le mot de passe est lu depuis
+    # st.secrets["admin_password"] si défini (recommandé, via
+    # .streamlit/secrets.toml sur Streamlit Cloud), sinon une valeur de
+    # secours codée en dur ci-dessous (à changer !).
+    if "is_admin" not in st.session_state:
+        st.session_state.is_admin = False
+
+    ADMIN_PASSWORD = st.secrets.get("admin_password", "ocp-admin-2026") if hasattr(st, "secrets") else "ocp-admin-2026"
+
     with st.sidebar:
+        if not st.session_state.is_admin:
+            with st.expander("🔒 Mode administrateur", expanded=False):
+                pwd = st.text_input("Mot de passe", type="password", key="admin_pwd_input")
+                if st.button("Se connecter", key="admin_login_btn"):
+                    if pwd == ADMIN_PASSWORD:
+                        st.session_state.is_admin = True
+                        st.rerun()
+                    else:
+                        st.error("Mot de passe incorrect.")
+        else:
+            with st.expander("🔓 Mode administrateur (actif)", expanded=False):
+                st.success("Connecté en tant qu'administrateur.")
+                if st.button("Se déconnecter", key="admin_logout_btn"):
+                    st.session_state.is_admin = False
+                    st.rerun()
+
+    # ── Diagnostic cache + bouton de recalcul forcé (barre latérale) ────────
+    # CORRIGÉ : visible uniquement en mode administrateur.
+    if st.session_state.is_admin:
+      with st.sidebar:
         with st.expander("🔧 Diagnostic calcul", expanded=False):
             if _CALC_SIG_OK:
                 st.success(f"Signature fichiers calcul : `{CALC_VERSION}`")
@@ -297,7 +328,9 @@ def main() -> None:
         # Affiche EN DIRECT dans l'app le detail KPI -> valeur -> gscore(0/1)
         # -> score final, pour verifier que la regle rouge=0/sinon=1 est
         # bien celle utilisee, sans avoir a comparer manuellement.
-        with st.sidebar:
+        # CORRIGÉ : visible uniquement en mode administrateur.
+        if st.session_state.is_admin:
+          with st.sidebar:
             with st.expander("🔬 Diagnostic score par poste", expanded=False):
                 _diag_poste = st.selectbox(
                     "Choisir un poste", options=sorted(ckdf.index.tolist()),
