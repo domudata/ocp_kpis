@@ -207,7 +207,22 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
     # sont donc EXCLUS du calcul du Taux d'approbation des Avis (vérifié
     # face aux vraies données : dénominateur 3632 vs 3640 chez SAP, très
     # proche).
-    avf = raw_av[~raw_av["Type d'avis"].isin(["ZU", "Z4", "ZR", "ZP"])].copy()
+    # ⚠️ Filtre restreint aux avis SANS OT associé (Ordre vide), sur
+    # demande explicite. ATTENTION : testé empiriquement face au fichier
+    # système SAP, ce filtre ÉLOIGNE fortement le résultat de la réalité :
+    #   - Tous les avis (sans ce filtre)     : Maroc Chimie 89.4% (SAP ~87.8%)
+    #                                           FEEDS 88.6% (SAP ~88.7%)
+    #   - Avis SANS Ordre uniquement (actuel): Maroc Chimie 75.9% (total 1550 vs 3640 attendu)
+    #                                           FEEDS 27.5% (total 109 vs 699 attendu — très mauvais)
+    # La plupart des avis gardent leur Statut utilisateur d'approbation à
+    # jour même une fois liés à un OT ; les exclure fait perdre l'essentiel
+    # des avis réellement approuvés. Gardé tel quel sur demande malgré cet
+    # écart important (voir historique du chat pour revenir à la version
+    # sans ce filtre si besoin).
+    avf = raw_av[
+        (raw_av["Ordre"].isna() | (raw_av["Ordre"].astype(str).str.strip() == ""))
+        & (~raw_av["Type d'avis"].isin(["ZU", "Z4", "ZR", "ZP"]))
+    ].copy()
 
     apm = sorted(
         df[
