@@ -2,11 +2,20 @@
 """
 Export Excel consolidant TOUTES les anomalies (OT + Avis) detectees sur le
 perimetre filtre courant (periode / poste / atelier / division), avec pour
-chaque ligne : le KPI en anomalie, le responsable et l'action recommandee.
+chaque ligne : le(s) KPI en anomalie, le(s) responsable(s) et l'(les)
+action(s) recommandee(s).
 
 Deux feuilles :
-  - "Anomalies OT"   : une ligne par (OT, KPI en anomalie)
-  - "Anomalies Avis" : une ligne par (Avis, KPI en anomalie)
+ - "Anomalies OT" : UNE ligne par OT (pas par KPI). Si un OT est en
+   anomalie sur plusieurs KPI, toutes les anomalies sont listees dans la
+   colonne "Anomalie" (separees par " | "), pas de duplication de l'OT.
+ - "Anomalies Avis" : idem, une ligne par Avis.
+
+CORRIGE : la version precedente faisait un simple pd.concat() des
+DataFrames d'anomalies par KPI, donc un OT en anomalie sur 3 KPI
+apparaissait 3 fois (une ligne par KPI). Desormais, on consolide par
+cle (Ordre pour les OT, Avis pour les avis) : une seule ligne par
+element, avec le nombre d'anomalies et le detail dans une colonne.
 """
 import io
 import pandas as pd
@@ -30,7 +39,6 @@ AVIS_COLS = [
 
 AVIS_ONLY_KPI = "Taux d'approbation des Avis"
 
-
 def _extract_cols(df: pd.DataFrame, cols: list) -> pd.DataFrame:
     """Garde uniquement les colonnes demandees, dans l'ordre, en ajoutant
     des colonnes vides si absentes de df (extraction source variable)."""
@@ -39,6 +47,45 @@ def _extract_cols(df: pd.DataFrame, cols: list) -> pd.DataFrame:
         out[c] = df[c] if c in df.columns else ""
     return out
 
+def _consolidate_by_key(df_long: pd.DataFrame, key_col: str, static_cols: list) -> pd.DataFrame:
+    """Regroupe les lignes en double (même OT/Avis apparu pour plusieurs
+    KPI en anomalie) en UNE SEULE ligne par clé (Ordre ou Avis).
+    - Les colonnes "statiques" (identité de l'OT/Avis) gardent leur
+      première valeur rencontrée (identiques d'une ligne à l'autre pour
+      une même clé).
+    - "Anomalie" / "Responsable" / "Action recommandée" sont fusionnées :
+      toutes les valeurs uniques, séparées par " | ".
+    - Ajoute une colonne "Nb anomalies" = nombre de KPI en anomalie pour
+      cet OT/Avis.
+    """
+    if df_long.empty or key_col not in df_long.columns:
+        return df_long
+
+    # Exclure les lignes sans clé exploitable (Ordre/Avis vide) du
+    # regroupement — elles restent telles quelles, chacune sa ligne.
+    has_key = df_long[key_col].notna() & (df_long[key_col].astype(str).str.strip() != "")
+    df_keyed = df_long[has_key].copy()
+    df_nokey = df_long[~has_key].copy()
+
+    if df_keyed.empty:
+        return df_long
+
+    nb_anom = df_keyed.groupby(key_col)["Anomalie"].transform("count")
+    df_keyed["Nb anomalies"] = nb_anom
+
+    agg_dict = {c: "first" for c in static_cols if c in df_keyed.columns and c != key_col}
+    agg_dict["Nb anomalies"] = "first"
+    agg_dict["Anomalie"] = lambda s: " | ".join(dict.fromkeys(s.astype(str)))  # valeurs uniques, ordre conservé
+    agg_dict["Responsable"] = lambda s: " | ".join(dict.fromkeys(s.astype(str)))
+    agg_dict["Action recommandée"] = lambda s: " | ".join(dict.fromkeys(s.astype(str)))
+
+    grouped = df_keyed.groupby(key_col, as_index=False, sort=False).agg(agg_dict)
+
+    if not df_nokey.empty:
+        df_nokey["Nb anomalies"] = 1
+        grouped = pd.concat([grouped, df_nokey], ignore_index=True)
+
+    return grouped
 
 def build_anomalies_workbook(anomaly_dfs: dict, kpi_resp_map: dict,
                               act_map: dict) -> bytes:
@@ -70,14 +117,32 @@ def build_anomalies_workbook(anomaly_dfs: dict, kpi_resp_map: dict,
             sub["Action recommandée"] = action
             ot_rows.append(sub)
 
-    df_ot_final = (
+    df_ot_long = (
         pd.concat(ot_rows, ignore_index=True) if ot_rows
         else pd.DataFrame(columns=OT_COLS + ["Anomalie", "Responsable", "Action recommandée"])
     )
-    df_avis_final = (
+    df_avis_long = (
         pd.concat(avis_rows, ignore_index=True) if avis_rows
         else pd.DataFrame(columns=AVIS_COLS + ["Anomalie", "Responsable", "Action recommandée"])
     )
+
+    # CORRIGÉ : consolidation par clé -> une seule ligne par OT / par Avis,
+    # avec toutes les anomalies listées dans une seule colonne.
+    df_ot_final = _consolidate_by_key(df_ot_long, "Ordre", OT_COLS)
+    df_avis_final = _consolidate_by_key(df_avis_long, "Avis", AVIS_COLS)
+
+    # Réordonner les colonnes : identité OT/Avis, puis Nb anomalies,
+    # Anomalie, Responsable, Action recommandée.
+    def _reorder(df_final: pd.DataFrame, base_cols: list) -> pd.DataFrame:
+        if df_final.empty:
+            return df_final
+        tail = ["Nb anomalies", "Anomalie", "Responsable", "Action recommandée"]
+        ordered = [c for c in base_cols if c in df_final.columns] + [c for c in tail if c in df_final.columns]
+        remaining = [c for c in df_final.columns if c not in ordered]
+        return df_final[ordered + remaining]
+
+    df_ot_final = _reorder(df_ot_final, OT_COLS)
+    df_avis_final = _reorder(df_avis_final, AVIS_COLS)
 
     buf = io.BytesIO()
     with pd.ExcelWriter(buf, engine="openpyxl") as writer:
