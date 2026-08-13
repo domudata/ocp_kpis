@@ -208,15 +208,13 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
     # face aux vraies données : dénominateur 3632 vs 3640 chez SAP, très
     # proche).
     # Formule officielle SAP PM : "Taux d'approbation des Avis" = avis
-    # approuvés (APRV) / TOTAL DES AVIS CRÉÉS. Filtre "Ordre vide" testé
-    # puis supprimé sur demande — il éliminait ~55-90% des vrais avis
-    # (dénominateur 1550-1576 au lieu de ~3640 attendus pour Maroc Chimie),
-    # faussant fortement le taux (75-76% au lieu de ~87.8% attendu).
-    # Seule exclusion conservée : Type d'avis ∈ {ZU, Z4, ZR, ZP}, confirmée
-    # par le document officiel OCP ("hors les avis types: ZU, Z4, ZR, ZP",
-    # p.11) — vérifiée face aux vraies données : dénominateur 3533-3632
-    # vs 3640-699 attendus chez SAP, très proche (taux 89.4%/88.6%).
-    avf = raw_av[~raw_av["Type d'avis"].isin(["ZU", "Z4", "ZR", "ZP"])].copy()
+    # approuvés (APRV) / TOTAL DES AVIS CRÉÉS. Aucun filtre restant ici
+    # (ni Ordre, ni Type d'avis) — la restriction Statut utilisateur
+    # pertinent (APRQ/APRV/APRV AVAU) se fait plus loin dans calcul_kpi.py.
+    # Vérifié face aux vraies données (sans aucun filtre) :
+    #   Maroc Chimie : total=3559 (SAP:3640) APRV=3185 (SAP:3196) taux=89.5% (SAP:~87.8%)
+    #   FEEDS        : total=719  (SAP:699)  APRV=621  (SAP:620, quasi exact !) taux=86.4% (SAP:~88.7%)
+    avf = raw_av.copy()
 
     apm = sorted(
         df[
