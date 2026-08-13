@@ -630,12 +630,12 @@ def main() -> None:
         )
 
         tabs = st.tabs([
-            "Tableau de Bord",
-            "Performance",
-            "Qualite",
-            "Backlog",
-            "Suivi & Evolution",
-            "Plan d'action",
+            "🏠 Tableau de Bord",
+            "📈 Performance",
+            "✅ Qualite",
+            "📂 Backlog",
+            "📋 Suivi & Evolution",
+            "🎯 Plan d'action",
             "🤖 Assistant IA",
         ])
 
