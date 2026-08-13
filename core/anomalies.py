@@ -24,15 +24,19 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
         .groupby("Poste travail princ.")["Ordre"].count()
     )
 
-    ano_map["OT préparation <1 mois"] = dfp[prep_filt & (dfp["ap"] != "<1 mois")].groupby("Poste travail princ.")["Ordre"].count()
+    # CORRIGÉ : les anomalies "<1 mois" utilisaient `!= "<1 mois"`, ce qui
+    # inclut TOUS les OT hors cette tranche — donc les mêmes OT que ceux
+    # déjà comptés séparément dans "1-3 mois" et ">3 mois". Un même OT
+    # était compté 2 fois (une fois sous "<1 mois", une fois sous sa
+    # tranche réelle), gonflant le Total Anomalies. Comme "1-3 mois" et
+    # ">3 mois" couvrent déjà, sans chevauchement, tous les OT non
+    # conformes, l'anomalie "<1 mois" est retirée (redondante).
     ano_map["OT préparation >3 mois"] = dfp[prep_filt & (dfp["ap"] == ">3 mois")].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["OT préparation 1mois< <3mois"] = dfp[prep_filt & (dfp["ap"] == "1 mois < <3 mois")].groupby("Poste travail princ.")["Ordre"].count()
 
-    ano_map["OT planification <1 mois"] = dfp[plan_filt & (dfp["alp"] != "<1 mois")].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["OT planification >3 mois"] = dfp[plan_filt & (dfp["alp"] == ">3 mois")].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["OT planification 1mois< <3mois"] = dfp[plan_filt & (dfp["alp"] == "1 mois < <3 mois")].groupby("Poste travail princ.")["Ordre"].count()
 
-    ano_map["OT exécution <1 mois"] = dfp[exec_filt & (dfp["aex"] != "<1 mois")].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["OT exécution >3 mois"] = dfp[exec_filt & (dfp["aex"] == ">3 mois")].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["OT exécution 1mois< <3mois"] = dfp[exec_filt & (dfp["aex"] == "1 mois < <3 mois")].groupby("Poste travail princ.")["Ordre"].count()
 
@@ -123,13 +127,12 @@ def build_anomaly_dfs(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts) -> dict:
 
     return {
         "TAUX_REALISATION_CORRECTIF/PT": dfp[(dfp["Nº appel pl.entret."].fillna(0) == 0) & (dfp["Contient SOPL"] == 1) & (~dfp["Statut OT"].isin(["CLOT", "TCLO"]))].copy(),
-        "OT préparation <1 mois": dfp[prep_filt & (dfp["ap"] != "<1 mois")].copy(),
+        # CORRIGÉ : "<1 mois" retiré (redondant avec 1-3 mois + >3 mois,
+        # cf. commentaire dans build_ano_map ci-dessus).
         "OT préparation >3 mois": dfp[prep_filt & (dfp["ap"] == ">3 mois")].copy(),
         "OT préparation 1mois< <3mois": dfp[prep_filt & (dfp["ap"] == "1 mois < <3 mois")].copy(),
-        "OT planification <1 mois": dfp[plan_filt & (dfp["alp"] != "<1 mois")].copy(),
         "OT planification >3 mois": dfp[plan_filt & (dfp["alp"] == ">3 mois")].copy(),
         "OT planification 1mois< <3mois": dfp[plan_filt & (dfp["alp"] == "1 mois < <3 mois")].copy(),
-        "OT exécution <1 mois": dfp[exec_filt & (dfp["aex"] != "<1 mois")].copy(),
         "OT exécution >3 mois": dfp[exec_filt & (dfp["aex"] == ">3 mois")].copy(),
         "OT exécution 1mois< <3mois": dfp[exec_filt & (dfp["aex"] == "1 mois < <3 mois")].copy(),
         "Performance Graissage": dfp[perf_filt & (dfp["_tw_num"] == 350)].copy(),
