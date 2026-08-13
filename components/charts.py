@@ -21,7 +21,6 @@ COLOR_MAP = {"CARACTERISE": "#10b981", "NON CARACTERISE": "#f97316"}
 TYPE_PALETTE = ['#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#06b6d4',
                 '#14b8a6', '#6366f1', '#0ea5e9', '#d946ef', '#a855f7']
 
-
 def _colors_for(labels):
     colors, idx = [], 0
     for c in labels:
@@ -31,7 +30,6 @@ def _colors_for(labels):
             colors.append(TYPE_PALETTE[idx % len(TYPE_PALETTE)])
             idx += 1
     return colors
-
 
 def show_simple_pie(piv_df: pd.DataFrame, title: str, keep_non_carac: bool = False) -> None:
     """
@@ -47,21 +45,21 @@ def show_simple_pie(piv_df: pd.DataFrame, title: str, keep_non_carac: bool = Fal
     counts = counts[counts > 0].sort_values(ascending=False)
 
     if counts.empty:
-        st.markdown('<div class="es">Aucune donnee</div>', unsafe_allow_html=True)
+        st.markdown('<div style="padding:20px;color:#94a3b8;">Aucune donnée</div>', unsafe_allow_html=True)
         return
 
     total = counts.sum()
-    pcts  = counts / total * 100
+    pcts = counts / total * 100
 
-    big   = counts[pcts >= SMALL_SLICE_PCT]
-    small = counts[pcts <  SMALL_SLICE_PCT]
+    big = counts[pcts >= SMALL_SLICE_PCT]
+    small = counts[pcts < SMALL_SLICE_PCT]
 
     # ── Cas simple : pas assez de secteurs minces → camembert unique ──
     if len(small) < 2:
         fig = go.Figure(go.Pie(
             labels=counts.index, values=counts.values,
             hole=0.4, sort=False,
-            texttemplate="%{label}<br>%{percent:.1%} (%{value})",
+            texttemplate="%{label} %{percent:.1%} (%{value})",
             textposition="outside",
             marker=dict(colors=_colors_for(counts.index), line=dict(color="white", width=2)),
         ))
@@ -74,9 +72,12 @@ def show_simple_pie(piv_df: pd.DataFrame, title: str, keep_non_carac: bool = Fal
             height=450, showlegend=True,
             legend=dict(orientation="h", yanchor="bottom", y=-0.12, x=0.5, xanchor="center"),
             margin=dict(t=60, b=70, l=40, r=40),
+            # CORRIGÉ : masque proprement les labels qui ne rentrent pas
+            # (tranches minuscules) au lieu de les laisser se chevaucher.
+            uniformtext_minsize=9, uniformtext_mode='hide',
         )
         # Reduire le domaine du pie pour laisser la place au titre en haut
-        fig.update_traces(domain=dict(y=[0.0, 0.85]))
+        fig.update_traces(domain=dict(y=[0.0, 0.82]))
         st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
         return
 
@@ -92,7 +93,7 @@ def show_simple_pie(piv_df: pd.DataFrame, title: str, keep_non_carac: bool = Fal
     )
     # Abaisser les sous-titres pour les separer du titre principal
     for ann in fig.layout.annotations:
-        ann.y = 0.90
+        ann.y = 0.95
         ann.font.size = 11
         ann.font.color = "#64748B"
 
@@ -101,11 +102,11 @@ def show_simple_pie(piv_df: pd.DataFrame, title: str, keep_non_carac: bool = Fal
     fig.add_trace(go.Pie(
         labels=main_counts.index, values=main_counts.values,
         hole=0.4, sort=False,
-        texttemplate="%{label}<br>%{percent:.1%} (%{value})",
+        texttemplate="%{label} %{percent:.1%} (%{value})",
         textposition="outside",
         marker=dict(colors=main_colors, line=dict(color="white", width=2)),
         legendgroup="main",
-        domain=dict(y=[0.0, 0.80]),
+        domain=dict(y=[0.0, 0.76]),
     ), 1, 1)
 
     # Camembert secondaire : detail des secteurs minces
@@ -113,11 +114,11 @@ def show_simple_pie(piv_df: pd.DataFrame, title: str, keep_non_carac: bool = Fal
     fig.add_trace(go.Pie(
         labels=small.index, values=small.values,
         hole=0.35, sort=False,
-        texttemplate="%{label}<br>%{value}",
+        texttemplate="%{label} %{value}",
         textposition="outside",
         marker=dict(colors=small_colors, line=dict(color="white", width=2)),
         legendgroup="detail",
-        domain=dict(y=[0.0, 0.80]),
+        domain=dict(y=[0.0, 0.76]),
     ), 1, 2)
 
     fig.update_traces(
@@ -128,20 +129,21 @@ def show_simple_pie(piv_df: pd.DataFrame, title: str, keep_non_carac: bool = Fal
         title=dict(text=title, x=0.5, xanchor='center', font=dict(size=14), y=0.99, yanchor='top'),
         height=470, showlegend=True,
         legend=dict(orientation="h", yanchor="bottom", y=-0.12, x=0.5, xanchor="center"),
-        margin=dict(t=75, b=70, l=30, r=30),
+        margin=dict(t=80, b=70, l=30, r=30),
+        # CORRIGÉ : masque proprement les labels qui ne rentrent pas.
+        uniformtext_minsize=9, uniformtext_mode='hide',
     )
     st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
-
 
 def show_pie_pair(piv_df: pd.DataFrame, title_prefix: str) -> None:
     """2 camemberts : par statut OT | realises vs non realises."""
     global_counts = piv_df[["CRÉÉ", "LANC", "CLOT", "TCLO"]].sum()
     global_counts = global_counts[global_counts > 0]
-    realised     = global_counts.get("CLOT", 0) + global_counts.get("TCLO", 0)
+    realised = global_counts.get("CLOT", 0) + global_counts.get("TCLO", 0)
     not_realised = global_counts.sum() - realised
 
     if global_counts.empty:
-        st.markdown('<div class="es">Aucune donnee</div>', unsafe_allow_html=True)
+        st.markdown('<div style="padding:20px;color:#94a3b8;">Aucune donnée</div>', unsafe_allow_html=True)
         return
 
     colors = ["#8b5cf6", "#f59e0b", "#10b981", "#3b82f6"]
@@ -153,9 +155,13 @@ def show_pie_pair(piv_df: pd.DataFrame, title_prefix: str) -> None:
             f"{title_prefix} — Réalisés vs Non Réalisés",
         ),
     )
-    # Abaisser les sous-titres pour bien les separer des camemberts
+    # CORRIGÉ : sous-titres remontés (y=0.97 au lieu de 0.93) ET domaine
+    # des camemberts réduit (0.72 au lieu de 0.82) pour créer un vrai
+    # espace tampon entre le titre et les labels "outside" des tranches
+    # minuscules (ex: CRÉÉ à 0.1%, LANC à 1.6%), qui remontaient jusque
+    # dans la zone du titre et se chevauchaient avec lui.
     for ann in fig.layout.annotations:
-        ann.y = 0.93
+        ann.y = 0.97
         ann.font.size = 12
         ann.font.color = "#334155"
 
@@ -164,10 +170,10 @@ def show_pie_pair(piv_df: pd.DataFrame, title_prefix: str) -> None:
     fig.add_trace(go.Pie(
         labels=global_counts.index, values=global_counts.values,
         hole=0.4, sort=False,
-        texttemplate="%{label}<br>%{percent:.1%} (%{value})",
+        texttemplate="%{label} %{percent:.1%} (%{value})",
         textposition="outside",
         marker=dict(colors=colors, line=dict(color="white", width=2)),
-        domain=dict(y=[0.0, 0.82]),
+        domain=dict(y=[0.0, 0.72]),
     ), 1, 1)
 
     pie2 = pd.Series(
@@ -177,10 +183,10 @@ def show_pie_pair(piv_df: pd.DataFrame, title_prefix: str) -> None:
     fig.add_trace(go.Pie(
         labels=pie2.index, values=pie2.values,
         hole=0.4, sort=False,
-        texttemplate="%{label}<br>%{percent:.1%} (%{value})",
+        texttemplate="%{label} %{percent:.1%} (%{value})",
         textposition="outside",
         marker=dict(colors=["#10b981", "#ef4444"], line=dict(color="white", width=2)),
-        domain=dict(y=[0.0, 0.82]),
+        domain=dict(y=[0.0, 0.72]),
     ), 1, 2)
 
     fig.update_traces(
@@ -188,12 +194,16 @@ def show_pie_pair(piv_df: pd.DataFrame, title_prefix: str) -> None:
         textfont=dict(size=12, family='Inter, sans-serif'),
     )
     fig.update_layout(
-        height=470, showlegend=True,
+        height=500, showlegend=True,
         legend=dict(orientation="h", yanchor="bottom", y=-0.10, x=0.5, xanchor="center"),
-        margin=dict(t=45, b=70, l=40, r=40),
+        margin=dict(t=55, b=70, l=40, r=40),
+        # CORRIGÉ : c'est le fix principal — Plotly masque proprement tout
+        # label qui ne rentre pas dans l'espace disponible plutôt que de
+        # les laisser se superposer/chevaucher. Les tranches minuscules
+        # sans label visible restent lisibles via la légende et le hover.
+        uniformtext_minsize=9, uniformtext_mode='hide',
     )
     st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
-
 
 # ═══════════════════════════════════════════════════════════════════════════
 # BARRES HORIZONTALES AVEC SEUILS (style rapport OCP SAP PM)
@@ -203,7 +213,6 @@ S1_DEFAULT, S2_DEFAULT = 70, 90
 # Couleurs identiques aux cellules Total des tableaux :
 # rouge < s1 | jaune s1-s2 | vert >= s2
 C_LOW, C_MID, C_HIGH = "#ef4444", "#f59e0b", "#10b981"
-
 
 def _bar_color_for(label, value, cible_map=None, lower_set=None, s1=S1_DEFAULT, s2=S2_DEFAULT):
     """
@@ -232,7 +241,6 @@ def _bar_color_for(label, value, cible_map=None, lower_set=None, s1=S1_DEFAULT, 
     # Pas de cible connue (score global, poste...) → seuils generiques
     return C_HIGH if v >= s2 else (C_MID if v >= s1 else C_LOW)
 
-
 def show_hbar_thresholds(labels, values, title, s1=S1_DEFAULT, s2=S2_DEFAULT,
                           suffix="%", cible_map=None, lower_set=None) -> None:
     """
@@ -245,7 +253,7 @@ def show_hbar_thresholds(labels, values, title, s1=S1_DEFAULT, s2=S2_DEFAULT,
     generiques s1/s2 appliques uniformement.
     """
     if len(labels) == 0:
-        st.markdown('<div class="es">Aucune donnee</div>', unsafe_allow_html=True)
+        st.markdown('<div style="padding:20px;color:#94a3b8;">Aucune donnée</div>', unsafe_allow_html=True)
         return
 
     colors = [
@@ -266,9 +274,9 @@ def show_hbar_thresholds(labels, values, title, s1=S1_DEFAULT, s2=S2_DEFAULT,
     fig.add_vline(x=s1, line_dash="dash", line_color=C_MID, line_width=2)
     fig.add_vline(x=s2, line_dash="dash", line_color=C_HIGH, line_width=2)
     fig.add_annotation(x=s1, y=1.04, yref="paper", text=f"▼ {s1}{suffix}",
-                       showarrow=False, font=dict(color=C_MID, size=14, family='Inter'))
+                        showarrow=False, font=dict(color=C_MID, size=14, family='Inter'))
     fig.add_annotation(x=s2, y=1.04, yref="paper", text=f"▼ {s2}{suffix}",
-                       showarrow=False, font=dict(color=C_HIGH, size=14, family='Inter'))
+                        showarrow=False, font=dict(color=C_HIGH, size=14, family='Inter'))
 
     fig.update_layout(
         title=dict(text=title, x=0.5, xanchor='center', font=dict(size=16, color='#1e293b')),
@@ -280,7 +288,6 @@ def show_hbar_thresholds(labels, values, title, s1=S1_DEFAULT, s2=S2_DEFAULT,
         showlegend=False,
     )
     st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
-
 
 def show_statut_hbar(piv_df: pd.DataFrame, title: str,
                       s1=S1_DEFAULT, s2=S2_DEFAULT) -> None:
@@ -298,12 +305,11 @@ def show_statut_hbar(piv_df: pd.DataFrame, title: str,
     taux = (rea[mask] / tot[mask] * 100).round(1).sort_values(ascending=False)
 
     if taux.empty:
-        st.markdown('<div class="es">Aucune donnee</div>', unsafe_allow_html=True)
+        st.markdown('<div style="padding:20px;color:#94a3b8;">Aucune donnée</div>', unsafe_allow_html=True)
         return
 
     show_hbar_thresholds(taux.index.tolist(), taux.values.tolist(),
-                         f"{title} — Taux de réalisation par poste", s1, s2)
-
+                          f"{title} — Taux de réalisation par poste", s1, s2)
 
 def show_grouped_hbar(vp, pscores: dict, qscores: dict, title: str,
                        s1=S1_DEFAULT, s2=S2_DEFAULT) -> None:
@@ -313,7 +319,7 @@ def show_grouped_hbar(vp, pscores: dict, qscores: dict, title: str,
     """
     postes = [p for p in vp if p in pscores or p in qscores]
     if not postes:
-        st.markdown('<div class="es">Aucune donnee</div>', unsafe_allow_html=True)
+        st.markdown('<div style="padding:20px;color:#94a3b8;">Aucune donnée</div>', unsafe_allow_html=True)
         return
 
     p_vals = [round(pscores.get(p, 0), 1) for p in postes]
@@ -342,9 +348,9 @@ def show_grouped_hbar(vp, pscores: dict, qscores: dict, title: str,
     fig.add_vline(x=s1, line_dash="dash", line_color=C_MID, line_width=2)
     fig.add_vline(x=s2, line_dash="dash", line_color=C_HIGH, line_width=2)
     fig.add_annotation(x=s1, y=1.03, yref="paper", text=f"▼ {s1}%",
-                       showarrow=False, font=dict(color=C_MID, size=14, family='Inter'))
+                        showarrow=False, font=dict(color=C_MID, size=14, family='Inter'))
     fig.add_annotation(x=s2, y=1.03, yref="paper", text=f"▼ {s2}%",
-                       showarrow=False, font=dict(color=C_HIGH, size=14, family='Inter'))
+                        showarrow=False, font=dict(color=C_HIGH, size=14, family='Inter'))
 
     fig.update_layout(
         title=dict(text=title, x=0.5, xanchor='center', font=dict(size=16, color='#1e293b')),
@@ -358,7 +364,6 @@ def show_grouped_hbar(vp, pscores: dict, qscores: dict, title: str,
     )
     st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
 
-
 def show_scores_hbar(vp, scores: dict, title, s1=S1_DEFAULT, s2=S2_DEFAULT):
     """
     Barres horizontales des scores PAR POSTE (une seule serie),
@@ -367,7 +372,7 @@ def show_scores_hbar(vp, scores: dict, title, s1=S1_DEFAULT, s2=S2_DEFAULT):
     """
     postes = [p for p in vp if p in scores]
     if not postes:
-        st.markdown('<div class="es">Aucune donnee</div>', unsafe_allow_html=True)
+        st.markdown('<div style="padding:20px;color:#94a3b8;">Aucune donnée</div>', unsafe_allow_html=True)
         return
     vals = [round(scores.get(p, 0), 1) for p in postes]
     show_hbar_thresholds(postes, vals, title, s1, s2)
