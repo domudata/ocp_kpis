@@ -19,6 +19,7 @@ try:
         LOWER_BETTER, CONSIGNES_HSE,
     )
     from core.prepare_data import prepare_data, get_date_from_file
+    from core.onedrive_loader import load_data_from_onedrive
     from core.calcul_kpi import calc_kpis, gscore, is_lb
     from core.anomalies import build_ano_map, build_ano_rows, build_anomaly_dfs
     from core.historique import (
@@ -113,42 +114,6 @@ def main() -> None:
         unsafe_allow_html=True
     )
 
-    if "is_admin" not in st.session_state:
-        st.session_state.is_admin = False
-
-    # CORRIGÉ : st.secrets peut lever une exception (pas seulement
-    # retourner un dict vide) si aucun fichier secrets.toml n'est
-    # configuré sur Streamlit Cloud — ce qui plantait TOUTE l'app (donc
-    # aussi les filtres de la sidebar, chargés plus loin) avant même
-    # d'afficher quoi que ce soit. Try/except explicite, plus de crash.
-    try:
-        ADMIN_PASSWORD = st.secrets["admin_password"]
-    except Exception:
-        ADMIN_PASSWORD = "ocp-admin-2026"
-
-    # ── Diagnostic cache + bouton de recalcul forcé (barre latérale) ────────
-    # CORRIGÉ : visible uniquement en mode administrateur.
-    if st.session_state.is_admin:
-      with st.sidebar:
-        with st.expander("🔧 Diagnostic calcul", expanded=False):
-            if _CALC_SIG_OK:
-                st.success(f"Signature fichiers calcul : `{CALC_VERSION}`")
-                st.caption(
-                    "Cette signature change automatiquement des que vous "
-                    "modifiez calcul_kpi.py, anomalies.py ou prepare_data.py. "
-                    "Si elle ne change PAS apres une modification + commit, "
-                    "utilisez le bouton ci-dessous."
-                )
-            else:
-                st.warning(
-                    "⚠️ Fichiers core/*.py introuvables pour le hash "
-                    f"(signature de secours: `{CALC_VERSION}`). "
-                    "Utilisez le bouton ci-dessous a chaque modification."
-                )
-            if st.button("🔄 Forcer le recalcul complet", use_container_width=True):
-                st.cache_data.clear()
-                st.rerun()
-
     # Masquer la barre d'outils Streamlit (Share/étoile/crayon/GitHub/menu),
     # le bandeau "Manage app", le menu principal et le footer
     st.markdown("""
@@ -206,12 +171,27 @@ def main() -> None:
         st.rerun()
         st.stop()
 
+    # ── Chargement des données : OneDrive (automatique) en priorité,
+    # fichiers locaux (ot.xlsx/avis.xlsx uploadés manuellement) en secours ──
     ot_bytes = av_bytes = None
-    if os.path.exists("ot.xlsx") and os.path.exists("avis.xlsx"):
-        with open("ot.xlsx", "rb") as f:
-            ot_bytes = f.read()
-        with open("avis.xlsx", "rb") as f:
-            av_bytes = f.read()
+    od_ot, od_av, od_date, od_error = load_data_from_onedrive()
+
+    if od_ot is not None and od_av is not None:
+        ot_bytes, av_bytes = od_ot, od_av
+        if od_date:
+            fichier_date = od_date
+        st.sidebar.success(f"☁️ Données chargées depuis OneDrive ({fichier_date})")
+    else:
+        if od_error:
+            st.sidebar.warning(
+                f"⚠️ Échec du chargement OneDrive : {od_error} "
+                "Utilisation des fichiers locaux si disponibles."
+            )
+        if os.path.exists("ot.xlsx") and os.path.exists("avis.xlsx"):
+            with open("ot.xlsx", "rb") as f:
+                ot_bytes = f.read()
+            with open("avis.xlsx", "rb") as f:
+                av_bytes = f.read()
 
     if ot_bytes and av_bytes:
         df_full, av_full, apm, now_ts = prepare_data(ot_bytes, av_bytes, fichier_date)
@@ -224,27 +204,6 @@ def main() -> None:
     av_full = ctx["av_full"]
     apm     = ctx["apm"]
     now_ts  = ctx["now_ts"]
-
-    # ── Mode administrateur (mot de passe) ──────────────────────────────────
-    # Placé APRÈS render_sidebar() pour que les filtres (période, poste,
-    # division) restent en haut de la sidebar, bien visibles en premier —
-    # ce petit bloc de connexion apparaît en dessous, discret.
-    with st.sidebar:
-        if not st.session_state.is_admin:
-            with st.expander("🔒 Mode administrateur", expanded=False):
-                pwd = st.text_input("Mot de passe", type="password", key="admin_pwd_input")
-                if st.button("Se connecter", key="admin_login_btn"):
-                    if pwd == ADMIN_PASSWORD:
-                        st.session_state.is_admin = True
-                        st.rerun()
-                    else:
-                        st.error("Mot de passe incorrect.")
-        else:
-            with st.expander("🔓 Mode administrateur (actif)", expanded=False):
-                st.success("Connecté en tant qu'administrateur.")
-                if st.button("Se déconnecter", key="admin_logout_btn"):
-                    st.session_state.is_admin = False
-                    st.rerun()
 
     if df_full.empty:
         st.markdown('<div class="es">Veuillez charger les fichiers OT et AVIS via le panneau de filtres.</div>', unsafe_allow_html=True)
@@ -328,44 +287,6 @@ def main() -> None:
         sf1_q = calc_score_division(sf1_posts, PK)
         sf2_p = calc_score_division(sf2_posts, QK)
         sf2_q = calc_score_division(sf2_posts, PK)
-
-        # ── Diagnostic detail du calcul de score, poste par poste ─────────
-        # Affiche EN DIRECT dans l'app le detail KPI -> valeur -> gscore(0/1)
-        # -> score final, pour verifier que la regle rouge=0/sinon=1 est
-        # bien celle utilisee, sans avoir a comparer manuellement.
-        # CORRIGÉ : visible uniquement en mode administrateur.
-        if st.session_state.is_admin:
-          with st.sidebar:
-            with st.expander("🔬 Diagnostic score par poste", expanded=False):
-                _diag_poste = st.selectbox(
-                    "Choisir un poste", options=sorted(ckdf.index.tolist()),
-                    key="diag_poste_select",
-                )
-                if _diag_poste:
-                    _r = ckdf.loc[_diag_poste]
-                    _rows = []
-                    for _k in QK:
-                        if _k in _r.index and pd.notna(_r[_k]):
-                            _s = gscore(_k, _r[_k], CIBLE[_k])
-                            _rows.append({
-                                "KPI": _k, "Valeur": round(float(_r[_k]), 1),
-                                "Cible": CIBLE[_k], "Score (0/1)": _s,
-                            })
-                    _df_diag = pd.DataFrame(_rows)
-                    st.dataframe(_df_diag, use_container_width=True, height=300)
-                    _tot = _df_diag["Score (0/1)"].sum() if not _df_diag.empty else 0
-                    _cnt = len(_df_diag)
-                    _final = (_tot / _cnt * 100) if _cnt else 0
-                    st.markdown(
-                        f"**Score Performance calculé = {_tot}/{_cnt} × 100 = {_final:.1f}%**"
-                    )
-                    st.markdown(
-                        f"**Score affiché dans l'app (pscores) = {pscores.get(_diag_poste, 0):.1f}%**"
-                    )
-                    if abs(_final - pscores.get(_diag_poste, 0)) > 0.5:
-                        st.error("⚠️ MISMATCH détecté entre le calcul direct et pscores !")
-                    else:
-                        st.success("✅ Cohérent : le calcul direct correspond au score affiché.")
 
         ano_map    = build_ano_map(dfp, avf, now_ts)
         ano_p_rows = build_ano_rows(vp, ano_map, QK)
