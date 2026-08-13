@@ -1,7 +1,6 @@
 # -*- coding: utf-8 -*-
 import streamlit as st
 
-
 def inject_custom_css() -> None:
     st.markdown("""<style>
     section[data-testid="stSidebar"]{width:250px!important}
@@ -23,7 +22,7 @@ def inject_custom_css() -> None:
     .mh h1{color:#fff;font-size:42px;font-weight:800;margin:0;flex:1}
     .mh .logo{height:50px;width:auto;max-width:150px;object-fit:contain;border-radius:6px}
     .mh .db{background:rgba(255,255,255,0.2);padding:6px 16px;border-radius:16px;color:#fff;
-             font-size:20px;font-weight:600;border:1px solid rgba(255,255,255,0.3);backdrop-filter:blur(10px);}
+        font-size:20px;font-weight:600;border:1px solid rgba(255,255,255,0.3);backdrop-filter:blur(10px);}
 
     .cr{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:10px}
     .cc{background:#fff;border-radius:12px;padding:18px 16px;box-shadow:0 4px 12px rgba(0,0,0,0.06);
@@ -45,13 +44,13 @@ def inject_custom_css() -> None:
     .cc .cv-var.neutral{color:#eab308}
 
     .stl{font-size:16px;font-weight:800;color:var(--primary);margin:10px 0 5px 0;
-         padding-left:12px;border-left:4px solid var(--info);}
+        padding-left:12px;border-left:4px solid var(--info);}
 
     .tw{width:100%;border-collapse:collapse;font-family:'Inter',sans-serif;font-size:13px;
         display:block;overflow-x:auto;-webkit-overflow-scrolling:touch;margin:0}
     .tw thead th{background:var(--primary);color:#fff;font-weight:700;font-size:11px;
-                 text-transform:uppercase;letter-spacing:.3px;padding:6px 8px;border:none;
-                 white-space:nowrap;position:sticky;top:0;z-index:10}
+        text-transform:uppercase;letter-spacing:.3px;padding:6px 8px;border:none;
+        white-space:nowrap;position:sticky;top:0;z-index:10}
     .tw.qt thead th{background:linear-gradient(135deg,#2563eb,#3b82f6)}
     .tw.pt thead th{background:linear-gradient(135deg,#059669,#10b981)}
     .tw.at thead th{background:linear-gradient(135deg,#dc2626,#ef4444)}
@@ -70,11 +69,61 @@ def inject_custom_css() -> None:
     .plan-action-table td{padding:6px 8px;border:1px solid #cbd5e1;text-align:center;vertical-align:middle;}
     .plan-action-table td:first-child{text-align:left;font-weight:800;}
 
-    .stTabs [data-baseweb="tab-list"]{gap:6px;background:#e2e8f0;padding:6px;border-radius:8px;margin-bottom:8px}
-    .stTabs [data-baseweb="tab"]{border-radius:6px;padding:12px 22px;font-weight:700;font-size:20px;line-height:1.5;min-height:48px;}
-    .stTabs [data-baseweb="tab"] span,.stTabs [data-baseweb="tab"] > div{font-size:22px !important;}
-    .stTabs [aria-selected="true"]{background:#fff!important;color:var(--primary)!important;box-shadow:0 3px 8px rgba(0,0,0,.1);font-size:21px;}
-    .stTabs [data-baseweb="tab"] svg{width:22px;height:22px}
+    /* ══════════════════════════════════════════════════════════════════
+       ONGLETS (tabs) — style pilule modernisé
+       Remplace l'ancien fond gris plat par un segmented-control avec
+       dégradé sur l'onglet actif, coins arrondis, effet de survol et
+       ombre douce. Sélecteurs multiples pour rester compatible avec
+       différentes versions du DOM interne de Streamlit (baseweb).
+       ══════════════════════════════════════════════════════════════════ */
+    .stTabs [data-baseweb="tab-list"]{
+        gap:8px;
+        background:#eef2f7;
+        padding:8px;
+        border-radius:14px;
+        margin-bottom:14px;
+        border:1px solid #e2e8f0;
+        flex-wrap:wrap;
+    }
+    .stTabs [data-baseweb="tab"]{
+        border-radius:10px;
+        padding:10px 20px;
+        font-weight:700;
+        font-size:15px;
+        line-height:1.4;
+        min-height:44px;
+        color:#475569;
+        background:transparent;
+        border:none !important;
+        transition:background .18s ease, color .18s ease, box-shadow .18s ease;
+    }
+    .stTabs [data-baseweb="tab"]:hover{
+        background:rgba(30,58,95,.08);
+        color:var(--primary);
+    }
+    .stTabs [data-baseweb="tab"] span,
+    .stTabs [data-baseweb="tab"] p,
+    .stTabs [data-baseweb="tab"] > div{
+        font-size:15px !important;
+        font-weight:700 !important;
+        color:inherit !important;
+    }
+    .stTabs [aria-selected="true"]{
+        background:linear-gradient(135deg,var(--primary) 0%,var(--primary-light) 100%) !important;
+        color:#fff !important;
+        box-shadow:0 4px 14px rgba(30,58,95,.28);
+    }
+    .stTabs [aria-selected="true"] span,
+    .stTabs [aria-selected="true"] p,
+    .stTabs [aria-selected="true"] > div{
+        color:#fff !important;
+    }
+    .stTabs [data-baseweb="tab"] svg{width:18px;height:18px}
+    /* Masque la barre de soulignement par defaut de Streamlit : le fond
+       degrade de l'onglet actif fait deja office d'indicateur visuel. */
+    .stTabs [data-baseweb="tab-highlight"]{display:none !important;}
+    .stTabs [data-baseweb="tab-border"]{display:none !important;background:transparent !important;}
+    .stTabs [data-baseweb="tab-panel"]{padding-top:6px}
 
     .ca{background:#fff;border-radius:var(--radius);padding:12px;margin-top:6px;border:1px solid var(--border);box-shadow:0 1px 4px rgba(0,0,0,.02)}
     .ca .ct{font-size:14px;font-weight:700;margin-bottom:8px;padding-bottom:5px;border-bottom:1px solid var(--border)}
@@ -84,7 +133,7 @@ def inject_custom_css() -> None:
     .car .cab{flex:1;height:26px;background:#edf2f7;border-radius:4px;overflow:visible;position:relative}
     .car .caf{height:100%;border-radius:4px;transition:width .3s}
     .car .target-mark{position:absolute;top:-4px;bottom:-4px;width:3px;background:var(--info) !important;z-index:20;
-                      transform:translateX(-50%);box-shadow:0 0 6px rgba(59,130,246,.9),0 0 2px rgba(0,0,0,.4);border-radius:2px;}
+        transform:translateX(-50%);box-shadow:0 0 6px rgba(59,130,246,.9),0 0 2px rgba(0,0,0,.4);border-radius:2px;}
     .car .cav-out{font-size:12px;font-weight:800;color:#1e293b;min-width:55px;text-align:right;padding-left:6px}
     .car .cav-tgt{font-size:10px;font-weight:700;color:#1e293b;min-width:42px;text-align:right;padding-left:4px;opacity:.7}
     .gbr{display:flex;align-items:center;padding:3px 0;font-size:12px;border-bottom:1px solid #f1f5f9}
@@ -127,7 +176,7 @@ def inject_custom_css() -> None:
     .es{text-align:center;padding:14px;color:#64748b;font-size:14px}
     .synth-tbl{width:100%;border-collapse:collapse;font-family:'Inter',sans-serif;font-size:12px}
     .synth-tbl thead th{background:var(--primary);color:#fff;font-weight:700;font-size:11px;
-                        padding:5px 8px;border:none;white-space:nowrap;position:sticky;top:0}
+        padding:5px 8px;border:none;white-space:nowrap;position:sticky;top:0}
     .synth-tbl tbody td{padding:4px 8px;border-bottom:1px solid var(--border);text-align:center;color:#1e293b !important}
     .synth-tbl tbody tr:nth-child(even) td{background:#f8fafc}
     .synth-tbl tbody tr:hover td{background:#eff6ff!important}
@@ -137,7 +186,7 @@ def inject_custom_css() -> None:
     [data-testid="stActionButtonContainer"]{display:none !important;}
 
     .footer{text-align:center;margin-top:30px;padding:15px;color:#64748b;font-size:13px;
-            border-top:1px solid var(--border);font-weight:600;}
+        border-top:1px solid var(--border);font-weight:600;}
 
     div[data-testid="stDataEditor"] table,div[data-testid="stDataEditor"] th,
     div[data-testid="stDataEditor"] td{font-size:18px !important;line-height:1.4 !important;
@@ -165,8 +214,11 @@ def inject_custom_css() -> None:
         .tw{font-size:10px}
         .tw thead th,.tw tbody td{padding:3px 4px}
         .stl{font-size:13px}
-        .stTabs [data-baseweb="tab"]{padding:8px 12px;font-size:15px}
-        .stTabs [data-baseweb="tab"] span{font-size:16px !important}
+        .stTabs [data-baseweb="tab-list"]{gap:5px;padding:5px;border-radius:12px}
+        .stTabs [data-baseweb="tab"]{padding:8px 12px;font-size:13px;min-height:38px}
+        .stTabs [data-baseweb="tab"] span,
+        .stTabs [data-baseweb="tab"] p,
+        .stTabs [data-baseweb="tab"] > div{font-size:13px !important}
         div[data-testid="stDataEditor"] table,div[data-testid="stDataEditor"] th,
         div[data-testid="stDataEditor"] td{font-size:14px !important;}
     }
