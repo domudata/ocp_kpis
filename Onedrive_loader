@@ -6,9 +6,9 @@ l'organisation avec le lien" ou public) — PAS d'authentification
 interactive Microsoft.
 
 Configuration (Streamlit Cloud → Settings → Secrets), format TOML :
-    ONEDRIVE_OT_URL   = "https://xxx-my.sharepoint.com/:x:/g/personal/.../ot.xlsx?e=..."
-    ONEDRIVE_AVIS_URL = "https://xxx-my.sharepoint.com/:x:/g/personal/.../avis.xlsx?e=..."
-    ONEDRIVE_DATE_URL = "https://xxx-my.sharepoint.com/:t:/g/personal/.../date.txt?e=..."  (optionnel)
+ONEDRIVE_OT_URL = "https://eocp-my.sharepoint.com/:x:/g/personal/m_benmoussa_ocpgroup_ma/IQAOdnffldv6QYtGHJmIoyArAYBM13a0OSo0CTvmH-mePyY?e=2PtZuz"
+ONEDRIVE_AVIS_URL = "https://eocp-my.sharepoint.com/:x:/g/personal/m_benmoussa_ocpgroup_ma/IQDQtfXEY5N-RY4Uq2tV__4YAbNm8sGrrGNfFd5tnhfRF-g?e=3cW3Gl"
+ONEDRIVE_DATE_URL = "https://eocp-my.sharepoint.com/:t:/g/personal/m_benmoussa_ocpgroup_ma/IQCnHSm2MW4lTImL-HqPH7lQAX_8v64udMNHnzmyLtJ8kI0?e=0XgVa2"
 
 Si ces secrets ne sont pas définis, load_data_from_onedrive() retourne
 (None, None, None, None) sans erreur → l'app retombe sur les fichiers
