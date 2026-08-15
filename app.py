@@ -643,6 +643,9 @@ def main() -> None:
 
             from core.publish_reports import generate_and_publish_all_postes
             from core.github_publish import is_configured as _github_configured
+            from core.github_publish import debug_config as _github_debug_config
+
+            st.caption(f"🔧 Config GitHub détectée : {_github_debug_config()}")
 
             if not _github_configured():
                 st.caption(
