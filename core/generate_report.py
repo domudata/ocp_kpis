@@ -65,6 +65,13 @@ APP_URL = "https://tableaubordmc.streamlit.app"
 
 
 def _color_for(val: float, cible: float, lower: bool) -> RGBColor:
+    # CORRIGÉ : arrondi à l'entier AVANT comparaison (même précision que
+    # l'affichage "f'{v:.0f}%'" dans les tableaux). Sans ça, une valeur
+    # comme 99.52% s'affiche "100%" mais était comparée à la cible sans
+    # arrondi (99.52 < 100) -> colorée orange alors que l'utilisateur voit
+    # "100%" et s'attend à du vert. Avec l'arrondi, round(99.52)=100
+    # correspond bien à la cible -> vert, cohérent avec l'affichage.
+    val = round(val)
     if lower:
         if val <= cible:
             return GREEN
