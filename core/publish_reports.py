@@ -140,13 +140,13 @@ def generate_and_publish_poste_report(
         return status
 
     # ── 5) Publication sur GitHub ──
+    # CORRIGÉ (sur demande) : le PPTX n'est plus publié — seuls le PDF et
+    # l'Excel des anomalies sont envoyés sur GitHub. Le PPTX reste généré
+    # en interne (étape 2) car nécessaire pour produire le PDF, mais son
+    # contenu n'est jamais poussé vers presentation/<poste>/.
     if not is_configured():
         status["messages"].append("GITHUB_TOKEN / GITHUB_REPO non configurés — fichiers générés mais non publiés.")
         return status
-
-    ok, msg = upload_file(f"presentation/{folder}/rapport.pptx", pptx_bytes, f"Rapport KPI {poste} — {date_str}")
-    status["messages"].append(f"PPTX → GitHub : {'OK' if ok else msg}")
-    status["pptx_published"] = ok
 
     if pdf_bytes:
         ok, msg = upload_file(f"presentation/{folder}/rapport.pdf", pdf_bytes, f"Rapport KPI {poste} (PDF) — {date_str}")
