@@ -631,6 +631,77 @@ def main() -> None:
             except Exception as _e:
                 st.caption(f"Export PowerPoint indisponible : {_e}")
 
+            # ── NOUVEAU : génération + publication de tous les rapports
+            # KPI par poste (PPTX + PDF + Excel anomalies) sur GitHub,
+            # dans presentation/<poste>/. Bouton MANUEL (pas automatique
+            # à chaque recalcul) : mesuré à ~1.6s/poste rien que pour la
+            # génération locale (PPTX+PDF), plus le temps d'upload GitHub
+            # par fichier — trop lent pour tourner à chaque interaction
+            # Streamlit (qui relance le script à chaque clic).
+            st.markdown("---")
+            st.markdown("#### 📤 Rapports KPI par poste (PPTX + PDF + Excel)")
+
+            from core.publish_reports import generate_and_publish_all_postes
+            from core.github_publish import is_configured as _github_configured
+
+            if not _github_configured():
+                st.caption(
+                    "⚠️ Publication GitHub non configurée (GITHUB_TOKEN / GITHUB_REPO "
+                    "absents des secrets). Les rapports seront générés mais pas publiés."
+                )
+
+            _col_pub, _col_dry = st.columns(2)
+            with _col_pub:
+                _launch_publish = st.button(
+                    f"🚀 Générer et publier les rapports ({len(vp)} poste(s))",
+                    use_container_width=True, type="primary", key="btn_publish_all",
+                )
+            with _col_dry:
+                _launch_dry = st.button(
+                    "🧪 Générer seulement (test, sans publier)",
+                    use_container_width=True, key="btn_dry_all",
+                )
+
+            if _launch_publish or _launch_dry:
+                _progress = st.progress(0, text="Démarrage...")
+                _status_area = st.empty()
+
+                def _on_progress(i, n, poste):
+                    _progress.progress(i / n, text=f"[{i + 1}/{n}] {poste}...")
+
+                _results = generate_and_publish_all_postes(
+                    ckdf, pscores, qscores, ano_map, dfp, avf, now_ts,
+                    date_str=fichier_date, postes=list(vp),
+                    dry_run=_launch_dry, progress_callback=_on_progress,
+                )
+                _progress.progress(1.0, text="Terminé.")
+
+                _ok_pptx = sum(1 for r in _results if r.get("pptx"))
+                _ok_pdf = sum(1 for r in _results if r.get("pdf"))
+                _ok_xlsx = sum(1 for r in _results if r.get("xlsx"))
+                _ok_pub = sum(1 for r in _results if r.get("pptx_published"))
+
+                with _status_area.container():
+                    if _launch_dry:
+                        st.success(
+                            f"✅ Génération test terminée : {_ok_pptx}/{len(_results)} PPTX, "
+                            f"{_ok_pdf}/{len(_results)} PDF, {_ok_xlsx}/{len(_results)} Excel."
+                        )
+                    else:
+                        st.success(
+                            f"✅ {_ok_pub}/{len(_results)} postes publiés sur GitHub "
+                            f"(presentation/<poste>/) — {_ok_pptx} PPTX, {_ok_pdf} PDF, "
+                            f"{_ok_xlsx} Excel générés."
+                        )
+                    with st.expander("Détail par poste"):
+                        for r in _results:
+                            _icons = "".join([
+                                "📊" if r.get("pptx") else "❌",
+                                "📄" if r.get("pdf") else "❌",
+                                "📈" if r.get("xlsx") else "❌",
+                            ])
+                            st.caption(f"{_icons}  **{r['poste']}** — " + " / ".join(r.get("messages", [])))
+
             render_plan_action_tab(plan_actions_rows, sf1_rows, sf2_rows, anomaly_dfs, fichier_date=fichier_date, poste_stars=poste_stars)
 
         with tabs[6]:
