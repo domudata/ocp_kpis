@@ -639,7 +639,7 @@ def main() -> None:
             # par fichier — trop lent pour tourner à chaque interaction
             # Streamlit (qui relance le script à chaque clic).
             st.markdown("---")
-            st.markdown("#### 📤 Rapports KPI par poste (PPTX + PDF + Excel)")
+            st.markdown("#### 📤 Rapports KPI par poste (PDF + Excel)")
 
             from core.publish_reports import generate_and_publish_all_postes
             from core.github_publish import is_configured as _github_configured
@@ -679,27 +679,25 @@ def main() -> None:
                 )
                 _progress.progress(1.0, text="Terminé.")
 
-                _ok_pptx = sum(1 for r in _results if r.get("pptx"))
                 _ok_pdf = sum(1 for r in _results if r.get("pdf"))
                 _ok_xlsx = sum(1 for r in _results if r.get("xlsx"))
-                _ok_pub = sum(1 for r in _results if r.get("pptx_published"))
+                _ok_pub = sum(1 for r in _results if r.get("pdf_published"))
 
                 with _status_area.container():
                     if _launch_dry:
                         st.success(
-                            f"✅ Génération test terminée : {_ok_pptx}/{len(_results)} PPTX, "
-                            f"{_ok_pdf}/{len(_results)} PDF, {_ok_xlsx}/{len(_results)} Excel."
+                            f"✅ Génération test terminée : {_ok_pdf}/{len(_results)} PDF, "
+                            f"{_ok_xlsx}/{len(_results)} Excel."
                         )
                     else:
                         st.success(
                             f"✅ {_ok_pub}/{len(_results)} postes publiés sur GitHub "
-                            f"(presentation/<poste>/) — {_ok_pptx} PPTX, {_ok_pdf} PDF, "
+                            f"(presentation/<poste>/) — {_ok_pdf} PDF, "
                             f"{_ok_xlsx} Excel générés."
                         )
                     with st.expander("Détail par poste"):
                         for r in _results:
                             _icons = "".join([
-                                "📊" if r.get("pptx") else "❌",
                                 "📄" if r.get("pdf") else "❌",
                                 "📈" if r.get("xlsx") else "❌",
                             ])
