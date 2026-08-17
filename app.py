@@ -19,7 +19,6 @@ try:
         LOWER_BETTER, CONSIGNES_HSE,
     )
     from core.prepare_data import prepare_data, get_date_from_file
-    from core.onedrive_loader import load_data_from_onedrive
     from core.calcul_kpi import calc_kpis, gscore, is_lb
     from core.anomalies import build_ano_map, build_ano_rows, build_anomaly_dfs
     from core.historique import (
@@ -171,27 +170,14 @@ def main() -> None:
         st.rerun()
         st.stop()
 
-    # ── Chargement des données : OneDrive (automatique) en priorité,
-    # fichiers locaux (ot.xlsx/avis.xlsx uploadés manuellement) en secours ──
+    # ── Chargement des données : fichiers locaux (ot.xlsx/avis.xlsx,
+    # committés dans le dépôt GitHub) uniquement — OneDrive retiré. ──
     ot_bytes = av_bytes = None
-    od_ot, od_av, od_date, od_error = load_data_from_onedrive()
-
-    if od_ot is not None and od_av is not None:
-        ot_bytes, av_bytes = od_ot, od_av
-        if od_date:
-            fichier_date = od_date
-        st.sidebar.success(f"☁️ Données chargées depuis OneDrive ({fichier_date})")
-    else:
-        if od_error:
-            st.sidebar.warning(
-                f"⚠️ Échec du chargement OneDrive : {od_error} "
-                "Utilisation des fichiers locaux si disponibles."
-            )
-        if os.path.exists("ot.xlsx") and os.path.exists("avis.xlsx"):
-            with open("ot.xlsx", "rb") as f:
-                ot_bytes = f.read()
-            with open("avis.xlsx", "rb") as f:
-                av_bytes = f.read()
+    if os.path.exists("ot.xlsx") and os.path.exists("avis.xlsx"):
+        with open("ot.xlsx", "rb") as f:
+            ot_bytes = f.read()
+        with open("avis.xlsx", "rb") as f:
+            av_bytes = f.read()
 
     if ot_bytes and av_bytes:
         df_full, av_full, apm, now_ts = prepare_data(ot_bytes, av_bytes, fichier_date)
