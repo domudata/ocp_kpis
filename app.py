@@ -433,7 +433,30 @@ def main() -> None:
             fichier_date,
         )
 
+        # ── NOUVEAU : publication automatique de l'historique sur GitHub ──
+        # Avant, il fallait télécharger indicateurs_kpis.xlsx manuellement
+        # et le committer sur GitHub (étapes 2-3 de l'aide affichée dans
+        # l'onglet "Suivi & Evolution") — étape régulièrement oubliée,
+        # ce qui bloquait le compteur de dates à 1 malgré de nouvelles
+        # extractions chargées. Réutilise le même mécanisme que la
+        # publication des rapports (core/github_publish.py).
         hist_filepath = os.path.join("kpis", "indicateurs_kpis.xlsx")
+        try:
+            from core.github_publish import upload_file as _gh_upload, is_configured as _gh_configured
+            if _gh_configured() and os.path.exists(hist_filepath):
+                with open(hist_filepath, "rb") as _hf:
+                    _hist_bytes = _hf.read()
+                _ok, _msg = _gh_upload(
+                    "kpis/indicateurs_kpis.xlsx", _hist_bytes,
+                    f"Historique KPI — {fichier_date}",
+                )
+                if _ok:
+                    st.sidebar.success(f"☁️ Historique publié sur GitHub ({fichier_date})")
+                else:
+                    st.sidebar.warning(f"⚠️ Historique non publié sur GitHub : {_msg}")
+        except Exception as _e:
+            st.sidebar.warning(f"⚠️ Publication historique impossible : {_e}")
+
         hist_df  = load_historical_kpis(hist_filepath)
         var_df   = calculate_variations(hist_df)
         journal_df = generate_journal(var_df)
