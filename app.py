@@ -712,6 +712,30 @@ def main() -> None:
                             ])
                             st.caption(f"{_icons}  **{r['poste']}** — " + " / ".join(r.get("messages", [])))
 
+                    # ── NOUVEAU : déclenche la synchronisation OneDrive via
+                    # Power Automate (webhook HTTP), uniquement après une
+                    # publication réelle réussie (pas en mode test).
+                    if not _launch_dry and _ok_pub > 0:
+                        try:
+                            _pa_url = st.secrets.get("POWER_AUTOMATE_WEBHOOK_URL")
+                        except Exception:
+                            _pa_url = None
+                        if _pa_url:
+                            try:
+                                import requests as _requests
+                                _pa_resp = _requests.post(_pa_url, json={}, timeout=15)
+                                if _pa_resp.status_code in (200, 201, 202):
+                                    st.success("☁️ Synchronisation OneDrive déclenchée (Power Automate).")
+                                else:
+                                    st.warning(f"⚠️ Power Automate a répondu {_pa_resp.status_code} : {_pa_resp.text[:200]}")
+                            except Exception as _pa_e:
+                                st.warning(f"⚠️ Impossible de déclencher Power Automate : {_pa_e}")
+                        else:
+                            st.caption(
+                                "ℹ️ Ajoutez POWER_AUTOMATE_WEBHOOK_URL dans les secrets pour "
+                                "déclencher automatiquement la synchronisation OneDrive ici."
+                            )
+
             render_plan_action_tab(plan_actions_rows, sf1_rows, sf2_rows, anomaly_dfs, fichier_date=fichier_date, poste_stars=poste_stars)
 
         with tabs[6]:
