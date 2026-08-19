@@ -82,9 +82,16 @@ def _spark_pivot(hist_df: pd.DataFrame, kpi_name: str, section: str) -> pd.DataF
     return pv.sort_index(axis=1)
 
 def get_spark_color(v) -> str:
-    if pd.isna(v): return "#cbd5e0"
-    if v >= 90: return "#10b981"
-    if v >= 80: return "#f59e0b"
+    if pd.isna(v):
+        return "#cbd5e0"
+    try:
+        v = float(v)
+    except (TypeError, ValueError):
+        return "#cbd5e0"
+    if v >= 90:
+        return "#10b981"
+    if v >= 80:
+        return "#f59e0b"
     return "#ef4444"
 
 def get_sparkline_html(scores: list) -> str:
@@ -180,12 +187,26 @@ def render_sparkline_table(hist_df: pd.DataFrame, kpi_list: list,
             last = vals[-1] if vals else None
             first = vals[0] if vals else None
             cible = CIBLE.get(kpi, 100)
-            clr = "#10b981" if (last is not None and (last <= cible if kpi in LOWER_BETTER else last >= cible)) else "#ef4444"
+            # Filet de sécurité : conversion en float avant comparaison
+            # (la conversion source se fait déjà dans historique.py, mais
+            # on évite ici tout risque de "'>=' not supported between
+            # instances of 'str' and 'int'" si une valeur non convertie
+            # arrivait quand même jusqu'ici).
+            try:
+                last_num = float(last) if last is not None and pd.notna(last) else None
+            except (TypeError, ValueError):
+                last_num = None
+            clr = "#10b981" if (last_num is not None and (last_num <= cible if kpi in LOWER_BETTER else last_num >= cible)) else "#ef4444"
             svg = make_sparkline_svg(vals, color=clr)
 
+            try:
+                first_num = float(first) if first is not None and pd.notna(first) else None
+            except (TypeError, ValueError):
+                first_num = None
+
             var_html = ""
-            if first is not None and last is not None and first != 0:
-                pct = ((last - first) / abs(first)) * 100
+            if first_num is not None and last_num is not None and first_num != 0:
+                pct = ((last_num - first_num) / abs(first_num)) * 100
                 if pct > 0.5:
                     var_html = f'<span style="color:#10b981;">▲+{pct:.1f}%</span>'
                 elif pct < -0.5:
@@ -193,7 +214,7 @@ def render_sparkline_table(hist_df: pd.DataFrame, kpi_list: list,
                 else:
                     var_html = '<span style="color:#94a3b8;">→0%</span>'
 
-            v_str = f'{last:.1f}%' if last is not None else '—'
+            v_str = f'{last_num:.1f}%' if last_num is not None else '—'
             if svg:
                 h += (f'<td style="text-align:center;padding:4px;">{svg}<br>'
                       f'<b>{v_str}</b> {var_html}</td>')
@@ -258,12 +279,20 @@ def render_anomaly_sparkline_table(hist_df: pd.DataFrame, kpi_list: list,
             vals = pivots[kpi].loc[poste].values.tolist()
             last = vals[-1] if vals else None
             first = vals[0] if vals else None
-            clr = "#10b981" if (last is not None and last == 0) else "#ef4444"
+            try:
+                last_num = float(last) if last is not None and pd.notna(last) else None
+            except (TypeError, ValueError):
+                last_num = None
+            try:
+                first_num = float(first) if first is not None and pd.notna(first) else None
+            except (TypeError, ValueError):
+                first_num = None
+            clr = "#10b981" if (last_num is not None and last_num == 0) else "#ef4444"
             svg = make_sparkline_svg(vals, color=clr)
 
             var_html = ""
-            if first is not None and last is not None:
-                diff = last - first
+            if first_num is not None and last_num is not None:
+                diff = last_num - first_num
                 if diff > 0:
                     var_html = f'<span style="color:#ef4444;">▲+{diff:.0f}</span>'
                 elif diff < 0:
@@ -271,7 +300,7 @@ def render_anomaly_sparkline_table(hist_df: pd.DataFrame, kpi_list: list,
                 else:
                     var_html = '<span style="color:#94a3b8;">→0</span>'
 
-            v_str = f'{last:.0f}' if last is not None else '—'
+            v_str = f'{last_num:.0f}' if last_num is not None else '—'
             if svg:
                 h += (f'<td style="text-align:center;padding:4px;">{svg}<br>'
                       f'<b>{v_str}</b> {var_html}</td>')
