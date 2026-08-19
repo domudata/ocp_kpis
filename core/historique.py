@@ -64,6 +64,19 @@ def load_historical_kpis(filepath: str) -> pd.DataFrame:
     df["Date_parsed"] = pd.to_datetime(
         df["Date"].str.replace("-", "/"), format="%d/%m/%Y", errors="coerce"
     )
+
+    # CORRIGÉ : les valeurs de KPI sont enregistrées dans le fichier Excel
+    # comme du TEXTE formaté (ex: "96.3", pas le nombre 96.3 — cf.
+    # `"%.1f" % r[k]` dans app.py). Sans conversion, toute comparaison
+    # numérique en aval (sparklines, gscore, évaluation de tendance)
+    # plante avec "'>=' not supported between instances of 'str' and
+    # 'int'". On convertit ici, une seule fois, toutes les colonnes sauf
+    # les colonnes texte connues (identité de la ligne).
+    _non_numeric_cols = {"Date", "Poste de travail", "_section", "Date_parsed"}
+    for col in df.columns:
+        if col not in _non_numeric_cols:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
     return df.sort_values("Date_parsed").reset_index(drop=True)
 
 def calculate_variations(hist_df: pd.DataFrame) -> pd.DataFrame:
@@ -212,3 +225,4 @@ def evaluate_trend_last_n(hist_df: pd.DataFrame, section: str, kpi_list: list, n
                 "Écart": round(diff, 1), "Écart %": round(pct, 1), "Tendance": tendance,
             })
     return pd.DataFrame(rows)
+    
