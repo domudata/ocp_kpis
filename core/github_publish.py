@@ -57,6 +57,46 @@ def debug_config() -> str:
     return f"repo={repo!r}  branch={branch!r}  token={token_masked}"
 
 
+def download_file(path_in_repo: str):
+    """
+    Télécharge le contenu actuel d'un fichier depuis le dépôt GitHub
+    configuré. Utilisé pour récupérer la DERNIÈRE version de l'historique
+    AVANT de le fusionner avec les nouvelles données (garantit qu'on ne
+    perd jamais les dates déjà publiées, même si le disque local de l'app
+    a été réinitialisé entre deux sessions).
+
+    Retourne (content_bytes, error_message).
+    - Si le fichier n'existe pas encore sur GitHub : (None, None) — pas
+      une erreur, c'est le cas normal pour la toute première publication.
+    - Si erreur réseau/config : (None, "message d'erreur explicite").
+    """
+    token, repo, branch = _get_config()
+    if not token or not repo:
+        return None, "GITHUB_TOKEN / GITHUB_REPO non configurés dans les secrets."
+
+    url = f"{API_ROOT}/repos/{repo}/contents/{path_in_repo}"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    try:
+        r = requests.get(url, headers=headers, params={"ref": branch}, timeout=TIMEOUT)
+    except requests.exceptions.RequestException as e:
+        return None, f"Erreur réseau (téléchargement) sur {url} : {e}"
+
+    if r.status_code == 404:
+        return None, None  # fichier pas encore créé — cas normal, pas une erreur
+    if r.status_code != 200:
+        return None, f"Échec téléchargement ({r.status_code}) sur {url} : {r.text[:300]}"
+
+    try:
+        content_b64 = r.json()["content"]
+        return base64.b64decode(content_b64), None
+    except Exception as e:
+        return None, f"Réponse GitHub illisible : {e}"
+
+
 def upload_file(path_in_repo: str, content_bytes: bytes, commit_message: str):
     """
     Crée ou met à jour un fichier dans le dépôt GitHub configuré.
