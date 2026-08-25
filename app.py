@@ -250,24 +250,36 @@ def main() -> None:
         sf2_posts = [p for p in vp if str(p).startswith("SF2")]
 
         def calc_score_division(postes, liste_kpi):
-            score = 0
-            nb = 0
+            total = 0
+            nombre_kpi = 0
 
-            for kpi in liste_kpi:
-                valeurs = []
+            for poste in postes:
+                if poste not in ckdf.index:
+                    continue
 
-                for poste in postes:
-                    if poste in ckdf.index:
-                        val = ckdf.loc[poste, kpi]
-                        if pd.notna(val):
-                            valeurs.append(float(val))
+                r = ckdf.loc[poste]
 
-                if valeurs:
-                    moyenne = sum(valeurs) / len(valeurs)
-                    score += gscore(kpi, moyenne, CIBLE[kpi])
-                    nb += 1
+                for kpi in liste_kpi:
+                    if kpi not in r.index:
+                        continue
 
-            return round(score / nb * 100, 2) if nb else 0
+                    val = r[kpi]
+
+                    if pd.isna(val):
+                        continue
+
+                    total += gscore(
+                        kpi,
+                        float(val),
+                        CIBLE[kpi]
+                    )
+
+                    nombre_kpi += 1
+
+            return round(
+                (total / nombre_kpi) * 100,
+                2
+            ) if nombre_kpi else 0
 
         sf1_p = calc_score_division(sf1_posts, QK)
         sf1_q = calc_score_division(sf1_posts, PK)
@@ -335,63 +347,32 @@ def main() -> None:
         cible_q["Score Qualite"] = "100"
         qrows.append(cible_q)
 
-        # Total general par KPI (CORRIGÉ) :
-        # - Pour les KPI d'âge (Préparation/Planification/Exécution × 3 tranches) :
-        #   MOYENNE SIMPLE, pas gscore. Au niveau de chaque poste, les 3 tranches
-        #   (<1 mois + 1-3 mois + >3 mois) somment déjà à 100% ; la moyenne
-        #   conserve cette propriété (linéarité), donc les 3 totaux somment
-        #   aussi à 100. Un comptage gscore indépendant sur chaque tranche
-        #   casserait cette contrainte.
-        # - Pour tous les autres KPI : gscore (rouge=0/sinon=1), comme convenu.
-        _AGE_KPIS = {
-            "OT préparation <1 mois", "OT préparation 1mois< <3mois", "OT préparation >3 mois",
-            "OT planification <1 mois", "OT planification 1mois< <3mois", "OT planification >3 mois",
-            "OT exécution <1 mois", "OT exécution 1mois< <3mois", "OT exécution >3 mois",
-        }
+        # Total general par KPI — UNIFORMISÉ : même règle gscore
+        # (rouge=0/sinon=1) pour TOUS les KPI, y compris les KPI d'âge
+        # (l'ancienne exception _AGE_KPIS, qui utilisait une moyenne
+        # simple, est supprimée sur demande explicite).
+        # Pour chaque KPI : nombre de cellules conformes (postes) /
+        # nombre de cellules valides (non-NaN) × 100.
         tot_p = {"Poste de travail": "Total general", "_t": "total"}
         for k in QK:
-            if k in _AGE_KPIS:
-                vals = []
-                for rw in prows:
-                    if k in rw and rw.get("_t") not in ("cible", "total"):
-                        try:
-                            fv = float(rw[k])
-                            if pd.notna(fv):
-                                vals.append(fv)
-                        except Exception:
-                            pass
-                tot_p[k] = ("%.1f" % (sum(vals) / len(vals))) if vals else "nan"
-            else:
-                cc = tc = 0
-                for rw in prows:
-                    if k in rw and rw.get("_t") not in ("cible", "total"):
-                        try:
-                            fv = float(rw[k])
-                            if pd.notna(fv):
-                                cc += gscore(k, fv, CIBLE.get(k, 100))
-                                tc += 1
-                        except Exception:
-                            pass
-                tot_p[k] = ("%.1f" % ((cc / tc) * 100)) if tc > 0 else "nan"
+            cc = tc = 0
+            for rw in prows:
+                if k in rw and rw.get("_t") not in ("cible", "total"):
+                    try:
+                        fv = float(rw[k])
+                        if pd.notna(fv):
+                            cc += gscore(k, fv, CIBLE.get(k, 100))
+                            tc += 1
+                    except Exception:
+                        pass
+            tot_p[k] = ("%.1f" % ((cc / tc) * 100)) if tc > 0 else "nan"
 
-        # ── Score Performance du Total general (CORRIGÉ) ───────────────────
-        # AVANT : moyenne des pscores par poste (sum(pscores.values())/len(pscores)).
-        # APRÈS : calculé DIRECTEMENT sur les valeurs de la ligne Total general
-        # (tot_p[k]) via gscore (rouge=0/sinon=1), sans passer par la moyenne
-        # des scores par poste.
-        score_total = 0
-        nb_kpi = 0
-
-        for k in QK:
-            try:
-                val = float(tot_p[k])
-                if pd.notna(val):
-                    score_total += gscore(k, val, CIBLE[k])
-                    nb_kpi += 1
-            except Exception:
-                pass
-
-        tot_p["Score Performance"] = "%.2f" % ((score_total / nb_kpi) * 100 if nb_kpi else 0)
+        # Score Performance du Total general : calculé DIRECTEMENT sur
+        # TOUTES les cellules KPI Performance de tous les postes
+        # sélectionnés (pas à partir de tot_p[k], pas une moyenne des
+        # scores par poste). Réutilise calc_score_division(vp, QK), qui
+        # applique exactement cette même règle cellule par cellule.
+        tot_p["Score Performance"] = "%.2f" % calc_score_division(vp, QK)
         prows.append(tot_p)
 
         tot_q = {"Poste de travail": "Total general", "_t": "total"}
@@ -408,23 +389,9 @@ def main() -> None:
                         pass
             tot_q[k] = ("%.1f" % ((cc / tc) * 100)) if tc > 0 else "nan"
 
-        # ── Score Qualite du Total general (CORRIGÉ) ───────────────────────
-        # Même principe que Score Performance ci-dessus : calculé
-        # directement sur les valeurs de la ligne Total general (tot_q[k])
-        # via gscore, sans passer par la moyenne des qscores par poste.
-        score_total = 0
-        nb_kpi = 0
-
-        for k in PK:
-            try:
-                val = float(tot_q[k])
-                if pd.notna(val):
-                    score_total += gscore(k, val, CIBLE[k])
-                    nb_kpi += 1
-            except Exception:
-                pass
-
-        tot_q["Score Qualite"] = "%.2f" % ((score_total / nb_kpi) * 100 if nb_kpi else 0)
+        # Score Qualite du Total general : même principe, directement sur
+        # toutes les cellules KPI Qualité de tous les postes sélectionnés.
+        tot_q["Score Qualite"] = "%.2f" % calc_score_division(vp, PK)
         qrows.append(tot_q)
 
         save_kpis_to_excel(
