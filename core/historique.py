@@ -225,4 +225,3 @@ def evaluate_trend_last_n(hist_df: pd.DataFrame, section: str, kpi_list: list, n
                 "Écart": round(diff, 1), "Écart %": round(pct, 1), "Tendance": tendance,
             })
     return pd.DataFrame(rows)
-    
