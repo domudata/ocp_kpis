@@ -34,6 +34,43 @@ def save_kpis_to_excel(prows, pcols, qrows, qcols,
 
     filepath = os.path.join(kpis_dir, "indicateurs_kpis.xlsx")
 
+    # ── NOUVEAU : synchronisation GitHub-first ──────────────────────────
+    # Avant de charger le fichier local, on tente de récupérer la
+    # DERNIÈRE version publiée sur GitHub et on l'utilise comme point de
+    # départ si elle est plus complète que ce qu'il y a en local (ou si
+    # rien n'existe en local). Ça évite de perdre l'historique quand le
+    # disque local de l'app a été réinitialisé entre deux sessions
+    # (redémarrage Streamlit Cloud) — le seul cas où on perdrait des
+    # dates malgré cette synchronisation est si GitHub lui-même n'a
+    # jamais reçu la publication (vérifier GITHUB_TOKEN/GITHUB_REPO).
+    try:
+        from core.github_publish import download_file as _gh_download, is_configured as _gh_is_configured
+        if _gh_is_configured():
+            _remote_bytes, _dl_err = _gh_download("kpis/indicateurs_kpis.xlsx")
+            if _remote_bytes:
+                _use_remote = True
+                if os.path.exists(filepath):
+                    try:
+                        _local_wb = load_workbook(filepath, read_only=True)
+                        _remote_wb = load_workbook(io.BytesIO(_remote_bytes), read_only=True)
+                        # Ne remplace le local que si le distant a AUTANT
+                        # ou PLUS de dates (feuilles) que le local — pour
+                        # ne jamais régresser si, par ordre d'exécution,
+                        # le local avait exceptionnellement plus de dates
+                        # que la dernière version publiée.
+                        _use_remote = len(_remote_wb.sheetnames) >= len(_local_wb.sheetnames)
+                        _local_wb.close()
+                        _remote_wb.close()
+                    except Exception:
+                        _use_remote = True
+                if _use_remote:
+                    with open(filepath, "wb") as _f:
+                        _f.write(_remote_bytes)
+            elif _dl_err:
+                st.sidebar.caption(f"ℹ️ Historique GitHub non récupéré avant fusion : {_dl_err}")
+    except Exception as _sync_e:
+        st.sidebar.caption(f"ℹ️ Synchronisation GitHub avant fusion ignorée : {_sync_e}")
+
     sn = (
         str(sheet_name)
         .replace("/", "-").replace("\\", "-").replace("*", "")
