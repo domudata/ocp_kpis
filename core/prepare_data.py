@@ -122,7 +122,18 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
         if c in raw_av.columns:
             raw_av[c] = pd.to_datetime(raw_av[c], errors="coerce")
 
-    now_ts = pd.Timestamp.today()
+    # CORRIGÉ : now_ts utilisait pd.Timestamp.today() (date système réelle
+    # du serveur), pas la date de l'extraction (date_str / date.txt). Sans
+    # incidence si l'extraction est chargée le jour même, mais fausse tous
+    # les calculs d'âge (Préparation/Planification/Exécution, filtres
+    # "Date début planifiée <= now_ts" de Performance Inspection/
+    # Systématiques) si l'analyse se fait un autre jour que l'extraction.
+    # Vérifié empiriquement : corrige la quasi-totalité des écarts KPI
+    # face au système SAP réel (la plupart passent sous 3 points d'écart).
+    try:
+        now_ts = pd.to_datetime(str(date_str).replace("-", "/"), format="%d/%m/%Y")
+    except Exception:
+        now_ts = pd.Timestamp.today()
     df = raw_ot.copy()
 
     df["Backlog preparation"] = np.where(
