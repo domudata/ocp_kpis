@@ -185,6 +185,7 @@ def main() -> None:
         res = calc_kpis_cached(df_period, avdf_period, now_ts, tuple(apm), fichier_date, sdt, edt)
 
         ckdf_full = res['ckdf']
+        nd_full = res.get('nd', {})
         dfp_full  = res['dfp']
         avf_full  = res['avf']
 
@@ -215,14 +216,11 @@ def main() -> None:
         sf1_posts = [p for p in vp if str(p).startswith("SF1")]
         sf2_posts = [p for p in vp if str(p).startswith("SF2")]
 
-        # ── Score PAR DIVISION (SF1/SF2) ────────────────────────────────────
+        # ── Score PAR DIVISION (SF1/SF2) — INCHANGÉ, conservé pour le
+        # Total general et toute autre utilisation ────────────────────────
         # CORRIGÉ : même règle uniforme — gscore() appliqué sur CHAQUE
         # cellule (poste × KPI) individuellement, puis somme des 0/1 sur
-        # le nombre total de cellules KPI valides. Avant, le code calculait
-        # d'abord une MOYENNE des valeurs par KPI puis appliquait gscore
-        # une seule fois par KPI — ce n'était pas la même règle que pour
-        # les scores par poste. Désormais, la logique est identique à tous
-        # les niveaux (poste / division / total général).
+        # le nombre total de cellules KPI valides.
         def calc_score_division(postes, liste_kpi):
             total = 0
             nombre_kpi = 0
@@ -255,12 +253,43 @@ def main() -> None:
                 2
             ) if nombre_kpi else 0
 
-        sf1_p = calc_score_division(sf1_posts, QK)
-        sf1_q = calc_score_division(sf1_posts, PK)
-        sf2_p = calc_score_division(sf2_posts, QK)
-        sf2_q = calc_score_division(sf2_posts, PK)
+        # ── NOUVEAU : score des CARTES SF1/SF2 basé sur le taux d'anomalie
+        # (nb_anomalies / nb_total) par KPI, plutôt que sur la valeur brute
+        # du poste. Utilisé UNIQUEMENT pour sf1_p/sf1_q/sf2_p/sf2_q — le
+        # score par poste individuel (pscores/qscores ci-dessus) et le
+        # Total general (plus bas, via calc_score_division) restent sur
+        # l'ancienne méthode, sur demande explicite.
+        ano_map = build_ano_map(dfp, avf, now_ts)
 
-        ano_map    = build_ano_map(dfp, avf, now_ts)
+        def calc_score_anomalie(postes, liste_kpi):
+            total = 0
+            nb_kpi = 0
+            for kpi in liste_kpi:
+                nb_anom = sum(int(ano_map.get(kpi, pd.Series()).get(p, 0)) for p in postes)
+                if kpi in nd_full:
+                    _num, den = nd_full[kpi]
+                    nb_total = sum(int(den.get(p, 0)) for p in postes if p in den.index)
+                else:
+                    nb_total = 0
+                if nb_total <= 0:
+                    continue
+                taux_anom = nb_anom / nb_total * 100
+                lower = is_lb(kpi)
+                # KPI "plus bas = mieux" : le taux d'anomalie EST déjà la
+                # valeur sémantique à comparer (anomalie = être dans la
+                # mauvaise tranche). Pour les autres, on compare le taux
+                # de conformité (100 - taux d'anomalie).
+                valeur_a_comparer = taux_anom if lower else (100 - taux_anom)
+                s = gscore(kpi, valeur_a_comparer, CIBLE[kpi])
+                total += s
+                nb_kpi += 1
+            return round((total / nb_kpi) * 100, 2) if nb_kpi else 0
+
+        sf1_p = calc_score_anomalie(sf1_posts, QK)
+        sf1_q = calc_score_anomalie(sf1_posts, PK)
+        sf2_p = calc_score_anomalie(sf2_posts, QK)
+        sf2_q = calc_score_anomalie(sf2_posts, PK)
+
         ano_p_rows = build_ano_rows(vp, ano_map, QK)
         ano_q_rows = build_ano_rows(vp, ano_map, PK, fixed_zero=["OT Fiabilité","Total Avis de Panne"])
         ano_p_cols = ["Poste de travail"] + QK + ["Total Anomalies"]
