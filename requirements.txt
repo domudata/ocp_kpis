@@ -23,3 +23,4 @@ python-pptx
 anthropic
 groq
 requests
+scikit-learn
