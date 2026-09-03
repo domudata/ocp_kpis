@@ -15,7 +15,8 @@ import numpy as np
 
 from core.ml_pipeline_pompes import (
     load_dataset, temporal_split, build_models, train_and_evaluate,
-    feature_importance,
+    feature_importance, add_type_panne_column, train_classifieur_type_panne,
+    predire_type_panne,
 )
 
 STATUS_COLORS = {"normal": "#10B981", "surveillance": "#F59E0B", "alerte": "#EF4444"}
@@ -28,7 +29,15 @@ def _get_trained_models(path):
     X_train, X_test, y_train, y_test, feature_cols = temporal_split(df)
     models = build_models()
     results_df, fitted = train_and_evaluate(models, X_train, X_test, y_train, y_test)
-    return df, results_df, fitted, feature_cols
+
+    # Type de panne (nouveau) : entraîné uniquement sur les observations
+    # en anomalie, avec un type reconstruit par signature de déviation
+    # (voir core/ml_pipeline_pompes.py — pas de vraie étiquette de type
+    # disponible dans les données actuelles).
+    df_typed = add_type_panne_column(df)
+    type_model, type_scaler, type_rapport = train_classifieur_type_panne(df_typed, feature_cols)
+
+    return df_typed, results_df, fitted, feature_cols, type_model, type_scaler, type_rapport
 
 
 def _risque_pour_poste(df, fitted, feature_cols, pompe_id, model_name="Random Forest"):
@@ -67,7 +76,7 @@ def render_maintenance_predictive_tab(dataset_path="feature_dataset.csv"):
         )
         return
 
-    df, results_df, fitted, feature_cols = _get_trained_models(dataset_path)
+    df, results_df, fitted, feature_cols, type_model, type_scaler, type_rapport = _get_trained_models(dataset_path)
 
     # ── Tableau comparatif des modèles (repris du rapport, chapitre 5) ──
     with st.expander("📊 Comparaison des modèles ML / Deep Learning", expanded=False):
@@ -83,32 +92,62 @@ def render_maintenance_predictive_tab(dataset_path="feature_dataset.csv"):
 
     st.markdown("---")
 
-    # ── Cartes pompes (jumeau numerique) ──
-    pompes = sorted(df["pompe"].unique())
+    # ── Tableau des pompes (jumeau numerique) ──
+    # CORRIGÉ : l'affichage en colonnes côte à côte (st.columns) ne
+    # s'adapte pas bien aux écrans étroits (mobile) — grands espaces
+    # vides, éléments mal alignés. Remplacé par un tableau simple,
+    # qui reste lisible quel que soit le format d'écran.
     model_choice = "Random Forest"  # modele retenu par defaut (voir rapport 5.5)
 
-    cols = st.columns(len(pompes))
+    pompes = sorted(df["pompe"].unique())
+    rows = []
     risques = {}
-    for i, pompe_id in enumerate(pompes):
+    for pompe_id in pompes:
         last_row, risque = _risque_pour_poste(df, fitted, feature_cols, pompe_id, model_choice)
         risques[pompe_id] = (last_row, risque)
         statut = _statut_depuis_risque(risque)
-        color = STATUS_COLORS[statut]
+        emoji = {"normal": "🟢", "surveillance": "🟠", "alerte": "🔴"}[statut]
+        if last_row is not None:
+            # Type de panne le plus probable — affiché seulement si un
+            # risque non négligeable est détecté (sinon peu de sens de
+            # prédire un "type" pour une pompe en état normal).
+            if risque >= 15:
+                type_pred, type_proba = predire_type_panne(type_model, type_scaler, feature_cols, last_row)
+                type_txt = f"{type_pred} ({type_proba}%)"
+            else:
+                type_txt = "—"
+            rows.append({
+                "Pompe": f"IP0{pompe_id}",
+                "Statut": f"{emoji} {statut.capitalize()}",
+                "Vibration (mm/s)": round(last_row["vibration"], 1),
+                "Courant (A)": round(last_row["courant"], 1),
+                "Risque prédit (%)": risque,
+                "Type de panne probable": type_txt,
+            })
 
-        with cols[i]:
-            st.markdown(
-                f"""<div style="background:{color};color:white;padding:6px 10px;
-                border-radius:6px 6px 0 0;font-weight:700;text-align:center;">
-                IP0{pompe_id}</div>""",
-                unsafe_allow_html=True,
-            )
-            with st.container(border=True):
-                if last_row is not None:
-                    st.metric("Vibration", f"{last_row['vibration']:.1f} mm/s")
-                    st.metric("Courant", f"{last_row['courant']:.1f} A")
-                    st.progress(min(risque / 100, 1.0), text=f"Risque prédit : {risque}%")
-                else:
-                    st.caption("Pas de données pour cette pompe")
+    st.markdown("#### 🖥️ Jumeau numérique — état actuel des pompes")
+    st.dataframe(
+        pd.DataFrame(rows),
+        use_container_width=True, hide_index=True,
+        column_config={
+            "Risque prédit (%)": st.column_config.ProgressColumn(
+                "Risque prédit (%)", min_value=0, max_value=100, format="%d%%",
+            ),
+        },
+    )
+    st.caption(
+        "🟢 Normal (risque < 15%) · 🟠 Surveillance (15-50%) · 🔴 Alerte prédictive (≥ 50%) "
+        "— risque de défaillance estimé par le modèle sur la dernière mesure disponible."
+    )
+
+    with st.expander("🔍 Détail du classifieur de type de panne", expanded=False):
+        st.caption(
+            "⚠️ Le type de panne est reconstruit à partir de la signature de déviation "
+            "entre les 4 mesures (quelle variable s'écarte le plus de la normale), en "
+            "l'absence d'étiquette de type réelle dans les données actuelles — voir "
+            "core/ml_pipeline_pompes.py, fonction classer_type_panne()."
+        )
+        st.code(type_rapport, language="text")
 
     st.markdown("---")
 
