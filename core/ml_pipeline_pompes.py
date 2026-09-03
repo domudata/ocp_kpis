@@ -141,6 +141,129 @@ def feature_importance(model, feature_cols, top_n=12):
     return imp.sort_values(ascending=False).head(top_n)
 
 
+# ═══════════════════════════════════════════════════════════════════
+# NOUVEAU : classification du TYPE de panne (pas seulement anomalie/non)
+# ═══════════════════════════════════════════════════════════════════
+#
+# Les données actuelles (feature_dataset.csv) ne contiennent qu'une
+# étiquette binaire "anomalie" (0/1) — le type de panne simulé
+# initialement (chapitre 3.5 du rapport) n'a pas été conservé dans
+# l'export final. Cette section reconstruit un type de panne PLAUSIBLE
+# à partir de la "signature" de déviation entre les 4 variables
+# (quelle variable s'écarte le plus de son comportement normal, et
+# selon quelle combinaison) — une approximation raisonnable en
+# l'absence des vraies étiquettes de simulation, à valider/remplacer
+# dès que des données réelles étiquetées seront disponibles.
+
+TYPES_PANNE = [
+    "Normal",
+    "Désalignement / usure roulement",
+    "Cavitation",
+    "Colmatage filtre/crépine",
+    "Fuite circuit",
+    "Défaut électrique",
+]
+
+
+def build_baseline(df):
+    """Calcule la moyenne et l'écart-type 'normal' (hors anomalie) de
+    chaque variable brute — sert de référence pour détecter quelle
+    variable s'écarte le plus de son comportement habituel."""
+    baseline = {}
+    for col in ["vibration", "courant", "debit", "pression"]:
+        normal = df.loc[df["anomalie"] == 0, col]
+        baseline[col] = (normal.mean(), normal.std())
+    return baseline
+
+
+def classer_type_panne(row, baseline):
+    """
+    Détermine un type de panne plausible pour une observation en
+    anomalie, à partir de sa signature de déviation (z-score) sur les
+    4 variables. Logique :
+      - Débit très bas + pression haute  -> Colmatage filtre/crépine
+      - Débit très bas + pression basse  -> Cavitation
+      - Pression basse (sans chute forte de débit) -> Fuite circuit
+      - Sinon : la variable au plus grand écart absolu détermine le
+        type (vibration -> désalignement, courant -> électrique, etc.)
+    """
+    if row["anomalie"] == 0:
+        return "Normal"
+
+    z = {}
+    for col in ["vibration", "courant", "debit", "pression"]:
+        m, s = baseline[col]
+        z[col] = (row[col] - m) / s if s > 0 else 0.0
+
+    if z["debit"] < -1.2 and z["pression"] > 1.2:
+        return "Colmatage filtre/crépine"
+    if z["debit"] < -1.2 and z["pression"] < -0.8:
+        return "Cavitation"
+    if z["pression"] < -1.2 and z["debit"] > -0.8:
+        return "Fuite circuit"
+
+    dominant = max(z, key=lambda k: abs(z[k]))
+    mapping = {
+        "vibration": "Désalignement / usure roulement",
+        "courant": "Défaut électrique",
+        "pression": "Fuite circuit",
+        "debit": "Colmatage filtre/crépine",
+    }
+    return mapping[dominant]
+
+
+def add_type_panne_column(df):
+    """Ajoute la colonne 'type_panne' au DataFrame (voir classer_type_panne)."""
+    baseline = build_baseline(df)
+    df = df.copy()
+    df["type_panne"] = df.apply(lambda r: classer_type_panne(r, baseline), axis=1)
+    return df
+
+
+def train_classifieur_type_panne(df, feature_cols, test_frac=0.2, random_state=42):
+    """
+    Entraîne un classifieur MULTI-CLASSES (Random Forest) qui prédit,
+    pour une observation en anomalie, le type de panne le plus probable
+    parmi TYPES_PANNE (hors 'Normal', qui n'a pas de sens à prédire ici).
+
+    Retourne (model, scaler, rapport_texte).
+    """
+    from sklearn.metrics import classification_report
+
+    df = add_type_panne_column(df) if "type_panne" not in df.columns else df
+    df_anom = df[df["anomalie"] == 1].sort_values("date")
+
+    n_test = max(1, int(len(df_anom) * test_frac))
+    n_train = len(df_anom) - n_test
+    train = df_anom.iloc[:n_train]
+    test = df_anom.iloc[n_train:]
+
+    scaler = StandardScaler()
+    X_train = scaler.fit_transform(train[feature_cols])
+    X_test = scaler.transform(test[feature_cols])
+    y_train = train["type_panne"]
+    y_test = test["type_panne"]
+
+    model = RandomForestClassifier(n_estimators=200, random_state=random_state, class_weight="balanced")
+    model.fit(X_train, y_train)
+
+    y_pred = model.predict(X_test)
+    rapport = classification_report(y_test, y_pred, zero_division=0)
+
+    return model, scaler, rapport
+
+
+def predire_type_panne(model, scaler, feature_cols, row):
+    """Prédit le type de panne le plus probable pour UNE observation
+    donnée (ligne de DataFrame), avec sa probabilité."""
+    X = row[feature_cols].values.reshape(1, -1)
+    X_s = scaler.transform(X)
+    proba = model.predict_proba(X_s)[0]
+    classes = model.classes_
+    idx_max = proba.argmax()
+    return classes[idx_max], round(proba[idx_max] * 100, 1)
+
+
 if __name__ == "__main__":
     df = load_dataset("feature_dataset.csv")
     X_train, X_test, y_train, y_test, feature_cols = temporal_split(df)
@@ -164,3 +287,13 @@ if __name__ == "__main__":
         print()
         print("=== Importance des variables (Random Forest) ===")
         print(feature_importance(rf_model, feature_cols))
+
+    # ── Type de panne ──
+    print()
+    print("=== Classification du type de panne (parmi les anomalies) ===")
+    df_typed = add_type_panne_column(df)
+    print(df_typed[df_typed["anomalie"] == 1]["type_panne"].value_counts())
+    type_model, type_scaler, rapport = train_classifieur_type_panne(df_typed, feature_cols)
+    print()
+    print(rapport)
+
