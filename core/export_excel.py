@@ -34,53 +34,61 @@ def save_kpis_to_excel(prows, pcols, qrows, qcols,
 
     filepath = os.path.join(kpis_dir, "indicateurs_kpis.xlsx")
 
-    # ── NOUVEAU : synchronisation GitHub-first ──────────────────────────
+    # ── Synchronisation GitHub-first (avec diagnostic détaillé) ──────────
     # Avant de charger le fichier local, on tente de récupérer la
     # DERNIÈRE version publiée sur GitHub et on l'utilise comme point de
-    # départ si elle est plus complète que ce qu'il y a en local (ou si
-    # rien n'existe en local). Ça évite de perdre l'historique quand le
-    # disque local de l'app a été réinitialisé entre deux sessions
-    # (redémarrage Streamlit Cloud) — le seul cas où on perdrait des
-    # dates malgré cette synchronisation est si GitHub lui-même n'a
-    # jamais reçu la publication (vérifier GITHUB_TOKEN/GITHUB_REPO).
+    # départ si elle est plus complète que ce qu'il y a en local.
+    _diag = []  # trace complète, affichée en fin de fonction pour diagnostic
     try:
         from core.github_publish import download_file as _gh_download, is_configured as _gh_is_configured
         if _gh_is_configured():
+            _diag.append("GitHub configuré : oui")
             _remote_bytes, _dl_err = _gh_download("kpis/indicateurs_kpis.xlsx")
             if _remote_bytes:
+                _remote_wb_check = load_workbook(io.BytesIO(_remote_bytes), read_only=True)
+                _diag.append(f"Distant GitHub : {len(_remote_wb_check.sheetnames)} feuille(s) — {_remote_wb_check.sheetnames}")
+                _remote_wb_check.close()
                 _use_remote = True
                 if os.path.exists(filepath):
                     try:
                         _local_wb = load_workbook(filepath, read_only=True)
+                        _local_sheets = _local_wb.sheetnames
+                        _diag.append(f"Local avant sync : {len(_local_sheets)} feuille(s) — {_local_sheets}")
                         _remote_wb = load_workbook(io.BytesIO(_remote_bytes), read_only=True)
-                        # Ne remplace le local que si le distant a AUTANT
-                        # ou PLUS de dates (feuilles) que le local — pour
-                        # ne jamais régresser si, par ordre d'exécution,
-                        # le local avait exceptionnellement plus de dates
-                        # que la dernière version publiée.
                         _use_remote = len(_remote_wb.sheetnames) >= len(_local_wb.sheetnames)
                         _local_wb.close()
                         _remote_wb.close()
-                    except Exception:
+                    except Exception as _e2:
+                        _diag.append(f"Erreur lecture local pour comparaison : {_e2}")
                         _use_remote = True
+                else:
+                    _diag.append("Local avant sync : fichier absent")
+                _diag.append(f"Décision : {'utiliser le distant' if _use_remote else 'garder le local'}")
                 if _use_remote:
                     with open(filepath, "wb") as _f:
                         _f.write(_remote_bytes)
             elif _dl_err:
-                st.sidebar.caption(f"ℹ️ Historique GitHub non récupéré avant fusion : {_dl_err}")
+                _diag.append(f"Téléchargement distant : échec — {_dl_err}")
+            else:
+                _diag.append("Téléchargement distant : fichier inexistant sur GitHub (normal si 1ère fois)")
+        else:
+            _diag.append("GitHub configuré : NON (secrets absents) — historique local uniquement, non persistant entre redémarrages")
     except Exception as _sync_e:
-        st.sidebar.caption(f"ℹ️ Synchronisation GitHub avant fusion ignorée : {_sync_e}")
+        _diag.append(f"Synchronisation GitHub : exception — {_sync_e}")
 
     sn = (
         str(sheet_name)
         .replace("/", "-").replace("\\", "-").replace("*", "")
         .replace("?", "").replace("[", "").replace("]", "")[:31]
     )
+    _diag.append(f"Nom de feuille pour cette date : '{sn}'")
 
     try:
         wb = load_workbook(filepath)
+        _diag.append(f"Fichier local chargé : {len(wb.sheetnames)} feuille(s) — {wb.sheetnames}")
     except FileNotFoundError:
         wb = Workbook()
+        _diag.append("Fichier local absent → nouveau classeur vide créé")
     except Exception as e:
         st.sidebar.error(f"❌ Impossible d'ouvrir '{filepath}' (fichier corrompu ?) : {e}")
         return
@@ -89,6 +97,7 @@ def save_kpis_to_excel(prows, pcols, qrows, qcols,
         del wb["Sheet"]
     if sn in wb.sheetnames:
         del wb[sn]
+        _diag.append(f"Feuille '{sn}' existait déjà → supprimée avant recréation (mise à jour de la même date)")
 
     ws = wb.create_sheet(sn)
 
@@ -118,6 +127,8 @@ def save_kpis_to_excel(prows, pcols, qrows, qcols,
     if ano_q_c and ano_q_r:
         rn = ws_sec("ANOMALIES QUALITE", ano_q_c, ano_q_r, rn)
 
+    _diag.append(f"Après ajout de '{sn}' : {len(wb.sheetnames)} feuille(s) — {wb.sheetnames}")
+
     try:
         wb.save(filepath)
     except Exception as e:
@@ -126,9 +137,6 @@ def save_kpis_to_excel(prows, pcols, qrows, qcols,
             f"La date '{sn}' n'a PAS été enregistrée. Téléchargez quand même "
             f"le fichier via le bouton de secours ci-dessous si besoin."
         )
-        # Filet de secours : proposer le téléchargement direct du classeur
-        # en mémoire, même si l'écriture disque a échoué, pour ne pas
-        # perdre les données de cette extraction.
         try:
             buf = io.BytesIO()
             wb.save(buf)
@@ -143,8 +151,10 @@ def save_kpis_to_excel(prows, pcols, qrows, qcols,
             pass
         return
 
-    # Confirmation visible que la sauvegarde a réussi (absente avant).
-    st.sidebar.success(f"✅ Historique mis à jour : date '{sn}' enregistrée dans {filepath}")
+    st.sidebar.success(f"✅ Historique mis à jour : date '{sn}' enregistrée dans {filepath} ({len(wb.sheetnames)} date(s) au total)")
+    with st.sidebar.expander("🔍 Diagnostic détaillé historique", expanded=False):
+        for line in _diag:
+            st.caption(line)
 
 def export_btn(df: pd.DataFrame, filename: str) -> None:
     buf = io.BytesIO()
