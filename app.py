@@ -38,26 +38,17 @@ try:
     from pages.backlog import render_backlog_page
     from pages.evolution import render_evolution_tab
     from pages.plan_action import render_plan_action_tab
+    from pages.maintenance_predictive import render_maintenance_predictive_tab
     _IMPORT_ERROR = None
 except Exception as _e:
     _IMPORT_ERROR = traceback.format_exc()
 
 
 # ── VERSION DE CALCUL (automatique) ──────────────────────────────────────────
-# Le cache @st.cache_data ne hash QUE le code de calc_kpis_cached (1 ligne),
-# PAS le code interne de calc_kpis() / _age_kpis() / build_ano_map() ni les
-# filtres filt_prep/plan/exec definis dans calcul_kpi.py et anomalies.py.
-# Pour que TOUTE modification de ces fichiers invalide le cache automatiquement,
-# on calcule un hash de leur contenu et on l injecte dans la cle de cache.
 import hashlib as _hashlib
 import os as _os
 
 def _calc_signature():
-    """
-    Hash du contenu des fichiers de calcul → invalide le cache si modifies.
-    Utilise le chemin ABSOLU (base = dossier de app.py) pour fonctionner
-    quel que soit le repertoire de travail au demarrage de Streamlit Cloud.
-    """
     h = _hashlib.md5()
     base_dir = _os.path.dirname(_os.path.abspath(__file__))
     found_any = False
@@ -70,9 +61,6 @@ def _calc_signature():
         except Exception:
             pass
     if not found_any:
-        # Aucun fichier trouve : ne jamais renvoyer un hash "silencieusement
-        # constant" -> utiliser un hash base sur mtime comme filet de securite
-        # pour au moins detecter un changement de deploiement/reboot.
         h.update(str(_os.path.getmtime(_os.path.abspath(__file__))).encode())
     return h.hexdigest()[:12], found_any
 
@@ -81,15 +69,6 @@ CALC_VERSION, _CALC_SIG_OK = _calc_signature()
 
 @st.cache_data(show_spinner="Calcul des KPIs en cours...")
 def calc_kpis_cached(df_period, avdf_period, now_ts, apm_tuple, fichier_date, sdt, edt, calc_version=CALC_VERSION):
-    """
-    Wrapper cache autour de calc_kpis().
-    Cle de cache = (df_period, avdf_period, now_ts, apm_tuple, fichier_date, sdt, edt, calc_version).
-    calc_version = hash du contenu de calcul_kpi.py / anomalies.py / prepare_data.py,
-    donc TOUTE modification de ces fichiers (filtres, formules) invalide le cache
-    automatiquement au redemarrage — plus besoin d incrementer un numero a la main.
-    Changer la SELECTION DE POSTES (vp) ne redeclenche PAS ce calcul,
-    car on calcule ici sur TOUS les postes (apm) puis on filtre ensuite dans main().
-    """
     return calc_kpis(df_period, avdf_period, now_ts, list(apm_tuple))
 
 
@@ -113,8 +92,6 @@ def main() -> None:
         unsafe_allow_html=True
     )
 
-    # Masquer la barre d'outils Streamlit (Share/étoile/crayon/GitHub/menu),
-    # le bandeau "Manage app", le menu principal et le footer
     st.markdown("""
     <style>
     [data-testid="stToolbar"] { display: none !important; }
@@ -170,8 +147,6 @@ def main() -> None:
         st.rerun()
         st.stop()
 
-    # ── Chargement des données : fichiers locaux (ot.xlsx/avis.xlsx,
-    # committés dans le dépôt GitHub) uniquement — OneDrive retiré. ──
     ot_bytes = av_bytes = None
     if os.path.exists("ot.xlsx") and os.path.exists("avis.xlsx"):
         with open("ot.xlsx", "rb") as f:
@@ -199,10 +174,6 @@ def main() -> None:
     try:
         sdt, edt = ctx["sdt"], ctx["edt"]
 
-        # ── Filtre par DATE uniquement (periode) sur TOUS les postes ───────
-        # Le filtre par poste (vp) est applique APRES le calcul en cache,
-        # pour que changer la selection de postes ne redeclenche PAS
-        # tout le calcul lourd (pivot_table / groupby sur ~130k lignes).
         df_period = df_full[
             df_full["Date de début planifiée"].between(sdt, edt)
         ].copy()
@@ -211,36 +182,31 @@ def main() -> None:
         if "Créé le" in avdf_period.columns:
             avdf_period = avdf_period[avdf_period["Créé le"].between(sdt, edt)]
 
-        # ── Calcul KPIs (mis en cache, ne tourne que si date.txt/periode change) ──
-        # calc_kpis() calcule correctement TOUS les KPIs incluant :
-        # - OT CONFIME  (via pivot Statut système contient CONF)
-        # - OT_COR_EGAL (via logique budget==reel, colonne OT_COR_EGAL=EGAL/DIFF)
-        # - Age Prep/Plan/Exec en valeurs brutes (taux reel par tranche)
-        # NE PAS recalculer ces KPIs ici — utiliser directement res['ckdf']
         res = calc_kpis_cached(df_period, avdf_period, now_ts, tuple(apm), fichier_date, sdt, edt)
 
-        ckdf_full = res['ckdf']   # TOUS les postes (apm)
+        ckdf_full = res['ckdf']
         dfp_full  = res['dfp']
         avf_full  = res['avf']
 
-        # ── Filtre par postes selectionnes (vp) : simple filtrage, instantane ──
         vp_present = [p for p in vp if p in ckdf_full.index]
         ckdf = ckdf_full.loc[vp_present] if vp_present else ckdf_full.iloc[0:0]
         dfp  = dfp_full[dfp_full["Poste travail princ."].isin(vp)]
         avf  = avf_full[avf_full["Poste travail princ."].isin(vp)] if "Poste travail princ." in avf_full.columns else avf_full
         df   = dfp
 
-        # mean() ignore nativement les NaN (skipna=True) : une cellule vide
-        # (OT absent) n'est pas comptee dans la moyenne du KPI.
         pa = {k: round(ckdf[k].mean(skipna=True), 2) for k in QK}
         qa = {k: round(ckdf[k].mean(skipna=True), 2) for k in PK}
 
+        # ── Score Performance / Qualite PAR POSTE ───────────────────────────
+        # Règle UNIFORME appliquée partout dans ce fichier : pour chaque
+        # cellule KPI, gscore() renvoie 0 (rouge / non conforme) ou 1
+        # (conforme / non rouge). Les valeurs NaN (KPI indisponible pour ce
+        # poste) sont exclues du calcul. Score = somme des 0/1 / nombre de
+        # KPI valides × 100.
         pscores = {}
         qscores = {}
         for poste in ckdf.index:
             r = ckdf.loc[poste]
-            # Exclure les KPIs NaN (cellule vide = OT absent) du calcul :
-            # score = nb KPIs conformes / nb KPIs NON-NaN × 100
             valid_q = [k for k in QK if k in r.index and pd.notna(r[k])]
             valid_p = [k for k in PK if k in r.index and pd.notna(r[k])]
             pscores[poste] = (sum(gscore(k, r[k], CIBLE[k]) for k in valid_q) / len(valid_q) * 100) if valid_q else 0
@@ -249,25 +215,45 @@ def main() -> None:
         sf1_posts = [p for p in vp if str(p).startswith("SF1")]
         sf2_posts = [p for p in vp if str(p).startswith("SF2")]
 
+        # ── Score PAR DIVISION (SF1/SF2) ────────────────────────────────────
+        # CORRIGÉ : même règle uniforme — gscore() appliqué sur CHAQUE
+        # cellule (poste × KPI) individuellement, puis somme des 0/1 sur
+        # le nombre total de cellules KPI valides. Avant, le code calculait
+        # d'abord une MOYENNE des valeurs par KPI puis appliquait gscore
+        # une seule fois par KPI — ce n'était pas la même règle que pour
+        # les scores par poste. Désormais, la logique est identique à tous
+        # les niveaux (poste / division / total général).
         def calc_score_division(postes, liste_kpi):
-            score = 0
-            nb = 0
+            total = 0
+            nombre_kpi = 0
 
-            for kpi in liste_kpi:
-                valeurs = []
+            for poste in postes:
+                if poste not in ckdf.index:
+                    continue
 
-                for poste in postes:
-                    if poste in ckdf.index:
-                        val = ckdf.loc[poste, kpi]
-                        if pd.notna(val):
-                            valeurs.append(float(val))
+                r = ckdf.loc[poste]
 
-                if valeurs:
-                    moyenne = sum(valeurs) / len(valeurs)
-                    score += gscore(kpi, moyenne, CIBLE[kpi])
-                    nb += 1
+                for kpi in liste_kpi:
+                    if kpi not in r.index:
+                        continue
 
-            return round(score / nb * 100, 2) if nb else 0
+                    val = r[kpi]
+
+                    if pd.isna(val):
+                        continue
+
+                    total += gscore(
+                        kpi,
+                        float(val),
+                        CIBLE[kpi]
+                    )
+
+                    nombre_kpi += 1
+
+            return round(
+                (total / nombre_kpi) * 100,
+                2
+            ) if nombre_kpi else 0
 
         sf1_p = calc_score_division(sf1_posts, QK)
         sf1_q = calc_score_division(sf1_posts, PK)
@@ -281,10 +267,6 @@ def main() -> None:
         ano_q_cols = ["Poste de travail"] + PK + ["Total Anomalies"]
         anomaly_dfs = build_anomaly_dfs(dfp, avf, now_ts)
 
-        # ── Export sidebar : classeur complet des anomalies (OT + Avis) ──
-        # Respecte automatiquement le perimetre filtre courant (periode,
-        # poste, atelier, division) car anomaly_dfs est construit a partir
-        # de dfp/avf deja restreints a la selection active.
         with st.sidebar:
             with st.expander("📥 Export anomalies (OT + Avis)", expanded=False):
                 try:
@@ -335,14 +317,14 @@ def main() -> None:
         cible_q["Score Qualite"] = "100"
         qrows.append(cible_q)
 
-        # Total general par KPI (CORRIGÉ) :
-        # - Pour les KPI d'âge (Préparation/Planification/Exécution × 3 tranches) :
-        #   MOYENNE SIMPLE, pas gscore. Au niveau de chaque poste, les 3 tranches
-        #   (<1 mois + 1-3 mois + >3 mois) somment déjà à 100% ; la moyenne
-        #   conserve cette propriété (linéarité), donc les 3 totaux somment
-        #   aussi à 100. Un comptage gscore indépendant sur chaque tranche
-        #   casserait cette contrainte.
-        # - Pour tous les autres KPI : gscore (rouge=0/sinon=1), comme convenu.
+        # ── Total general PAR KPI ────────────────────────────────────────
+        # RE-CORRIGÉ (sur nouvelle demande explicite) : les 9 KPI d'âge
+        # (Préparation/Planification/Exécution × <1mois/1-3mois/>3mois)
+        # reviennent à une MOYENNE SIMPLE des valeurs (pas gscore), pour
+        # garantir que les 3 tranches somment à 100% sur la ligne Total
+        # general — propriété perdue avec le passage au gscore uniforme
+        # demandé précédemment. Tous les AUTRES KPI restent en gscore
+        # (comptage de cellules conformes / cellules valides × 100).
         _AGE_KPIS = {
             "OT préparation <1 mois", "OT préparation 1mois< <3mois", "OT préparation >3 mois",
             "OT planification <1 mois", "OT planification 1mois< <3mois", "OT planification >3 mois",
@@ -374,24 +356,12 @@ def main() -> None:
                             pass
                 tot_p[k] = ("%.1f" % ((cc / tc) * 100)) if tc > 0 else "nan"
 
-        # ── Score Performance du Total general (CORRIGÉ) ───────────────────
-        # AVANT : moyenne des pscores par poste (sum(pscores.values())/len(pscores)).
-        # APRÈS : calculé DIRECTEMENT sur les valeurs de la ligne Total general
-        # (tot_p[k]) via gscore (rouge=0/sinon=1), sans passer par la moyenne
-        # des scores par poste.
-        score_total = 0
-        nb_kpi = 0
-
-        for k in QK:
-            try:
-                val = float(tot_p[k])
-                if pd.notna(val):
-                    score_total += gscore(k, val, CIBLE[k])
-                    nb_kpi += 1
-            except Exception:
-                pass
-
-        tot_p["Score Performance"] = "%.2f" % ((score_total / nb_kpi) * 100 if nb_kpi else 0)
+        # ── Score Performance du Total general ──────────────────────────
+        # INCHANGÉ : reste calculé DIRECTEMENT sur toutes les cellules KPI
+        # Performance de tous les postes sélectionnés, via
+        # calc_score_division(vp, QK) — n'utilise PAS les valeurs tot_p[k]
+        # ci-dessus (donc pas affecté par la moyenne des KPI d'âge).
+        tot_p["Score Performance"] = "%.2f" % calc_score_division(vp, QK)
         prows.append(tot_p)
 
         tot_q = {"Poste de travail": "Total general", "_t": "total"}
@@ -408,23 +378,10 @@ def main() -> None:
                         pass
             tot_q[k] = ("%.1f" % ((cc / tc) * 100)) if tc > 0 else "nan"
 
-        # ── Score Qualite du Total general (CORRIGÉ) ───────────────────────
-        # Même principe que Score Performance ci-dessus : calculé
-        # directement sur les valeurs de la ligne Total general (tot_q[k])
-        # via gscore, sans passer par la moyenne des qscores par poste.
-        score_total = 0
-        nb_kpi = 0
-
-        for k in PK:
-            try:
-                val = float(tot_q[k])
-                if pd.notna(val):
-                    score_total += gscore(k, val, CIBLE[k])
-                    nb_kpi += 1
-            except Exception:
-                pass
-
-        tot_q["Score Qualite"] = "%.2f" % ((score_total / nb_kpi) * 100 if nb_kpi else 0)
+        # ── Score Qualite du Total general ──────────────────────────────
+        # Même principe : directement sur toutes les cellules KPI Qualité
+        # de tous les postes sélectionnés, via calc_score_division.
+        tot_q["Score Qualite"] = "%.2f" % calc_score_division(vp, PK)
         qrows.append(tot_q)
 
         save_kpis_to_excel(
@@ -433,13 +390,6 @@ def main() -> None:
             fichier_date,
         )
 
-        # ── NOUVEAU : publication automatique de l'historique sur GitHub ──
-        # Avant, il fallait télécharger indicateurs_kpis.xlsx manuellement
-        # et le committer sur GitHub (étapes 2-3 de l'aide affichée dans
-        # l'onglet "Suivi & Evolution") — étape régulièrement oubliée,
-        # ce qui bloquait le compteur de dates à 1 malgré de nouvelles
-        # extractions chargées. Réutilise le même mécanisme que la
-        # publication des rapports (core/github_publish.py).
         hist_filepath = os.path.join("kpis", "indicateurs_kpis.xlsx")
         try:
             from core.github_publish import upload_file as _gh_upload, is_configured as _gh_configured
@@ -486,25 +436,16 @@ def main() -> None:
                 target  = CIBLE.get(kpi, 100)
                 nb_anom = int(ano_map.get(kpi, pd.Series()).get(poste, 0))
                 lower   = is_lb(kpi)
-                # Ecart SIGNE : positif = conforme, negatif = non conforme
-                # (sens inverse pour les KPIs LOWER_BETTER)
                 ecart = (target - actual) if lower else (actual - target)
-                # 0 anomalie → ecart force a 0
                 if nb_anom == 0:
                     ecart = 0.0
                 conforme = (actual <= target) if lower else (actual >= target)
-                # Statut a 3 etats :
-                #   0 anomalie                → NON (vert)
-                #   anomalies + sous cible    → OUI (rouge)
-                #   anomalies + cible atteinte→ OUI (vert)
                 if nb_anom == 0:
                     status = "non_vert"
                 elif conforme:
                     status = "oui_vert"
                 else:
                     status = "oui_rouge"
-                # N'inclure une ligne QUE s'il y a au moins 1 anomalie.
-                # 0 anomalie = rien a signaler, la ligne n'apparait pas.
                 if nb_anom > 0:
                     plan_actions_rows.append({
                         "poste":       poste,
@@ -523,9 +464,6 @@ def main() -> None:
         sf1_rows = [r for r in plan_actions_rows if str(r["poste"]).startswith("SF1")]
         sf2_rows = [r for r in plan_actions_rows if str(r["poste"]).startswith("SF2")]
 
-        # ── Score étoiles par poste (0 à 5 ★) ────────────────────────────
-        # Score global = moyenne(Score Performance, Score Qualite) du poste,
-        # converti sur une echelle de 5 etoiles (100% = 5 etoiles).
         poste_stars = {}
         for poste in vp:
             ps = pscores.get(poste)
@@ -533,18 +471,17 @@ def main() -> None:
             vals = [v for v in (ps, qs) if v is not None and pd.notna(v)]
             if vals:
                 score_global = sum(vals) / len(vals)
-                stars = round(score_global / 20)  # 0-100% -> 0-5
+                stars = round(score_global / 20)
                 stars = max(0, min(5, stars))
             else:
                 score_global = None
                 stars = 0
             poste_stars[poste] = {"score": score_global, "stars": stars}
 
-        # CORRIGÉ : avg_p_score/avg_q_score (cartes) utilisaient encore la
-        # moyenne simple de pa/qa. Pour être cohérent avec tot_p/tot_q
-        # (déjà basés sur gscore), on reprend directement le Score
-        # Performance/Qualite du Total general déjà calculé ci-dessus —
-        # même chiffre affiché dans les cartes et dans les tableaux.
+        # ── avg_p_score / avg_q_score (cartes du dashboard) ─────────────
+        # Reprend directement le Score Performance/Qualite du Total
+        # general déjà calculé ci-dessus (via calc_score_division) —
+        # garantit le même chiffre affiché dans les cartes et les tableaux.
         try:
             avg_p_score = float(tot_p["Score Performance"])
         except Exception:
@@ -572,6 +509,7 @@ def main() -> None:
             "📋 Suivi & Evolution",
             "🎯 Plan d'action",
             "🤖 Assistant IA",
+            "🔧 Maintenance Prédictive",
         ])
 
         with tabs[0]:
@@ -583,7 +521,6 @@ def main() -> None:
         with tabs[3]:
             render_backlog_page(dfp, vp)
         with tabs[4]:
-            # ── Gestion de l'historique (persistance via GitHub) ─────────────
             _hist_path = os.path.join("kpis", "indicateurs_kpis.xlsx")
             n_dates = 0
             if not hist_df.empty and "Date" in hist_df.columns:
@@ -621,7 +558,6 @@ def main() -> None:
                 synth_perf, synth_qual, vp,
             )
         with tabs[5]:
-            # ── Bouton export PowerPoint (dynamique selon filtre poste) ──
             try:
                 from core.export_pptx import build_presentation
                 pptx_bytes = build_presentation(
@@ -640,13 +576,6 @@ def main() -> None:
             except Exception as _e:
                 st.caption(f"Export PowerPoint indisponible : {_e}")
 
-            # ── NOUVEAU : génération + publication de tous les rapports
-            # KPI par poste (PPTX + PDF + Excel anomalies) sur GitHub,
-            # dans presentation/<poste>/. Bouton MANUEL (pas automatique
-            # à chaque recalcul) : mesuré à ~1.6s/poste rien que pour la
-            # génération locale (PPTX+PDF), plus le temps d'upload GitHub
-            # par fichier — trop lent pour tourner à chaque interaction
-            # Streamlit (qui relance le script à chaque clic).
             st.markdown("---")
             st.markdown("#### 📤 Rapports KPI par poste (PDF + Excel)")
 
@@ -712,9 +641,6 @@ def main() -> None:
                             ])
                             st.caption(f"{_icons}  **{r['poste']}** — " + " / ".join(r.get("messages", [])))
 
-                    # ── NOUVEAU : déclenche la synchronisation OneDrive via
-                    # Power Automate (webhook HTTP), uniquement après une
-                    # publication réelle réussie (pas en mode test).
                     if not _launch_dry and _ok_pub > 0:
                         try:
                             _pa_url = st.secrets.get("POWER_AUTOMATE_WEBHOOK_URL")
@@ -749,6 +675,12 @@ def main() -> None:
                 )
             except Exception as _e:
                 st.error(f"Assistant IA indisponible : {_e}")
+
+        with tabs[7]:
+            try:
+                render_maintenance_predictive_tab("feature_dataset.csv")
+            except Exception as _e:
+                st.error(f"Maintenance prédictive indisponible : {_e}")
 
     except Exception as e:
         st.error("Erreur lors du chargement des donnees : %s" % str(e))
