@@ -173,7 +173,13 @@ def render_maintenance_predictive_tab(dataset_path="feature_dataset.csv"):
 
         # Construire une observation modifiee : on remplace le debit (et ses
         # derivees directes) par la valeur simulee, en gardant le reste
-        # inchange -- approximation simple, suffisante pour une demonstration.
+        # INCHANGÉ. Limite importante et assumée : ce modèle ne capture
+        # aucune corrélation physique entre le débit et la vibration ou le
+        # courant (par exemple, une cavitation liée à un débit trop bas
+        # ferait normalement AUSSI monter la vibration dans la réalité).
+        # Vibration et courant affichés ci-dessous restent donc volontairement
+        # fixes à leur dernière valeur réelle — seul le risque global change,
+        # via l'effet du débit seul sur le modèle.
         sim_row = last_row.copy()
         ratio = debit_simule / debit_actuel if debit_actuel else 1.0
         for col in feature_cols:
@@ -184,13 +190,124 @@ def render_maintenance_predictive_tab(dataset_path="feature_dataset.csv"):
         X_sim = sim_row[feature_cols].values.reshape(1, -1)
         X_sim_s = scaler.transform(X_sim)
         proba_sim = model.predict_proba(X_sim_s)[0, 1] * 100 if hasattr(model, "predict_proba") else 0.0
+        delta_risque = proba_sim - risques[sim_pompe][1]
 
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Vibration estimée", f"{sim_row['vibration']:.1f} mm/s")
-        c2.metric("Courant estimé", f"{sim_row['courant']:.1f} A")
-        c3.metric("Risque de défaillance estimé", f"{proba_sim:.0f}%",
-                    delta=f"{proba_sim - risques[sim_pompe][1]:+.0f} pts vs actuel",
-                    delta_color="inverse")
+        st.caption(
+            "ℹ️ Seul le débit (et ses tendances dérivées) est modifié par cette simulation. "
+            "Vibration et courant restent fixés à leur dernière valeur réelle mesurée — "
+            "ce modèle ne modélise pas leur possible corrélation physique avec le débit."
+        )
+
+        # CORRIGÉ : l'affichage en 3 colonnes (st.columns) ne s'adapte pas
+        # bien aux écrans étroits (mobile) — mêmes symptômes que pour le
+        # tableau des pompes plus haut (colonnes écrasées, valeurs
+        # invisibles). Remplacé par un tableau simple.
+        st.dataframe(
+            pd.DataFrame([{
+                "Vibration (inchangée, mm/s)": round(sim_row["vibration"], 1),
+                "Courant (inchangé, A)": round(sim_row["courant"], 1),
+                "Risque estimé (%)": round(proba_sim, 0),
+                "Variation vs actuel": f"{delta_risque:+.0f} pts",
+            }]),
+            use_container_width=True, hide_index=True,
+        )
+
+        if proba_sim >= 15:
+            type_pred_sim, type_proba_sim = predire_type_panne(
+                type_model, type_scaler, feature_cols, sim_row
+            )
+            st.info(f"**Type de panne probable dans ce scénario :** {type_pred_sim} ({type_proba_sim}%)")
+        else:
+            st.caption("Risque estimé faible — aucun type de panne particulier à signaler dans ce scénario.")
+
+    st.markdown("---")
+
+    # ── NOUVEAU : Prédiction manuelle à partir de valeurs saisies ───────
+    # L'utilisateur saisit de nouvelles valeurs (vibration, courant, débit,
+    # pression) pour une pompe. Ces valeurs sont combinées avec les 6
+    # derniers jours RÉELS de la pompe (issus de l'historique) pour
+    # recalculer les variables dérivées (moyennes mobiles, écarts-types,
+    # deltas) exactement comme le fait le pipeline ETL (chapitre 3.4 du
+    # rapport) — les valeurs saisies servent de "point de départ" du jour
+    # courant, le reste du contexte venant de l'historique réel de la pompe.
+    st.markdown("#### ✍️ Prédiction à partir de valeurs saisies")
+    st.caption(
+        "Saisissez de nouvelles mesures pour une pompe : elles sont combinées avec "
+        "les 6 derniers jours réels de son historique pour recalculer les tendances "
+        "(moyennes mobiles, écarts-types) et produire une prédiction."
+    )
+
+    pred_pompe = st.selectbox("Pompe", pompes, format_func=lambda p: f"IP0{p}", key="pred_manuelle_pompe")
+    sub_hist = df[df["pompe"] == pred_pompe].sort_values("date")
+    raw_cols = ["vibration", "courant", "debit", "pression"]
+
+    if len(sub_hist) < 7:
+        st.warning("Historique insuffisant pour cette pompe (moins de 7 jours disponibles).")
+    else:
+        derniers_jours = sub_hist.iloc[-7:][["date"] + raw_cols].reset_index(drop=True)
+        dernier_jour = sub_hist.iloc[-1]
+
+        with st.form("form_prediction_manuelle"):
+            st.caption(f"Valeurs par défaut = dernière mesure connue de IP0{pred_pompe} "
+                       f"(le {pd.to_datetime(dernier_jour['date']).strftime('%d/%m/%Y')}) — modifiez-les librement.")
+            # 2x2 plutôt que 4 colonnes cote a cote : plus robuste sur les
+            # ecrans etroits (mobile), evite l'ecrasement observe ailleurs
+            # dans cette page avec des rangees de 3-4 colonnes.
+            r1c1, r1c2 = st.columns(2)
+            v_vib = r1c1.number_input("Vibration (mm/s)", value=float(dernier_jour["vibration"]), min_value=0.0, step=0.1)
+            v_cour = r1c2.number_input("Courant (A)", value=float(dernier_jour["courant"]), min_value=0.0, step=1.0)
+            r2c1, r2c2 = st.columns(2)
+            v_deb = r2c1.number_input("Débit (m³/h)", value=float(dernier_jour["debit"]), min_value=0.0, step=100.0)
+            v_pres = r2c2.number_input("Pression (barg)", value=float(dernier_jour["pression"]), min_value=0.0, step=0.1)
+            submitted = st.form_submit_button("🔮 Prédire", type="primary", use_container_width=True)
+
+        if submitted:
+            # Reconstituer une fenetre de 7 jours : les 6 derniers jours
+            # reels + le nouveau jour saisi, pour recalculer les features
+            # derivees exactement comme le pipeline ETL.
+            nouveau_jour = pd.DataFrame([{
+                "date": pd.to_datetime(dernier_jour["date"]) + pd.Timedelta(days=1),
+                "vibration": v_vib, "courant": v_cour, "debit": v_deb, "pression": v_pres,
+            }])
+            fenetre = pd.concat([derniers_jours, nouveau_jour], ignore_index=True)
+
+            for col in raw_cols:
+                fenetre[f"{col}_lag1"] = fenetre[col].shift(1)
+                fenetre[f"{col}_roll3_mean"] = fenetre[col].shift(1).rolling(3).mean()
+                fenetre[f"{col}_roll7_mean"] = fenetre[col].shift(1).rolling(7).mean()
+                fenetre[f"{col}_roll7_std"] = fenetre[col].shift(1).rolling(7).std()
+                fenetre[f"{col}_delta1"] = fenetre[col].shift(1) - fenetre[col].shift(2)
+            fenetre["dow"] = pd.to_datetime(fenetre["date"]).dt.dayofweek
+
+            nouvelle_ligne = fenetre.iloc[-1]
+            manque = [c for c in feature_cols if pd.isna(nouvelle_ligne.get(c))]
+            if manque:
+                st.error(f"Impossible de calculer certaines variables dérivées (historique trop court) : {manque}")
+            else:
+                model, scaler = fitted[model_choice]
+                X_new = nouvelle_ligne[feature_cols].values.reshape(1, -1).astype(float)
+                X_new_s = scaler.transform(X_new)
+                proba_new = model.predict_proba(X_new_s)[0, 1] * 100 if hasattr(model, "predict_proba") else 0.0
+                statut_new = _statut_depuis_risque(proba_new)
+                color_new = STATUS_COLORS[statut_new]
+
+                st.markdown(
+                    f"""<div style="background:{color_new};color:white;padding:14px;
+                    border-radius:8px;text-align:center;font-size:20px;font-weight:700;">
+                    Risque prédit : {proba_new:.0f}% — {statut_new.capitalize()}</div>""",
+                    unsafe_allow_html=True,
+                )
+
+                if proba_new >= 15:
+                    type_pred_new, type_proba_new = predire_type_panne(
+                        type_model, type_scaler, feature_cols, nouvelle_ligne
+                    )
+                    st.info(f"**Type de panne le plus probable :** {type_pred_new} ({type_proba_new}%)")
+                else:
+                    st.caption("Risque faible — aucun type de panne particulier à signaler.")
+
+                with st.expander("Détail du calcul (variables dérivées utilisées)"):
+                    st.dataframe(fenetre, use_container_width=True, hide_index=True)
 
 
 # ═══════════════════════════════════════════════════════════════════
