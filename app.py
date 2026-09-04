@@ -38,7 +38,6 @@ try:
     from pages.backlog import render_backlog_page
     from pages.evolution import render_evolution_tab
     from pages.plan_action import render_plan_action_tab
-    from pages.maintenance_predictive import render_maintenance_predictive_tab
     _IMPORT_ERROR = None
 except Exception as _e:
     _IMPORT_ERROR = traceback.format_exc()
@@ -546,7 +545,6 @@ def main() -> None:
             "📋 Suivi & Evolution",
             "🎯 Plan d'action",
             "🤖 Assistant IA",
-            "🔧 Maintenance Prédictive",
         ])
 
         with tabs[0]:
@@ -712,12 +710,6 @@ def main() -> None:
                 )
             except Exception as _e:
                 st.error(f"Assistant IA indisponible : {_e}")
-
-        with tabs[7]:
-            try:
-                render_maintenance_predictive_tab("feature_dataset.csv")
-            except Exception as _e:
-                st.error(f"Maintenance prédictive indisponible : {_e}")
 
     except Exception as e:
         st.error("Erreur lors du chargement des donnees : %s" % str(e))
