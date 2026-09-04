@@ -1,0 +1,71 @@
+date,pompe,point,vibration_H_mm_s,vibration_V_mm_s,vibration_axiale_A_mm_s,temperature_C,declenche_par_vibration_generale_journaliere,z_score_vibration_generale,type_panne_diagnostique,diagnostic_spectral,gravite
+2023-09-11,IP02,moteur_DE,2.27,2.74,5.07,60.9,False,-0.66,Défaut d'alignement,"Défaut d'alignement suspecté — pic marqué à 2x (20.1 Hz), amplitude 5.07 mm/s",alerte
+2023-09-18,IP01,moteur_NDE,6.68,2.04,1.86,58.1,False,0.92,Usure roulement (bague extérieure),"Défaut de roulement suspecté (BPFO) — pic à 41.3 Hz, amplitude 6.68 mm/s",alerte
+2024-01-15,IP04,moteur_DE,2.33,2.33,5.65,60.5,False,1.07,Défaut d'alignement,"Défaut d'alignement suspecté — pic marqué à 2x (25.0 Hz), amplitude 5.65 mm/s",alerte
+2024-02-05,IP03,moteur_NDE,1.97,1.64,7.16,56.2,False,1.52,Défaut d'alignement,"Défaut d'alignement suspecté — pic marqué à 2x (33.3 Hz), amplitude 7.16 mm/s",alerte
+2024-02-12,IP03,moteur_DE,2.1,8.94,2.06,68.2,True,5.51,Surchauffe palier,"Non applicable — diagnostic basé sur les données de process (température/courant), pas sur une signature spectrale mécanique",alerte
+2024-02-26,IP04,pompe,2.72,2.37,5.35,54.1,False,2.84,Défaut d'alignement,"Défaut d'alignement suspecté — pic marqué à 2x (25.0 Hz), amplitude 5.35 mm/s",alerte
+2024-04-15,IP04,moteur_NDE,7.3,2.12,1.79,57.1,False,1.05,Usure roulement (bague extérieure),"Défaut de roulement suspecté (BPFO) — pic à 41.1 Hz, amplitude 7.3 mm/s",alerte
+2024-04-29,IP04,moteur_NDE,1.69,1.96,6.83,55.6,False,-0.87,Défaut d'alignement,"Défaut d'alignement suspecté — pic marqué à 2x (24.9 Hz), amplitude 6.83 mm/s",alerte
+2024-05-06,IP02,moteur_DE,7.54,2.3,2.4,61.1,False,1.5,Usure roulement (bague extérieure),"Défaut de roulement suspecté (BPFO) — pic à 33.0 Hz, amplitude 7.54 mm/s",alerte
+2024-05-13,IP02,moteur_NDE,2.55,1.91,7.18,58.4,False,-0.51,Défaut d'alignement,"Défaut de roulement suspecté (BPFO) — pic à 98.3 Hz, amplitude 0.31 mm/s",alerte
+2024-05-13,IP03,moteur_DE,2.22,2.26,7.56,62.8,False,1.42,Défaut d'alignement,"Défaut de roulement suspecté (BPFI) — pic à 87.2 Hz, amplitude 0.31 mm/s",alerte
+2024-05-13,IP04,pompe,2.29,5.5,1.8,55.3,True,3.89,Balourd,"Défaut de roulement suspecté (BPFO) — pic à 51.6 Hz, amplitude 5.5 mm/s",surveillance
+2024-06-10,IP01,moteur_DE,2.32,6.23,2.16,61.4,True,4.81,Usure roulement (bague intérieure),"Défaut de roulement suspecté (BPFO) — pic à 41.1 Hz, amplitude 6.23 mm/s",alerte
+2024-07-08,IP02,moteur_NDE,5.54,1.47,2.1,59.3,False,-0.41,Usure roulement (bague extérieure),"Défaut de roulement suspecté (BPFO) — pic à 33.1 Hz, amplitude 5.54 mm/s",alerte
+2024-07-08,IP04,moteur_NDE,1.8,2.3,5.56,55.7,False,-1.01,Défaut d'alignement,"Défaut d'alignement suspecté — pic marqué à 2x (25.0 Hz), amplitude 5.56 mm/s",alerte
+2024-07-22,IP04,pompe,2.51,2.09,6.18,58.7,False,-0.57,Défaut d'alignement,"Défaut de roulement suspecté (FTF) — pic à 10.2 Hz, amplitude 0.31 mm/s",alerte
+2024-07-22,IP02,pompe,12.74,2.42,2.87,58.6,False,1.21,Usure roulement (bague extérieure),"Défaut de roulement suspecté (BPFO) — pic à 42.1 Hz, amplitude 12.74 mm/s",alerte
+2024-07-29,IP01,pompe,8.73,2.98,3.06,63.5,True,7.41,Surchauffe palier,"Non applicable — diagnostic basé sur les données de process (température/courant), pas sur une signature spectrale mécanique",alerte
+2024-07-29,IP02,moteur_DE,2.25,5.1,1.96,59.8,False,0.48,Balourd,"Défaut de roulement suspecté (BPFO) — pic à 33.0 Hz, amplitude 5.1 mm/s",surveillance
+2024-08-12,IP02,moteur_NDE,6.5,2.27,2.09,55.3,False,0.18,Usure roulement (bague extérieure),"Défaut de roulement suspecté (BPFO) — pic à 33.1 Hz, amplitude 6.5 mm/s",alerte
+2024-09-16,IP04,moteur_NDE,12.19,1.9,2.05,63.3,True,3.47,Surchauffe palier,"Non applicable — diagnostic basé sur les données de process (température/courant), pas sur une signature spectrale mécanique",alerte
+2024-09-23,IP02,pompe,2.61,2.66,4.93,58.6,False,-0.25,Défaut d'alignement,"Défaut d'alignement suspecté — pic marqué à 2x (20.1 Hz), amplitude 4.93 mm/s",alerte
+2024-09-30,IP01,pompe,2.17,2.73,7.82,56.5,False,1.53,Défaut d'alignement,"Défaut de roulement suspecté (FTF) — pic à 10.1 Hz, amplitude 0.36 mm/s",alerte
+2024-11-18,IP02,pompe,2.97,2.83,5.55,55.0,False,1.69,Défaut d'alignement,"Défaut d'alignement suspecté — pic marqué à 2x (20.1 Hz), amplitude 5.55 mm/s",alerte
+2024-11-25,IP04,moteur_DE,1.94,2.28,6.34,59.0,False,0.08,Défaut d'alignement,"Défaut d'alignement suspecté — pic marqué à 2x (25.0 Hz), amplitude 6.34 mm/s",alerte
+2024-12-02,IP01,pompe,2.33,5.19,2.09,56.0,False,1.55,Balourd,"Défaut de roulement suspecté (BPFO) — pic à 52.2 Hz, amplitude 5.19 mm/s",surveillance
+2024-12-16,IP02,pompe,2.63,5.98,3.19,52.9,False,-0.44,Usure roulement (bague intérieure),"Défaut de roulement suspecté (BPFO) — pic à 42.0 Hz, amplitude 5.98 mm/s",alerte
+2024-12-23,IP02,pompe,7.39,2.77,2.26,55.4,False,-0.25,Usure roulement (bague extérieure),"Défaut de roulement suspecté (BPFO) — pic à 42.1 Hz, amplitude 7.39 mm/s",alerte
+2025-01-20,IP04,moteur_NDE,2.44,6.18,2.11,56.1,False,2.45,Usure roulement (bague intérieure),"Défaut de roulement suspecté (BPFO) — pic à 41.1 Hz, amplitude 6.18 mm/s",alerte
+2025-01-27,IP03,moteur_NDE,7.58,2.31,2.25,66.2,True,3.13,Surchauffe palier,"Non applicable — diagnostic basé sur les données de process (température/courant), pas sur une signature spectrale mécanique",alerte
+2025-03-03,IP02,pompe,12.39,2.65,2.57,58.3,False,1.13,Usure roulement (bague extérieure),"Défaut de roulement suspecté (BPFO) — pic à 42.1 Hz, amplitude 12.39 mm/s",alerte
+2025-03-31,IP02,moteur_DE,4.99,2.09,1.9,57.5,False,-0.27,Balourd,"Défaut de roulement suspecté (BPFO) — pic à 33.0 Hz, amplitude 4.99 mm/s",surveillance
+2025-04-07,IP02,moteur_DE,10.99,1.97,2.16,69.3,False,0.62,Surchauffe palier,"Non applicable — diagnostic basé sur les données de process (température/courant), pas sur une signature spectrale mécanique",alerte
+2025-04-14,IP04,moteur_NDE,6.32,2.37,1.93,57.7,False,0.94,Usure roulement (bague extérieure),"Défaut de roulement suspecté (BPFO) — pic à 41.2 Hz, amplitude 6.32 mm/s",alerte
+2025-05-05,IP03,moteur_DE,2.47,5.48,2.61,59.8,False,1.11,Balourd,"Défaut de roulement suspecté (BPFO) — pic à 62.3 Hz, amplitude 5.48 mm/s",surveillance
+2025-06-30,IP03,moteur_DE,2.24,4.58,2.49,62.8,False,1.18,Surchauffe palier,"Non applicable — diagnostic basé sur les données de process (température/courant), pas sur une signature spectrale mécanique",alerte
+2025-06-30,IP04,pompe,2.33,7.07,2.77,54.3,False,0.7,Usure roulement (bague intérieure),"Défaut de roulement suspecté (BPFO) — pic à 51.6 Hz, amplitude 7.07 mm/s",alerte
+2025-07-14,IP03,pompe,2.39,7.5,2.46,55.4,False,2.01,Usure roulement (bague intérieure),"Défaut de roulement suspecté (BPFO) — pic à 55.4 Hz, amplitude 7.5 mm/s",alerte
+2025-07-21,IP03,moteur_NDE,7.4,1.98,1.85,62.0,True,6.58,Usure roulement (bague extérieure),"Défaut de roulement suspecté (BPFO) — pic à 55.0 Hz, amplitude 7.4 mm/s",alerte
+2025-08-18,IP01,moteur_DE,2.54,1.97,6.95,60.7,True,8.97,Défaut d'alignement,"Défaut de roulement suspecté (BPFO) — pic à 41.5 Hz, amplitude 0.34 mm/s",alerte
+2025-08-25,IP02,moteur_NDE,2.14,5.27,1.87,62.6,False,1.04,Surchauffe palier,"Non applicable — diagnostic basé sur les données de process (température/courant), pas sur une signature spectrale mécanique",alerte
+2025-08-25,IP03,moteur_DE,1.98,2.22,6.63,61.1,False,1.21,Défaut d'alignement,"Défaut de roulement suspecté (BSF) — pic à 96.5 Hz, amplitude 0.41 mm/s",alerte
+2025-09-29,IP01,pompe,2.27,2.76,7.33,53.1,True,3.87,Défaut d'alignement,"Défaut de roulement suspecté (FTF) — pic à 17.1 Hz, amplitude 0.38 mm/s",alerte
+2025-10-06,IP04,moteur_NDE,2.11,2.54,7.26,56.5,False,1.17,Défaut d'alignement,"Défaut d'alignement suspecté — pic marqué à 2x (25.0 Hz), amplitude 7.26 mm/s",alerte
+2025-10-20,IP02,pompe,8.59,2.58,2.76,63.6,False,1.36,Surchauffe palier,"Non applicable — diagnostic basé sur les données de process (température/courant), pas sur une signature spectrale mécanique",alerte
+2025-10-27,IP01,moteur_DE,7.59,1.98,2.46,62.5,False,2.84,Surchauffe palier,"Non applicable — diagnostic basé sur les données de process (température/courant), pas sur une signature spectrale mécanique",alerte
+2025-11-03,IP04,pompe,7.7,2.88,3.05,56.5,False,1.42,Usure roulement (bague extérieure),"Défaut de roulement suspecté (BPFO) — pic à 51.6 Hz, amplitude 7.7 mm/s",alerte
+2025-11-10,IP02,moteur_DE,2.23,4.54,1.85,62.2,False,1.1,Surchauffe palier,"Non applicable — diagnostic basé sur les données de process (température/courant), pas sur une signature spectrale mécanique",alerte
+2025-11-24,IP03,moteur_DE,11.61,2.11,2.08,63.0,False,1.09,Surchauffe palier,"Non applicable — diagnostic basé sur les données de process (température/courant), pas sur une signature spectrale mécanique",alerte
+2025-12-01,IP04,moteur_NDE,4.87,1.73,1.99,58.6,False,1.55,Balourd,"Défaut de roulement suspecté (BPFO) — pic à 41.1 Hz, amplitude 4.87 mm/s",surveillance
+2025-12-08,IP04,moteur_DE,6.03,2.39,2.07,58.5,False,1.39,Usure roulement (bague extérieure),"Défaut de roulement suspecté (BPFO) — pic à 41.6 Hz, amplitude 6.03 mm/s",alerte
+2025-12-22,IP03,pompe,2.82,3.23,6.28,53.4,False,1.25,Défaut d'alignement,"Défaut d'alignement suspecté — pic marqué à 2x (33.3 Hz), amplitude 6.28 mm/s",alerte
+2025-12-29,IP03,pompe,6.01,2.56,2.87,54.6,False,1.33,Usure roulement (bague extérieure),"Défaut de roulement suspecté (BPFO) — pic à 55.4 Hz, amplitude 6.01 mm/s",alerte
+2025-12-29,IP01,moteur_DE,2.31,2.79,5.02,59.8,True,6.96,Défaut d'alignement,"Défaut d'alignement suspecté — pic marqué à 2x (24.9 Hz), amplitude 5.02 mm/s",alerte
+2026-01-05,IP03,pompe,2.26,2.82,7.33,55.0,False,1.29,Défaut d'alignement,"Défaut de roulement suspecté (FTF) — pic à 21.4 Hz, amplitude 0.35 mm/s",alerte
+2026-01-05,IP04,moteur_NDE,7.11,1.79,2.0,60.2,False,0.93,Usure roulement (bague extérieure),"Défaut de roulement suspecté (BPFO) — pic à 41.1 Hz, amplitude 7.11 mm/s",alerte
+2026-01-12,IP04,pompe,5.24,2.25,2.13,52.4,False,0.86,Balourd,"Défaut de roulement suspecté (BPFO) — pic à 51.6 Hz, amplitude 5.24 mm/s",surveillance
+2026-01-19,IP04,moteur_NDE,7.42,2.15,2.11,56.2,False,0.75,Usure roulement (bague extérieure),"Défaut de roulement suspecté (BPFO) — pic à 41.1 Hz, amplitude 7.42 mm/s",alerte
+2026-02-16,IP02,pompe,7.47,2.68,2.33,64.3,False,1.14,Surchauffe palier,"Non applicable — diagnostic basé sur les données de process (température/courant), pas sur une signature spectrale mécanique",alerte
+2026-03-09,IP02,pompe,2.56,5.54,3.0,53.2,False,1.01,Usure roulement (bague intérieure),"Défaut de roulement suspecté (BPFO) — pic à 42.1 Hz, amplitude 5.54 mm/s",alerte
+2026-03-16,IP01,moteur_NDE,4.69,1.71,1.63,58.4,True,6.64,Balourd,"Défaut de roulement suspecté (BPFO) — pic à 41.2 Hz, amplitude 4.69 mm/s",surveillance
+2026-04-06,IP02,moteur_DE,1.75,9.43,1.91,64.4,False,1.03,Surchauffe palier,"Non applicable — diagnostic basé sur les données de process (température/courant), pas sur une signature spectrale mécanique",alerte
+2026-04-20,IP02,moteur_DE,2.2,2.11,5.0,63.6,False,0.73,Défaut d'alignement,"Défaut d'alignement suspecté — pic marqué à 2x (19.9 Hz), amplitude 5.0 mm/s",alerte
+2026-04-20,IP03,moteur_DE,1.89,5.09,2.44,58.1,False,1.79,Balourd,"Défaut de roulement suspecté (BPFO) — pic à 62.3 Hz, amplitude 5.09 mm/s",surveillance
+2026-04-27,IP03,moteur_DE,1.88,10.15,2.27,68.7,True,6.04,Surchauffe palier,"Non applicable — diagnostic basé sur les données de process (température/courant), pas sur une signature spectrale mécanique",alerte
+2026-06-29,IP01,moteur_DE,1.72,5.33,2.25,60.6,False,1.09,Balourd,"Défaut de roulement suspecté (BPFO) — pic à 41.1 Hz, amplitude 5.33 mm/s",surveillance
+2026-06-29,IP03,moteur_NDE,6.18,2.08,2.57,59.0,False,1.16,Usure roulement (bague extérieure),"Défaut de roulement suspecté (BPFO) — pic à 55.0 Hz, amplitude 6.18 mm/s",alerte
+2026-07-06,IP03,pompe,5.97,2.83,2.89,54.0,False,-0.24,Usure roulement (bague extérieure),"Défaut de roulement suspecté (BPFO) — pic à 55.5 Hz, amplitude 5.97 mm/s",alerte
+2026-07-13,IP02,pompe,2.32,7.87,2.67,54.5,False,1.47,Usure roulement (bague intérieure),"Défaut de roulement suspecté (BPFO) — pic à 42.0 Hz, amplitude 7.87 mm/s",alerte
+2026-08-24,IP04,pompe,2.5,7.02,2.99,55.6,True,3.19,Usure roulement (bague intérieure),"Défaut de roulement suspecté (BPFO) — pic à 51.6 Hz, amplitude 7.02 mm/s",alerte
