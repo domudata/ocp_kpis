@@ -1,28 +1,27 @@
 # -*- coding: utf-8 -*-
 """
-Onglet "Fréquence de Maintenance" — classification ML de l'adéquation
-de la fréquence de maintenance préventive, sur données réelles SAP PM.
+Onglet "Fréquence de Maintenance" — lit plan_entretien.xlsx et
+frequence.xlsx directement à la racine du dépôt (même principe que
+ot.xlsx / avis.xlsx), sans bouton d'upload dans l'application.
 
 À placer dans : pages/frequence_maintenance.py
-Utilise : core/frequency_model.py (à placer dans core/)
-Données : frequence_maintenance_avec_impact.csv (déjà calculé, à la
-racine du dépôt — ou recalculé à la volée si absent, voir plus bas).
+Utilise : core/frequency_model.py
+Fichiers requis à la racine du dépôt (à committer sur GitHub, comme
+ot.xlsx et avis.xlsx) : plan_entretien.xlsx, frequence.xlsx
 """
 import os
 import streamlit as st
 import pandas as pd
 import numpy as np
 
+from core.frequency_model import (
+    charger_reference_plans_actifs, charger_reference_frequence_officielle,
+    construire_dataset_frequence, classer_frequence, calculer_couts_reference,
+    estimer_impact_financier, entrainer_classifieur_frequence,
+)
 
 COULEUR_CLASSE = {"Adéquat": "#10B981", "Insuffisant": "#EF4444", "Trop fréquent": "#F59E0B"}
 EMOJI_CLASSE = {"Adéquat": "🟢", "Insuffisant": "🔴", "Trop fréquent": "🟠"}
-
-
-@st.cache_data(show_spinner="Chargement du modèle de fréquence de maintenance...")
-def _charger_donnees(chemin_csv):
-    if not os.path.exists(chemin_csv):
-        return None
-    return pd.read_csv(chemin_csv)
 
 
 def _carte_kpi(col, label, valeur, couleur, sous_texte=""):
@@ -38,24 +37,62 @@ def _carte_kpi(col, label, valeur, couleur, sous_texte=""):
     )
 
 
-def render_frequence_maintenance_tab(chemin_csv="frequence_maintenance_avec_impact.csv"):
+@st.cache_data(show_spinner="Analyse de la fréquence de maintenance en cours...")
+def _calculer_pipeline_complet(df_ot, chemin_plan, chemin_freq):
+    plans_actifs, type_travail_map = charger_reference_plans_actifs(chemin_plan)
+    freq_officielle_map = charger_reference_frequence_officielle(chemin_freq)
+
+    ds = construire_dataset_frequence(
+        df_ot, plans_actifs=plans_actifs, type_travail_map=type_travail_map,
+        freq_officielle_map=freq_officielle_map,
+    )
+    if ds.empty:
+        return None, None
+
+    ds["classe_frequence"] = ds.apply(classer_frequence, axis=1)
+    cout_prev, cout_correctif = calculer_couts_reference(df_ot)
+    impacts = ds.apply(lambda r: estimer_impact_financier(r, cout_prev, cout_correctif), axis=1)
+    impacts_df = pd.DataFrame(list(impacts))
+    ds_final = pd.concat([ds.reset_index(drop=True), impacts_df], axis=1)
+
+    results_df, _ = entrainer_classifieur_frequence(ds)
+    return ds_final, results_df
+
+
+def render_frequence_maintenance_tab(df_ot, chemin_plan="poste_maintenace.xlsx", chemin_freq="freq_plan_maint.xlsx"):
+    """
+    df_ot : DataFrame des ordres de travail (réutilisé depuis
+    l'application principale — ot.xlsx déjà chargé, pas de nouvel
+    upload nécessaire).
+    chemin_plan / chemin_freq : fichiers attendus à la racine du dépôt,
+    committés sur GitHub comme ot.xlsx et avis.xlsx.
+    Noms réels utilisés : poste_maintenace.xlsx, freq_plan_maint.xlsx
+    """
     st.markdown("### 🔄 Fréquence de Maintenance Préventive")
     st.caption(
         "Classification par Machine Learning de l'adéquation de la fréquence de maintenance "
-        "préventive de chaque équipement — données réelles SAP PM (ot.xlsx)."
+        "préventive de chaque équipement — données réelles SAP PM."
     )
 
-    ds = _charger_donnees(chemin_csv)
-    if ds is None:
+    if not os.path.exists(chemin_plan) or not os.path.exists(chemin_freq):
         st.warning(
-            f"⚠️ Fichier `{chemin_csv}` introuvable. Générez-le via `core/frequency_model.py` "
-            f"et placez-le à la racine du dépôt."
+            f"⚠️ Fichier(s) manquant(s) à la racine du dépôt : "
+            f"{'`' + chemin_plan + '` ' if not os.path.exists(chemin_plan) else ''}"
+            f"{'`' + chemin_freq + '`' if not os.path.exists(chemin_freq) else ''}. "
+            f"Committez-les sur GitHub, comme ot.xlsx et avis.xlsx."
         )
         return
 
-    # ══════════════════════════════════════════════════════════════
-    # 1) Cartes de synthèse
-    # ══════════════════════════════════════════════════════════════
+    if df_ot is None or df_ot.empty:
+        st.warning("⚠️ Aucune donnée OT disponible. Chargez d'abord ot.xlsx / avis.xlsx via le panneau latéral.")
+        return
+
+    ds, results_modeles = _calculer_pipeline_complet(df_ot, chemin_plan, chemin_freq)
+
+    if ds is None or ds.empty:
+        st.error("❌ Aucun triplet (poste, plan, type de travail) exploitable trouvé.")
+        return
+
     n_total = len(ds)
     n_adequat = (ds["classe_frequence"] == "Adéquat").sum()
     n_insuffisant = (ds["classe_frequence"] == "Insuffisant").sum()
@@ -67,37 +104,23 @@ def render_frequence_maintenance_tab(chemin_csv="frequence_maintenance_avec_impa
     _carte_kpi(c2, "🟢 Adéquat", f"{n_adequat/n_total*100:.0f}%", COULEUR_CLASSE["Adéquat"], f"{n_adequat:,}".replace(",", " "))
     _carte_kpi(c3, "🔴 Insuffisant", f"{n_insuffisant/n_total*100:.0f}%", COULEUR_CLASSE["Insuffisant"], f"{n_insuffisant:,}".replace(",", " "))
     _carte_kpi(c4, "🟠 Trop fréquent", f"{n_trop/n_total*100:.0f}%", COULEUR_CLASSE["Trop fréquent"], f"{n_trop:,}".replace(",", " "))
-    _carte_kpi(c5, "💰 Économie estimée", f"{economie_totale/1e6:.1f} M MAD", "#0D9488", "par an")
+    _carte_kpi(c5, "💰 Économie estimée", f"{economie_totale/1e6:.1f} M MAD", "#0D9488", "par an (parc analysé)")
 
     st.markdown("---")
 
-    # ══════════════════════════════════════════════════════════════
-    # 2) Entonnoir de sélection des données (transparence méthodologique)
-    # ══════════════════════════════════════════════════════════════
-    with st.expander("🔍 D'où viennent ces chiffres ? (entonnoir de sélection des données)", expanded=False):
+    with st.expander("🧠 Performance du modèle de classification (5 modèles comparés)", expanded=False):
+        st.dataframe(results_modeles, use_container_width=True, hide_index=True)
+
+    with st.expander("🔍 Méthodologie", expanded=False):
         st.caption(
-            "Sur les **12 156 plans d'entretien** présents dans ot.xlsx, tous ne peuvent pas "
-            "être analysés : un historique minimum est nécessaire pour calculer une fréquence "
-            "et un écart-type fiables."
-        )
-        etapes = pd.DataFrame([
-            {"Étape": "Plans d'entretien dans ot.xlsx (tous types d'ordre)", "Nombre": 12156},
-            {"Étape": "… dont ordres préventifs/systématiques (ZPRV/ZEST)", "Nombre": 10130},
-            {"Étape": "… avec ≥ 3 dates d'exécution distinctes (seuil minimal)", "Nombre": 6098},
-            {"Étape": "… répartis par type de travail (triplets analysés)", "Nombre": 6559},
-        ])
-        st.dataframe(etapes, use_container_width=True, hide_index=True)
-        st.caption(
-            "**4 032 plans exclus** faute d'historique suffisant (< 3 exécutions enregistrées "
-            "sur la période) — limite méthodologique nécessaire, pas une erreur : il faut au "
-            "moins 2 intervalles pour calculer une moyenne et un écart-type significatifs."
+            "Unité d'analyse : triplet (poste technique, plan d'entretien, type de travail). "
+            "Fréquence recommandée arrondie aux valeurs standard utilisées en pratique "
+            "(7, 15, 30, 60, 90, 180, 365, 730 jours). Fréquence basée sur l'intervalle OBSERVÉ "
+            "entre exécutions réelles — l'« Intervalle d'appels » du référentiel officiel présente "
+            "une ambiguïté non résolue sur les plans multi-tâches (voir rapport, chapitre Limites)."
         )
 
     st.markdown("---")
-
-    # ══════════════════════════════════════════════════════════════
-    # 3) Analyse par corps de métier
-    # ══════════════════════════════════════════════════════════════
     st.markdown("#### 🔧 Répartition par corps de métier")
     tab_metier = ds.groupby(["corps_metier", "classe_frequence"]).size().unstack(fill_value=0)
     for c in ["Adéquat", "Insuffisant", "Trop fréquent"]:
@@ -116,9 +139,9 @@ def render_frequence_maintenance_tab(chemin_csv="frequence_maintenance_avec_impa
 
     st.markdown("---")
 
-    # ══════════════════════════════════════════════════════════════
-    # 4) Table détaillée filtrable
-    # ══════════════════════════════════════════════════════════════
+    # CORRIGÉ : ajout de "Désignation" (description avis/OT) et
+    # "Désignation du poste technique" (description équipement) à côté
+    # de "Poste technique" ; colonne "Économie" retirée de ce tableau.
     st.markdown("#### 📋 Détail par équipement")
 
     c1, c2 = st.columns(2)
@@ -131,30 +154,27 @@ def render_frequence_maintenance_tab(chemin_csv="frequence_maintenance_avec_impa
     if filtre_classe != "Toutes":
         ds_filtre = ds_filtre[ds_filtre["classe_frequence"] == filtre_classe]
 
-    ds_filtre = ds_filtre.sort_values("economie_estimee_mad", ascending=False)
+    ds_filtre = ds_filtre.sort_values("frequence_actuelle_jours", ascending=False)
     ds_affiche = ds_filtre[[
-        "poste_technique", "plan_entretien", "categorie_travail", "corps_metier",
-        "frequence_actuelle_jours", "frequence_recommandee_jours",
-        "classe_frequence", "economie_estimee_mad",
+        "poste_technique", "designation", "designation_poste_technique", "corps_metier",
+        "categorie_travail", "frequence_actuelle_jours", "frequence_recommandee_jours",
+        "classe_frequence",
     ]].rename(columns={
-        "poste_technique": "Poste technique", "plan_entretien": "Plan", "categorie_travail": "Catégorie",
-        "corps_metier": "Corps de métier", "frequence_actuelle_jours": "Fréq. actuelle (j)",
+        "poste_technique": "Poste technique", "designation": "Désignation",
+        "designation_poste_technique": "Désignation du poste technique",
+        "corps_metier": "Corps de métier", "categorie_travail": "Catégorie",
+        "frequence_actuelle_jours": "Fréq. actuelle (j)",
         "frequence_recommandee_jours": "Fréq. recommandée (j)", "classe_frequence": "Classe",
-        "economie_estimee_mad": "Économie (MAD/an)",
     })
     ds_affiche["Classe"] = ds_affiche["Classe"].apply(lambda c: f"{EMOJI_CLASSE.get(c,'')} {c}")
 
-    st.dataframe(
-        ds_affiche, use_container_width=True, hide_index=True, height=380,
-        column_config={
-            "Économie (MAD/an)": st.column_config.NumberColumn("Économie (MAD/an)", format="%d MAD"),
-        },
-    )
+    st.dataframe(ds_affiche, use_container_width=True, hide_index=True, height=400)
     st.caption(f"{len(ds_filtre):,} équipement(s) affiché(s) sur {n_total:,}".replace(",", " "))
 
-    st.markdown("---")
-    st.caption(
-        "⚠️ Fréquence basée sur l'intervalle OBSERVÉ entre exécutions réelles (et non sur un "
-        "référentiel de fréquence nominale officielle, dont l'interprétation pour les plans "
-        "multi-tâches reste à confirmer avec l'équipe planification — voir rapport, section limites)."
+    st.download_button(
+        "⬇️ Télécharger l'analyse complète (CSV)",
+        data=ds.to_csv(index=False).encode("utf-8"),
+        file_name="frequence_maintenance_avec_impact.csv",
+        mime="text/csv",
+        use_container_width=True,
     )
