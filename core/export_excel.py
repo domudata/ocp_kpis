@@ -1,167 +1,247 @@
 # -*- coding: utf-8 -*-
+"""
+Historisation des KPI — architecture 100% GitHub, sans disque local.
+
+PROBLÈME RÉSOLU : la version précédente utilisait le disque local comme
+intermédiaire (téléchargement GitHub → fusion locale → sauvegarde locale
+→ publication GitHub séparée, pilotée par app.py). Sur Streamlit Cloud,
+le système de fichiers est ÉPHÉMÈRE : il est réinitialisé à chaque
+redémarrage de l'application. Toute date écrite localement mais non
+republiée immédiatement était donc perdue, et le fichier local repartait
+systématiquement de zéro — d'où l'historique bloqué à une seule date.
+
+NOUVELLE ARCHITECTURE : tout se passe en mémoire, et GitHub est la
+SEULE source de vérité.
+    1. Télécharger le classeur historique depuis GitHub (en mémoire)
+    2. Y ajouter / mettre à jour la feuille de la date courante
+    3. Republier immédiatement le classeur complet sur GitHub
+    4. Lire l'historique directement depuis GitHub pour l'affichage
+Aucune écriture disque n'intervient : le redémarrage de l'application
+n'a plus aucun effet sur l'historique.
+
+L'enregistrement est déclenché par la date lue dans date.txt : une
+nouvelle date crée une nouvelle feuille, une date déjà présente met à
+jour la feuille existante.
+"""
 import io
-import os
+import re
 
 import pandas as pd
 import streamlit as st
 from openpyxl import load_workbook, Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
-def save_kpis_to_excel(prows, pcols, qrows, qcols,
-                        ano_p_r, ano_p_c, ano_q_r, ano_q_c,
-                        sheet_name: str) -> None:
-    kpis_dir = "kpis"
+CHEMIN_HISTORIQUE_GITHUB = "kpis/indicateurs_kpis.xlsx"
 
+
+def _nom_feuille(date_str: str) -> str:
+    """Convertit une date en nom de feuille Excel valide (31 car. max)."""
+    return re.sub(r'[/\\*?:\[\]]', '-', str(date_str))[:31]
+
+
+def _telecharger_historique():
+    """Récupère le classeur historique depuis GitHub, en mémoire.
+    Retourne (workbook, message_diagnostic)."""
+    try:
+        from core.github_publish import download_file, is_configured
+    except Exception as e:
+        return None, f"Module github_publish indisponible : {e}"
+
+    if not is_configured():
+        return None, "GitHub non configuré (GITHUB_TOKEN / GITHUB_REPO absents des secrets)"
+
+    contenu, err = download_file(CHEMIN_HISTORIQUE_GITHUB)
+    if contenu:
+        try:
+            wb = load_workbook(io.BytesIO(contenu))
+            return wb, f"Historique GitHub chargé : {len(wb.sheetnames)} date(s) — {wb.sheetnames}"
+        except Exception as e:
+            return None, f"Fichier GitHub illisible (corrompu ?) : {e}"
+    if err:
+        return None, f"Téléchargement échoué : {err}"
+    return None, "Aucun historique sur GitHub (normal au premier enregistrement)"
+
+
+def _ecrire_feuille(wb, nom, prows, pcols, qrows, qcols, ano_p_r, ano_p_c, ano_q_r, ano_q_c):
+    """Écrit (ou réécrit) la feuille d'une date dans le classeur."""
     hf = Font(bold=True, color="FFFFFF", size=10)
     hfl = PatternFill(start_color="1E3A5F", end_color="1E3A5F", fill_type="solid")
     tf = Font(bold=True, size=12, color="1E3A5F")
-    tb = Border(
-        left=Side(style='thin'), right=Side(style='thin'),
-        top=Side(style='thin'), bottom=Side(style='thin')
-    )
+    tb = Border(left=Side(style="thin"), right=Side(style="thin"),
+                top=Side(style="thin"), bottom=Side(style="thin"))
 
-    # CORRIGÉ : chaque étape à risque (création dossier, écriture disque)
-    # est maintenant tracée avec un message explicite dans la sidebar en
-    # cas d'échec, au lieu d'un `except: pass` qui avalait silencieusement
-    # toute erreur (permissions, disque en lecture seule sur Streamlit
-    # Cloud, etc.) — l'app continuait à tourner normalement sans que la
-    # date ne soit réellement sauvegardée, sans aucun signal visible.
-    try:
-        os.makedirs(kpis_dir, exist_ok=True)
-    except Exception as e:
-        st.sidebar.error(f"❌ Impossible de créer le dossier '{kpis_dir}/' : {e}")
-        return
-
-    filepath = os.path.join(kpis_dir, "indicateurs_kpis.xlsx")
-
-    # ── Synchronisation GitHub-first (avec diagnostic détaillé) ──────────
-    # Avant de charger le fichier local, on tente de récupérer la
-    # DERNIÈRE version publiée sur GitHub et on l'utilise comme point de
-    # départ si elle est plus complète que ce qu'il y a en local.
-    _diag = []  # trace complète, affichée en fin de fonction pour diagnostic
-    try:
-        from core.github_publish import download_file as _gh_download, is_configured as _gh_is_configured
-        if _gh_is_configured():
-            _diag.append("GitHub configuré : oui")
-            _remote_bytes, _dl_err = _gh_download("kpis/indicateurs_kpis.xlsx")
-            if _remote_bytes:
-                _remote_wb_check = load_workbook(io.BytesIO(_remote_bytes), read_only=True)
-                _diag.append(f"Distant GitHub : {len(_remote_wb_check.sheetnames)} feuille(s) — {_remote_wb_check.sheetnames}")
-                _remote_wb_check.close()
-                _use_remote = True
-                if os.path.exists(filepath):
-                    try:
-                        _local_wb = load_workbook(filepath, read_only=True)
-                        _local_sheets = _local_wb.sheetnames
-                        _diag.append(f"Local avant sync : {len(_local_sheets)} feuille(s) — {_local_sheets}")
-                        _remote_wb = load_workbook(io.BytesIO(_remote_bytes), read_only=True)
-                        _use_remote = len(_remote_wb.sheetnames) >= len(_local_wb.sheetnames)
-                        _local_wb.close()
-                        _remote_wb.close()
-                    except Exception as _e2:
-                        _diag.append(f"Erreur lecture local pour comparaison : {_e2}")
-                        _use_remote = True
-                else:
-                    _diag.append("Local avant sync : fichier absent")
-                _diag.append(f"Décision : {'utiliser le distant' if _use_remote else 'garder le local'}")
-                if _use_remote:
-                    with open(filepath, "wb") as _f:
-                        _f.write(_remote_bytes)
-            elif _dl_err:
-                _diag.append(f"Téléchargement distant : échec — {_dl_err}")
-            else:
-                _diag.append("Téléchargement distant : fichier inexistant sur GitHub (normal si 1ère fois)")
-        else:
-            _diag.append("GitHub configuré : NON (secrets absents) — historique local uniquement, non persistant entre redémarrages")
-    except Exception as _sync_e:
-        _diag.append(f"Synchronisation GitHub : exception — {_sync_e}")
-
-    sn = (
-        str(sheet_name)
-        .replace("/", "-").replace("\\", "-").replace("*", "")
-        .replace("?", "").replace("[", "").replace("]", "")[:31]
-    )
-    _diag.append(f"Nom de feuille pour cette date : '{sn}'")
-
-    try:
-        wb = load_workbook(filepath)
-        _diag.append(f"Fichier local chargé : {len(wb.sheetnames)} feuille(s) — {wb.sheetnames}")
-    except FileNotFoundError:
-        wb = Workbook()
-        _diag.append("Fichier local absent → nouveau classeur vide créé")
-    except Exception as e:
-        st.sidebar.error(f"❌ Impossible d'ouvrir '{filepath}' (fichier corrompu ?) : {e}")
-        return
-
-    if "Sheet" in wb.sheetnames:
+    if "Sheet" in wb.sheetnames and len(wb.sheetnames) > 1:
         del wb["Sheet"]
-    if sn in wb.sheetnames:
-        del wb[sn]
-        _diag.append(f"Feuille '{sn}' existait déjà → supprimée avant recréation (mise à jour de la même date)")
+    if nom in wb.sheetnames:
+        del wb[nom]
+    ws = wb.create_sheet(nom)
 
-    ws = wb.create_sheet(sn)
-
-    def ws_sec(title, cols, rows, sr):
-        ws.cell(row=sr, column=1, value=title).font = tf
-        sr += 1
+    def section(titre, cols, rows, ligne):
+        ws.cell(row=ligne, column=1, value=titre).font = tf
+        ligne += 1
         for j, c in enumerate(cols, 1):
-            cl = ws.cell(row=sr, column=j, value=c)
-            cl.font = hf
-            cl.fill = hfl
-            cl.alignment = Alignment(horizontal='center')
-            cl.border = tb
-        sr += 1
+            cl = ws.cell(row=ligne, column=j, value=c)
+            cl.font, cl.fill, cl.border = hf, hfl, tb
+            cl.alignment = Alignment(horizontal="center")
+        ligne += 1
         for r in rows:
             for j, c in enumerate(cols, 1):
-                cl = ws.cell(row=sr, column=j, value=r.get(c, ""))
+                cl = ws.cell(row=ligne, column=j, value=r.get(c, ""))
                 cl.border = tb
-                cl.alignment = Alignment(horizontal='center')
-            sr += 1
-        return sr + 1
+                cl.alignment = Alignment(horizontal="center")
+            ligne += 1
+        return ligne + 1
 
-    rn = 1
-    rn = ws_sec("INDICATEURS DE PERFORMANCE", pcols, prows, rn)
+    n = 1
+    n = section("INDICATEURS DE PERFORMANCE", pcols, prows, n)
     if ano_p_c and ano_p_r:
-        rn = ws_sec("ANOMALIES PERFORMANCE", ano_p_c, ano_p_r, rn)
-    rn = ws_sec("INDICATEURS DE QUALITE", qcols, qrows, rn)
+        n = section("ANOMALIES PERFORMANCE", ano_p_c, ano_p_r, n)
+    n = section("INDICATEURS DE QUALITE", qcols, qrows, n)
     if ano_q_c and ano_q_r:
-        rn = ws_sec("ANOMALIES QUALITE", ano_q_c, ano_q_r, rn)
+        n = section("ANOMALIES QUALITE", ano_q_c, ano_q_r, n)
 
-    _diag.append(f"Après ajout de '{sn}' : {len(wb.sheetnames)} feuille(s) — {wb.sheetnames}")
+    if "Sheet" in wb.sheetnames and len(wb.sheetnames) > 1:
+        del wb["Sheet"]
+    return wb
 
+
+def save_kpis_to_excel(prows, pcols, qrows, qcols,
+                        ano_p_r, ano_p_c, ano_q_r, ano_q_c,
+                        sheet_name: str) -> None:
+    """
+    Enregistre les KPI de la date courante dans l'historique GitHub.
+    Signature identique à l'ancienne version (compatible avec app.py).
+    """
+    diag = []
+    nom = _nom_feuille(sheet_name)
+    diag.append(f"Date à enregistrer : '{nom}'")
+
+    wb, msg = _telecharger_historique()
+    diag.append(msg)
+    if wb is None:
+        wb = Workbook()
+        diag.append("→ Nouveau classeur créé en mémoire")
+
+    dates_avant = [s for s in wb.sheetnames if s != "Sheet"]
+    deja_presente = nom in dates_avant
+
+    wb = _ecrire_feuille(wb, nom, prows, pcols, qrows, qcols,
+                          ano_p_r, ano_p_c, ano_q_r, ano_q_c)
+    dates_apres = [s for s in wb.sheetnames if s != "Sheet"]
+    diag.append(f"{'Mise à jour' if deja_presente else 'Ajout'} de la date → "
+                f"{len(dates_apres)} date(s) au total : {dates_apres}")
+
+    # Sérialisation en mémoire
+    buf = io.BytesIO()
+    wb.save(buf)
+    contenu = buf.getvalue()
+
+    # Publication immédiate sur GitHub (seule source de vérité)
     try:
-        wb.save(filepath)
-    except Exception as e:
-        st.sidebar.error(
-            f"❌ Échec de la sauvegarde de l'historique ('{filepath}') : {e}\n\n"
-            f"La date '{sn}' n'a PAS été enregistrée. Téléchargez quand même "
-            f"le fichier via le bouton de secours ci-dessous si besoin."
-        )
-        try:
-            buf = io.BytesIO()
-            wb.save(buf)
-            buf.seek(0)
-            st.sidebar.download_button(
-                "⬇️ Télécharger quand même (sauvegarde disque échouée)",
-                data=buf, file_name="indicateurs_kpis.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key=f"fallback_dl_{sn}",
+        from core.github_publish import upload_file, is_configured
+        if not is_configured():
+            st.sidebar.error(
+                "❌ GitHub non configuré : l'historique ne peut pas être conservé. "
+                "Ajoutez GITHUB_TOKEN et GITHUB_REPO dans les secrets Streamlit."
             )
-        except Exception:
-            pass
-        return
+            _bouton_secours(contenu, nom)
+            return
+        ok, msg_up = upload_file(CHEMIN_HISTORIQUE_GITHUB, contenu,
+                                  f"Historique KPI — {sheet_name}")
+        if ok:
+            diag.append("Publication GitHub : OK")
+            st.sidebar.success(
+                f"✅ Historique enregistré sur GitHub : date '{nom}' "
+                f"({len(dates_apres)} date(s) au total)"
+            )
+        else:
+            diag.append(f"Publication GitHub : ÉCHEC — {msg_up}")
+            st.sidebar.error(f"❌ Publication de l'historique échouée : {msg_up}")
+            _bouton_secours(contenu, nom)
+    except Exception as e:
+        diag.append(f"Publication GitHub : exception — {e}")
+        st.sidebar.error(f"❌ Erreur lors de la publication de l'historique : {e}")
+        _bouton_secours(contenu, nom)
 
-    st.sidebar.success(f"✅ Historique mis à jour : date '{sn}' enregistrée dans {filepath} ({len(wb.sheetnames)} date(s) au total)")
-    with st.sidebar.expander("🔍 Diagnostic détaillé historique", expanded=False):
-        for line in _diag:
-            st.caption(line)
+    with st.sidebar.expander("🔍 Diagnostic historique", expanded=False):
+        for ligne in diag:
+            st.caption(ligne)
+
+
+def _bouton_secours(contenu, nom):
+    """Bouton de repli permettant de récupérer le classeur si la
+    publication automatique échoue."""
+    st.sidebar.download_button(
+        "⬇️ Télécharger l'historique (publication échouée)",
+        data=contenu, file_name="indicateurs_kpis.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        key=f"secours_{nom}",
+    )
+
+
+@st.cache_data(show_spinner=False, ttl=60)
+def charger_historique_depuis_github():
+    """
+    Lit l'historique complet directement depuis GitHub et le convertit en
+    DataFrame exploitable (une ligne par Date × Poste × KPI).
+    Remplace la lecture d'un fichier local, désormais inutile.
+    """
+    wb, msg = _telecharger_historique()
+    if wb is None:
+        return pd.DataFrame(), msg
+
+    lignes = []
+    for feuille in wb.sheetnames:
+        if feuille == "Sheet":
+            continue
+        ws = wb[feuille]
+        date_str = feuille.replace("-", "/")
+        section = None
+        entetes = None
+        for row in ws.iter_rows(values_only=True):
+            if row is None or all(v is None for v in row):
+                continue
+            premier = str(row[0]) if row[0] is not None else ""
+            if premier.startswith("INDICATEURS DE PERFORMANCE"):
+                section, entetes = "Performance", None
+                continue
+            if premier.startswith("INDICATEURS DE QUALITE"):
+                section, entetes = "Qualite", None
+                continue
+            if premier.startswith("ANOMALIES"):
+                section, entetes = None, None
+                continue
+            if section is None:
+                continue
+            if entetes is None:
+                entetes = [str(v) if v is not None else "" for v in row]
+                continue
+            poste = row[0]
+            if poste in (None, "", "CIBLE"):
+                continue
+            for j, kpi in enumerate(entetes[1:], start=1):
+                if not kpi or kpi.startswith("Score") or j >= len(row):
+                    continue
+                val = row[j]
+                try:
+                    val = float(val)
+                except (TypeError, ValueError):
+                    continue
+                lignes.append({"Date": date_str, "Poste": poste, "KPI": kpi,
+                               "Valeur": val, "Famille": section})
+
+    df = pd.DataFrame(lignes)
+    if not df.empty:
+        df["Date_dt"] = pd.to_datetime(df["Date"], format="%d/%m/%Y", errors="coerce")
+        df = df.sort_values("Date_dt")
+    return df, f"{len([s for s in wb.sheetnames if s != 'Sheet'])} date(s) chargée(s) depuis GitHub"
+
 
 def export_btn(df: pd.DataFrame, filename: str) -> None:
     buf = io.BytesIO()
-    df.to_excel(buf, index=False, engine='openpyxl')
+    df.to_excel(buf, index=False, engine="openpyxl")
     buf.seek(0)
     st.download_button(
-        "📥 Exporter Excel", data=buf,
-        file_name=filename,
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        "📥 Exporter Excel", data=buf, file_name=filename,
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
