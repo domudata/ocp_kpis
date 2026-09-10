@@ -24,18 +24,23 @@ STATUTS_CLOTURE = ["TCLO", "CLOT"]
 NAVY = "#1E3A5F"
 BLUE = "#2563EB"
 GREEN = "#10B981"
-ORANGE = "#F59E0B"
-RED = "#EF4444"
 TEAL = "#0D9488"
-PURPLE = "#7C3AED"
+SKY = "#0EA5E9"          # bleu ciel — remplace l'ancien orange
+EMERAUDE = "#059669"     # vert émeraude foncé
+CYAN = "#06B6D4"         # cyan — remplace l'ancien rouge
+INDIGO = "#4F46E5"       # indigo
 GREY = "#64748B"
 DARK = "#1E293B"
 
+MOIS_FR = ["janvier", "février", "mars", "avril", "mai", "juin",
+           "juillet", "août", "septembre", "octobre", "novembre", "décembre"]
+
+# Palette harmonisée verts / bleus (sans rouge ni orange)
 PALETTE_STATUT = {
-    "TCLO": GREEN, "CLOT": TEAL, "CRÉÉ": ORANGE, "CREE": ORANGE,
-    "LANC": BLUE, "PART": PURPLE,
+    "TCLO": GREEN, "CLOT": EMERAUDE, "CRÉÉ": SKY, "CREE": SKY,
+    "LANC": INDIGO, "PART": TEAL,
 }
-PALETTE_AVIS = {"ZI": RED, "ZH": ORANGE}
+PALETTE_AVIS = {"ZI": BLUE, "ZH": TEAL}
 
 
 @st.cache_data(show_spinner="Chargement des avis HSE...")
@@ -83,7 +88,7 @@ def _pie(donnees, titre, palette=None, seuil_explode=8):
     if total <= 0:
         return None
     parts = [v / total * 100 for v in valeurs]
-    defaut = [BLUE, ORANGE, GREEN, RED, PURPLE, TEAL, GREY] * 5
+    defaut = [BLUE, SKY, GREEN, TEAL, INDIGO, EMERAUDE, CYAN, GREY] * 5
     couleurs = [(palette or {}).get(l) or defaut[i] for i, l in enumerate(labels)]
     explode = [0.16 if p < seuil_explode else 0.02 for p in parts]
 
@@ -153,66 +158,116 @@ def _carte(col, label, valeur, couleur, sous_texte=""):
     )
 
 
-def _generer_rapport_pdf(tab_ot, tab_avis, tab_sans, buffers, contexte):
-    from reportlab.lib.pagesizes import A4
+def _libelle_periode(sel_annee, sel_mois_lbl, sel_sem):
+    """Construit un libellé de période à partir des filtres réellement
+    utilisés. Les filtres laissés sur « Tous / Toutes » ne sont pas
+    mentionnés, afin de ne pas alourdir le titre inutilement."""
+    parties = []
+    if sel_sem != "Toutes":
+        parties.append(f"semaine {sel_sem}")
+    if sel_mois_lbl != "Tous":
+        parties.append(sel_mois_lbl)
+    if sel_annee != "Toutes":
+        parties.append(str(sel_annee))
+    return " — " + " ".join(parties) if parties else ""
+
+
+def _generer_rapport_pdf(tab_ot, tab_avis, tab_sans, buffers, libelle_periode, date_str, nb_postes):
+    from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.units import cm
     from reportlab.lib import colors
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
+    from reportlab.platypus import (SimpleDocTemplate, Paragraph, Spacer, Table,
+                                     TableStyle, Image, PageBreak)
 
     C_NAVY = colors.HexColor(NAVY)
     C_GREY = colors.HexColor(GREY)
     C_LGREY = colors.HexColor("#F1F5F9")
+    LARGEUR_UTILE = 25.7 * cm  # A4 paysage moins les marges
 
     s = getSampleStyleSheet()
-    s.add(ParagraphStyle(name="T1x", fontSize=18, textColor=C_NAVY, fontName="Helvetica-Bold", leading=23, spaceAfter=8))
-    s.add(ParagraphStyle(name="Subx", fontSize=9.5, textColor=C_GREY, leading=13, spaceAfter=14))
-    s.add(ParagraphStyle(name="H2y", fontSize=12, textColor=C_NAVY, fontName="Helvetica-Bold", spaceBefore=14, spaceAfter=6))
-    s.add(ParagraphStyle(name="Cy", fontSize=8.5, leading=11))
+    s.add(ParagraphStyle(name="T1x", fontSize=19, textColor=C_NAVY, fontName="Helvetica-Bold", leading=24))
+    s.add(ParagraphStyle(name="Subx", fontSize=10, textColor=C_GREY, leading=14))
+    s.add(ParagraphStyle(name="H2y", fontSize=13, textColor=C_NAVY, fontName="Helvetica-Bold",
+                          spaceBefore=10, spaceAfter=8))
+    s.add(ParagraphStyle(name="Cy", fontSize=9, leading=12))
 
-    story = [Paragraph("Rapport de suivi HSE", s["T1x"]), Paragraph(contexte, s["Subx"])]
+    def _entete(titre_page):
+        """Bandeau d'en-tête avec logo OCP à gauche et titre à droite."""
+        bloc_titre = [
+            Paragraph(f"Suivi HSE{libelle_periode}", s["T1x"]),
+            Spacer(1, 3),
+            Paragraph(titre_page, s["Subx"]),
+        ]
+        if os.path.exists("logo.png"):
+            entete = Table([[Image("logo.png", width=2.1 * cm, height=2.1 * cm), bloc_titre]],
+                            colWidths=[2.6 * cm, LARGEUR_UTILE - 2.6 * cm])
+        else:
+            entete = Table([[bloc_titre]], colWidths=[LARGEUR_UTILE])
+        entete.setStyle(TableStyle([
+            ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+            ("LINEBELOW", (0, 0), (-1, -1), 1.2, C_NAVY),
+            ("BOTTOMPADDING", (0, 0), (-1, -1), 8),
+        ]))
+        return entete
 
     def _table(df, titre):
-        story.append(Paragraph(titre, s["H2y"]))
+        elements = [Paragraph(titre, s["H2y"])]
         if df is None or df.empty:
-            story.append(Paragraph("Aucune donnée sur ce périmètre.", s["Cy"]))
-            return
+            elements.append(Paragraph("Aucune donnée sur ce périmètre.", s["Cy"]))
+            return elements
         n = len(df.columns)
         rows = [list(df.columns)] + df.astype(str).values.tolist()
-        t = Table(rows, colWidths=[16.5 / n * cm] * n, repeatRows=1)
+        t = Table(rows, colWidths=[LARGEUR_UTILE / n] * n, repeatRows=1)
         t.setStyle(TableStyle([
             ("BACKGROUND", (0, 0), (-1, 0), C_NAVY), ("TEXTCOLOR", (0, 0), (-1, 0), colors.white),
-            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"), ("FONTSIZE", (0, 0), (-1, -1), 7.5),
+            ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"), ("FONTSIZE", (0, 0), (-1, -1), 8),
             ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#E2E8F0")),
             ("ROWBACKGROUNDS", (0, 1), (-1, -1), [colors.white, C_LGREY]),
             ("ALIGN", (1, 0), (-1, -1), "CENTER"), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
             ("TOPPADDING", (0, 0), (-1, -1), 4), ("BOTTOMPADDING", (0, 0), (-1, -1), 4),
         ]))
-        story.append(t)
+        elements.append(t)
+        return elements
 
-    _table(tab_ot, "1. Ordres de travail HSE (type de travail 320) par poste")
+    story = []
 
-    imgs = [Image(buffers[k], width=7.6 * cm, height=6 * cm)
+    # ═══ PAGE 1 — Ordres de travail HSE ═══
+    story.append(_entete(f"Page 1/2 — Ordres de travail HSE (type de travail 320) · "
+                          f"{nb_postes} poste(s) · Extraction du {date_str}"))
+    story.append(Spacer(1, 10))
+    story.extend(_table(tab_ot, "Répartition des OT HSE par poste de travail et par statut"))
+
+    imgs = [Image(buffers[k], width=11 * cm, height=8.6 * cm)
             for k in ("pie_statut", "pie_avis_ot") if buffers.get(k)]
     if imgs:
-        story.append(Spacer(1, 8))
-        t = Table([imgs], colWidths=[8.2 * cm] * len(imgs))
+        story.append(Spacer(1, 12))
+        t = Table([imgs], colWidths=[LARGEUR_UTILE / len(imgs)] * len(imgs))
         t.setStyle(TableStyle([("ALIGN", (0, 0), (-1, -1), "CENTER")]))
         story.append(t)
 
-    _table(tab_avis, "2. Avis HSE (ZI / ZH) par poste de travail")
+    story.append(PageBreak())
+
+    # ═══ PAGE 2 — Avis HSE ═══
+    story.append(_entete(f"Page 2/2 — Avis HSE (ZI / ZH) · "
+                          f"{nb_postes} poste(s) · Extraction du {date_str}"))
+    story.append(Spacer(1, 10))
+    story.extend(_table(tab_avis, "Répartition des avis HSE par poste de travail et par type"))
 
     if buffers.get("pie_type_avis"):
         story.append(Spacer(1, 8))
-        t = Table([[Image(buffers["pie_type_avis"], width=7.6 * cm, height=6 * cm)]], colWidths=[8.2 * cm])
+        t = Table([[Image(buffers["pie_type_avis"], width=8 * cm, height=6.2 * cm)]],
+                   colWidths=[LARGEUR_UTILE])
         t.setStyle(TableStyle([("ALIGN", (0, 0), (-1, -1), "CENTER")]))
         story.append(t)
 
-    _table(tab_sans, "3. Postes de travail sans OT 320 et sans avis ZI/ZH")
+    story.append(Spacer(1, 10))
+    story.extend(_table(tab_sans, "Postes de travail sans OT de type 320 et sans avis ZI/ZH"))
 
     buf = io.BytesIO()
-    doc = SimpleDocTemplate(buf, pagesize=A4, topMargin=1.5 * cm, bottomMargin=1.5 * cm,
-                             leftMargin=1.7 * cm, rightMargin=1.7 * cm)
+    doc = SimpleDocTemplate(buf, pagesize=landscape(A4),
+                             topMargin=1.3 * cm, bottomMargin=1.3 * cm,
+                             leftMargin=1.6 * cm, rightMargin=1.6 * cm)
     doc.build(story)
     buf.seek(0)
     return buf.getvalue()
@@ -254,7 +309,8 @@ def render_suivi_hse_tab(dfp, vp, date_str="", chemin_avis_total="avis_total.xls
     semaines = sorted({s for s in pd.concat([ot["_Semaine"], avis["_Semaine"]]).dropna().unique()})
     f1, f2, f3 = st.columns(3)
     sel_annee = f1.selectbox("Année", ["Toutes"] + [str(a) for a in annees], key="hse_annee")
-    sel_mois = f2.selectbox("Mois", ["Tous"] + [str(m) for m in range(1, 13)], key="hse_mois")
+    sel_mois_lbl = f2.selectbox("Mois", ["Tous"] + MOIS_FR, key="hse_mois")
+    sel_mois = "Tous" if sel_mois_lbl == "Tous" else str(MOIS_FR.index(sel_mois_lbl) + 1)
     sel_sem = f3.selectbox("Semaine", ["Toutes"] + list(semaines), key="hse_semaine")
 
     ot = _appliquer_filtres_periode(ot, sel_annee, sel_mois, sel_sem)
@@ -281,8 +337,8 @@ def render_suivi_hse_tab(dfp, vp, date_str="", chemin_avis_total="avis_total.xls
     _carte(c1, "OT HSE (tw 320)", str(n_ot), NAVY, "sur le périmètre filtré")
     _carte(c2, "OT clôturés", str(n_clot), GREEN, f"{n_clot/n_ot*100:.0f}% (TCLO + CLOT)" if n_ot else "—")
     _carte(c3, "OT avec avis", str(n_avec_avis), BLUE, f"{n_avec_avis/n_ot*100:.0f}% des OT" if n_ot else "—")
-    _carte(c4, "Avis ZI", str(n_zi), RED, "incidents")
-    _carte(c5, "Avis ZH", str(n_zh), ORANGE, "hygiène / sécurité")
+    _carte(c4, "Avis ZI", str(n_zi), BLUE, "incidents")
+    _carte(c5, "Avis ZH", str(n_zh), TEAL, "hygiène / sécurité")
 
     st.markdown("---")
     st.markdown("#### 📋 Ordres de travail HSE (type 320) par poste de travail")
@@ -365,11 +421,15 @@ def render_suivi_hse_tab(dfp, vp, date_str="", chemin_avis_total="avis_total.xls
 
     st.markdown("---")
     st.markdown("#### 📄 Rapport de synthèse")
-    contexte = (f"Périmètre : {len(vp)} poste(s) · Année : {sel_annee} · Mois : {sel_mois} · "
-                f"Semaine : {sel_sem} · Extraction du {date_str}")
+    libelle = _libelle_periode(sel_annee, sel_mois_lbl, sel_sem)
+    if libelle:
+        st.caption(f"Titre du rapport : « Suivi HSE{libelle} »")
+    else:
+        st.caption("Aucun filtre de période actif — le rapport portera le titre « Suivi HSE ».")
     if st.button("🖨️ Générer le rapport PDF", type="primary", use_container_width=True):
         try:
-            pdf_bytes = _generer_rapport_pdf(tab_ot, tab_avis, tab_sans, buffers, contexte)
+            pdf_bytes = _generer_rapport_pdf(tab_ot, tab_avis, tab_sans, buffers,
+                                              libelle, date_str, len(vp))
             st.download_button(
                 "⬇️ Télécharger le rapport HSE (PDF)", data=pdf_bytes,
                 file_name=f"rapport_HSE_{str(date_str).replace('/', '-')}.pdf",
