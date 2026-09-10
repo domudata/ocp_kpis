@@ -27,6 +27,14 @@ STATUTS_CLOTURE = ["TCLO", "CLOT"]
 # Les codes ZI / ZH restent utilisés en interne pour le filtrage.
 LIBELLE_AVIS = {"ZI": "Avis Inspection", "ZH": "Avis HSE"}
 
+# Statut d'approbation d'un avis (champ "Statut utilisateur" SAP) :
+#   APRV = approuvé · APRQ = approbation requise (en attente) · REJT = rejeté
+LIBELLE_APPROBATION = {
+    "APRV": "Approuvé",
+    "APRQ": "En attente d'approbation",
+    "REJT": "Rejeté",
+}
+
 NAVY = "#1E3A5F"
 BLUE = "#2563EB"
 GREEN = "#10B981"
@@ -47,6 +55,11 @@ PALETTE_STATUT = {
     "LANC": INDIGO, "PART": TEAL,
 }
 PALETTE_AVIS = {"Avis Inspection": BLUE, "Avis HSE": TEAL}
+PALETTE_APPROBATION = {
+    "Approuvé": GREEN,
+    "En attente d'approbation": SKY,
+    "Rejeté": INDIGO,
+}
 
 
 def _statut_court(serie):
@@ -249,10 +262,11 @@ def _generer_rapport_pdf(tab_ot, tab_avis, tab_sans, buffers, libelle_periode, d
     story.append(Spacer(1, 10))
     story.extend(_table(tab_avis, "Répartition des avis HSE par poste de travail et par type"))
 
-    if buffers.get("pie_type_avis"):
+    imgs_avis = [Image(buffers[k], width=9 * cm, height=7 * cm)
+                 for k in ("pie_type_avis", "pie_approbation") if buffers.get(k)]
+    if imgs_avis:
         story.append(Spacer(1, 8))
-        t = Table([[Image(buffers["pie_type_avis"], width=8 * cm, height=6.2 * cm)]],
-                   colWidths=[LARGEUR_UTILE])
+        t = Table([imgs_avis], colWidths=[LARGEUR_UTILE / len(imgs_avis)] * len(imgs_avis))
         t.setStyle(TableStyle([("ALIGN", (0, 0), (-1, -1), "CENTER")]))
         story.append(t)
 
@@ -327,6 +341,14 @@ def render_suivi_hse_tab(dfp, avf, vp, date_str=""):
     if not avis.empty:
         # Libellé métier affiché partout à la place du code SAP brut
         avis["Type"] = avis["Type d'avis"].map(LIBELLE_AVIS).fillna(avis["Type d'avis"])
+        # Statut d'approbation (APRV / APRQ / REJT)
+        if "Statut utilisateur" in avis.columns:
+            avis["Approbation"] = (
+                avis["Statut utilisateur"].fillna("").astype(str).str.strip().str.split().str[0]
+                .map(LIBELLE_APPROBATION).fillna("Non renseigné")
+            )
+        else:
+            avis["Approbation"] = "Non renseigné"
         if "Statut système" in avis.columns:
             avis["Statut"] = _statut_court(avis["Statut système"])
 
@@ -371,7 +393,7 @@ def render_suivi_hse_tab(dfp, avf, vp, date_str=""):
                 st.image(buf_bar, use_container_width=True)
 
     st.markdown("#### 📊 Répartitions")
-    g1, g2, g3 = st.columns(3)
+    g1, g2, g3, g4 = st.columns(4)
     buffers = {}
     if not ot.empty:
         b = _pie(ot["Statut"].value_counts().to_dict(), "Statut des OT HSE", PALETTE_STATUT)
@@ -388,6 +410,11 @@ def render_suivi_hse_tab(dfp, avf, vp, date_str=""):
         buffers["pie_type_avis"] = b3
         if b3:
             g3.image(b3, use_container_width=True)
+        b4 = _pie(avis["Approbation"].value_counts().to_dict(),
+                   "Approbation des avis", PALETTE_APPROBATION)
+        buffers["pie_approbation"] = b4
+        if b4:
+            g4.image(b4, use_container_width=True)
 
     st.markdown("---")
     st.markdown("#### 🚨 Avis Inspection / Avis HSE par poste de travail")
