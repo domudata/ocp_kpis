@@ -217,12 +217,12 @@ def main() -> None:
         sf1_posts = [p for p in vp if str(p).startswith("SF1")]
         sf2_posts = [p for p in vp if str(p).startswith("SF2")]
 
-        # ── Score PAR DIVISION (SF1/SF2) — INCHANGÉ, conservé pour le
-        # Total general et toute autre utilisation ────────────────────────
-        # CORRIGÉ : même règle uniforme — gscore() appliqué sur CHAQUE
-        # cellule (poste × KPI) individuellement, puis somme des 0/1 sur
-        # le nombre total de cellules KPI valides.
-        def calc_score_division(postes, liste_kpi):
+        # ── Score cellule par cellule — conservé pour le Total general ────
+        # Applique gscore() sur CHAQUE cellule (poste × KPI) puis fait la
+        # moyenne des verdicts 0/1. Utilisé UNIQUEMENT pour la ligne
+        # "Total general" des tableaux Performance/Qualité — les cartes
+        # SF1/SF2 utilisent désormais la méthode consolidée (voir plus bas).
+        def calc_score_cellules(postes, liste_kpi):
             total = 0
             nombre_kpi = 0
 
@@ -255,11 +255,35 @@ def main() -> None:
             ) if nombre_kpi else 0
 
         # ── Score des CARTES SF1/SF2 ──────────────────────────────────────
-        # RE-CORRIGÉ (sur demande explicite) : retour à calc_score_division
-        # (gscore appliqué directement sur la valeur brute de CHAQUE cellule
-        # poste × KPI, comme pscore/qscore) — et non plus sur un taux
-        # d'anomalie agrégé sur l'ensemble des postes de la division.
+        # NOUVELLE MÉTHODE (sur demande explicite) : au lieu d'appliquer
+        # gscore() cellule par cellule (poste × KPI) puis d'en faire la
+        # moyenne, on CONSOLIDE d'abord chaque colonne KPI sur l'ensemble
+        # des postes de la division — en additionnant son numérateur et
+        # son dénominateur réels — pour obtenir UNE valeur globale par
+        # KPI, représentative de toute la division. C'est seulement sur
+        # cette valeur consolidée qu'on applique ensuite la règle 0/1.
+        #
+        # Exemple : pour "Performance Graissage", au lieu de moyenner les
+        # 22 verdicts 0/1 des 22 postes SF1, on calcule
+        # (somme des OT graissage clôturés SF1) / (somme des OT graissage
+        # planifiés SF1) × 100, puis on applique gscore() à ce taux global.
         ano_map = build_ano_map(dfp, avf, now_ts)
+
+        def calc_score_division(postes, liste_kpi):
+            total = 0
+            nombre_kpi = 0
+            for kpi in liste_kpi:
+                if kpi not in nd_full:
+                    continue
+                num_serie, den_serie = nd_full[kpi]
+                num = sum(float(num_serie.get(p, 0)) for p in postes if p in num_serie.index)
+                den = sum(float(den_serie.get(p, 0)) for p in postes if p in den_serie.index)
+                if den <= 0:
+                    continue
+                valeur_globale = (num / den) * 100
+                total += gscore(kpi, valeur_globale, CIBLE[kpi])
+                nombre_kpi += 1
+            return round((total / nombre_kpi) * 100, 2) if nombre_kpi else 0
 
         sf1_p = calc_score_division(sf1_posts, QK)
         sf1_q = calc_score_division(sf1_posts, PK)
@@ -364,9 +388,9 @@ def main() -> None:
         # ── Score Performance du Total general ──────────────────────────
         # INCHANGÉ : reste calculé DIRECTEMENT sur toutes les cellules KPI
         # Performance de tous les postes sélectionnés, via
-        # calc_score_division(vp, QK) — n'utilise PAS les valeurs tot_p[k]
+        # calc_score_cellules(vp, QK) — n'utilise PAS les valeurs tot_p[k]
         # ci-dessus (donc pas affecté par la moyenne des KPI d'âge).
-        tot_p["Score Performance"] = "%.2f" % calc_score_division(vp, QK)
+        tot_p["Score Performance"] = "%.2f" % calc_score_cellules(vp, QK)
         prows.append(tot_p)
 
         tot_q = {"Poste de travail": "Total general", "_t": "total"}
@@ -385,8 +409,8 @@ def main() -> None:
 
         # ── Score Qualite du Total general ──────────────────────────────
         # Même principe : directement sur toutes les cellules KPI Qualité
-        # de tous les postes sélectionnés, via calc_score_division.
-        tot_q["Score Qualite"] = "%.2f" % calc_score_division(vp, PK)
+        # de tous les postes sélectionnés, via calc_score_cellules.
+        tot_q["Score Qualite"] = "%.2f" % calc_score_cellules(vp, PK)
         qrows.append(tot_q)
 
         # ── Historisation : entièrement gérée dans save_kpis_to_excel ──
