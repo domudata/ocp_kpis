@@ -2,10 +2,12 @@
 """
 Onglet "Suivi HSE" — suivi croisé :
   · des ordres de travail HSE (Type de travail = 320) issus de ot.xlsx ;
-  · des avis d'incident (ZI) et d'hygiène/sécurité (ZH) issus de avis_total.xlsx.
+  · des avis d'incident (ZI) et d'hygiène/sécurité (ZH) issus du fichier
+    principal avis.xlsx, déjà chargé par l'application.
 
 À placer dans : pages/suivi_hse.py
-Fichier requis à la racine du dépôt : avis_total.xlsx
+Aucun fichier supplémentaire n'est requis : les données proviennent des
+mêmes extractions que le reste de l'application (ot.xlsx / avis.xlsx).
 """
 import io
 import os
@@ -20,6 +22,10 @@ import matplotlib.pyplot as plt
 TYPE_TRAVAIL_HSE = 320
 TYPES_AVIS_HSE = ["ZI", "ZH"]
 STATUTS_CLOTURE = ["TCLO", "CLOT"]
+
+# Libellés métier affichés à la place des codes SAP bruts.
+# Les codes ZI / ZH restent utilisés en interne pour le filtrage.
+LIBELLE_AVIS = {"ZI": "Avis Inspection", "ZH": "Avis HSE"}
 
 NAVY = "#1E3A5F"
 BLUE = "#2563EB"
@@ -40,18 +46,7 @@ PALETTE_STATUT = {
     "TCLO": GREEN, "CLOT": EMERAUDE, "CRÉÉ": SKY, "CREE": SKY,
     "LANC": INDIGO, "PART": TEAL,
 }
-PALETTE_AVIS = {"ZI": BLUE, "ZH": TEAL}
-
-
-@st.cache_data(show_spinner="Chargement des avis HSE...")
-def _charger_avis_total(chemin):
-    """Charge avis_total.xlsx (même structure que avis.xlsx, avec
-    davantage d'avis historiques)."""
-    df = pd.read_excel(chemin)
-    for c in ["Créé le", "Date de la clôture"]:
-        if c in df.columns:
-            df[c] = pd.to_datetime(df[c], errors="coerce")
-    return df
+PALETTE_AVIS = {"Avis Inspection": BLUE, "Avis HSE": TEAL}
 
 
 def _statut_court(serie):
@@ -249,7 +244,7 @@ def _generer_rapport_pdf(tab_ot, tab_avis, tab_sans, buffers, libelle_periode, d
     story.append(PageBreak())
 
     # ═══ PAGE 2 — Avis HSE ═══
-    story.append(_entete(f"Page 2/2 — Avis HSE (ZI / ZH) · "
+    story.append(_entete(f"Page 2/2 — Avis Inspection / Avis HSE · "
                           f"{nb_postes} poste(s) · Extraction du {date_str}"))
     story.append(Spacer(1, 10))
     story.extend(_table(tab_avis, "Répartition des avis HSE par poste de travail et par type"))
@@ -262,7 +257,7 @@ def _generer_rapport_pdf(tab_ot, tab_avis, tab_sans, buffers, libelle_periode, d
         story.append(t)
 
     story.append(Spacer(1, 10))
-    story.extend(_table(tab_sans, "Postes de travail sans OT de type 320 et sans avis ZI/ZH"))
+    story.extend(_table(tab_sans, "Postes de travail sans OT de type 320 et sans avis Inspection/HSE"))
 
     buf = io.BytesIO()
     doc = SimpleDocTemplate(buf, pagesize=landscape(A4),
@@ -273,9 +268,13 @@ def _generer_rapport_pdf(tab_ot, tab_avis, tab_sans, buffers, libelle_periode, d
     return buf.getvalue()
 
 
-def render_suivi_hse_tab(dfp, vp, date_str="", chemin_avis_total="avis_total.xlsx"):
+def render_suivi_hse_tab(dfp, avf, vp, date_str=""):
     """
     dfp : DataFrame des OT déjà filtré par la sidebar (division, poste, période).
+    avf : DataFrame des AVIS déjà chargé et filtré par l'application
+          (issu du fichier principal avis.xlsx) — plus de lecture d'un
+          fichier séparé : on réutilise directement la donnée en mémoire,
+          ce qui garantit la cohérence avec le reste de l'application.
     vp  : liste des postes de travail visibles selon la sidebar.
     """
     st.markdown("### 🦺 Suivi HSE")
@@ -284,10 +283,12 @@ def render_suivi_hse_tab(dfp, vp, date_str="", chemin_avis_total="avis_total.xls
         "d'incident (ZI) / hygiène-sécurité (ZH)."
     )
 
-    if not os.path.exists(chemin_avis_total):
-        st.warning(f"⚠️ Fichier `{chemin_avis_total}` introuvable à la racine du dépôt. Committez-le sur GitHub.")
+    avis = avf.copy() if avf is not None else pd.DataFrame()
+    if avis.empty:
+        st.warning("⚠️ Aucune donnée d'avis disponible. Chargez d'abord ot.xlsx / avis.xlsx.")
         return
-    avis = _charger_avis_total(chemin_avis_total)
+    if "Créé le" in avis.columns:
+        avis["Créé le"] = pd.to_datetime(avis["Créé le"], errors="coerce")
 
     ot = dfp.copy()
     ot["_tw"] = ot["_tw_num"] if "_tw_num" in ot.columns else pd.to_numeric(ot.get("Type de travail"), errors="coerce")
@@ -323,8 +324,11 @@ def render_suivi_hse_tab(dfp, vp, date_str="", chemin_avis_total="avis_total.xls
     ot["Statut"] = _statut_court(ot["Statut système"]) if "Statut système" in ot.columns else "Inconnu"
     ot["Clôturé"] = ot["Statut"].isin(STATUTS_CLOTURE)
     ot["A un avis"] = ot["Avis"].notna() if "Avis" in ot.columns else False
-    if not avis.empty and "Statut système" in avis.columns:
-        avis["Statut"] = _statut_court(avis["Statut système"])
+    if not avis.empty:
+        # Libellé métier affiché partout à la place du code SAP brut
+        avis["Type"] = avis["Type d'avis"].map(LIBELLE_AVIS).fillna(avis["Type d'avis"])
+        if "Statut système" in avis.columns:
+            avis["Statut"] = _statut_court(avis["Statut système"])
 
     n_ot = len(ot)
     n_clot = int(ot["Clôturé"].sum()) if n_ot else 0
@@ -337,8 +341,8 @@ def render_suivi_hse_tab(dfp, vp, date_str="", chemin_avis_total="avis_total.xls
     _carte(c1, "OT HSE (tw 320)", str(n_ot), NAVY, "sur le périmètre filtré")
     _carte(c2, "OT clôturés", str(n_clot), GREEN, f"{n_clot/n_ot*100:.0f}% (TCLO + CLOT)" if n_ot else "—")
     _carte(c3, "OT avec avis", str(n_avec_avis), BLUE, f"{n_avec_avis/n_ot*100:.0f}% des OT" if n_ot else "—")
-    _carte(c4, "Avis ZI", str(n_zi), BLUE, "incidents")
-    _carte(c5, "Avis ZH", str(n_zh), TEAL, "hygiène / sécurité")
+    _carte(c4, "Avis Inspection", str(n_zi), BLUE, "type ZI")
+    _carte(c5, "Avis HSE", str(n_zh), TEAL, "type ZH")
 
     st.markdown("---")
     st.markdown("#### 📋 Ordres de travail HSE (type 320) par poste de travail")
@@ -380,39 +384,40 @@ def render_suivi_hse_tab(dfp, vp, date_str="", chemin_avis_total="avis_total.xls
         if b2:
             g2.image(b2, use_container_width=True)
     if not avis.empty:
-        b3 = _pie(avis["Type d'avis"].value_counts().to_dict(), "Répartition des avis HSE", PALETTE_AVIS)
+        b3 = _pie(avis["Type"].value_counts().to_dict(), "Répartition des avis HSE", PALETTE_AVIS)
         buffers["pie_type_avis"] = b3
         if b3:
             g3.image(b3, use_container_width=True)
 
     st.markdown("---")
-    st.markdown("#### 🚨 Avis HSE (ZI / ZH) par poste de travail")
+    st.markdown("#### 🚨 Avis Inspection / Avis HSE par poste de travail")
     tab_avis = pd.DataFrame()
+    LIBELLES = [LIBELLE_AVIS[t] for t in TYPES_AVIS_HSE]
     if avis.empty:
-        st.info("Aucun avis ZI/ZH sur ce périmètre.")
+        st.info("Aucun avis d'inspection ni HSE sur ce périmètre.")
     else:
-        piv_av = pd.crosstab(avis["Poste travail princ."], avis["Type d'avis"])
-        for t in TYPES_AVIS_HSE:
-            if t not in piv_av.columns:
-                piv_av[t] = 0
-        piv_av = piv_av[TYPES_AVIS_HSE]
+        piv_av = pd.crosstab(avis["Poste travail princ."], avis["Type"])
+        for lbl in LIBELLES:
+            if lbl not in piv_av.columns:
+                piv_av[lbl] = 0
+        piv_av = piv_av[LIBELLES]
         piv_av["Total"] = piv_av.sum(axis=1)
         tab_avis = piv_av.reset_index().rename(columns={"Poste travail princ.": "Poste de travail"})
         st.dataframe(tab_avis.sort_values("Total", ascending=False), use_container_width=True, hide_index=True)
-        buf_av = _bar_empilee(piv_av[TYPES_AVIS_HSE], "Répartition des avis HSE par poste et par type",
+        buf_av = _bar_empilee(piv_av[LIBELLES], "Répartition des avis par poste et par type",
                                PALETTE_AVIS, "Nombre d'avis")
         if buf_av:
             st.image(buf_av, use_container_width=True)
 
     st.markdown("---")
     st.markdown("#### ⚪ Postes de travail sans activité HSE")
-    st.caption("Postes n'ayant NI ordre de travail de type 320, NI avis ZI/ZH sur le périmètre et la période sélectionnés.")
+    st.caption("Postes n'ayant NI ordre de travail de type 320, NI avis Inspection/HSE sur le périmètre et la période sélectionnés.")
     postes_ot = set(ot["Poste travail princ."].dropna().unique()) if not ot.empty else set()
     postes_avis = set(avis["Poste travail princ."].dropna().unique()) if not avis.empty else set()
     sans = sorted(set(vp) - postes_ot - postes_avis)
     tab_sans = pd.DataFrame({"Poste de travail": sans,
                               "OT type 320": ["Aucun"] * len(sans),
-                              "Avis ZI/ZH": ["Aucun"] * len(sans)})
+                              "Avis Inspection/HSE": ["Aucun"] * len(sans)})
     if sans:
         st.dataframe(tab_sans, use_container_width=True, hide_index=True)
         st.caption(f"{len(sans)} poste(s) sur {len(vp)} sans aucune activité HSE enregistrée.")
