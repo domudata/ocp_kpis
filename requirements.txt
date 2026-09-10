@@ -1,4 +1,5 @@
 streamlit>=1.0
+matplotlib
 pandas>=1.5.0
 numpy
 openpyxl>=3.0.0
