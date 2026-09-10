@@ -389,30 +389,19 @@ def main() -> None:
         tot_q["Score Qualite"] = "%.2f" % calc_score_division(vp, PK)
         qrows.append(tot_q)
 
+        # ── Historisation : entièrement gérée dans save_kpis_to_excel ──
+        # (téléchargement GitHub → ajout de la date → republication GitHub,
+        # le tout en mémoire). Plus aucune publication séparée ici, ni
+        # aucune dépendance au disque local, éphémère sur Streamlit Cloud.
         save_kpis_to_excel(
             prows, pcols, qrows, qcols,
             ano_p_rows, ano_p_cols, ano_q_rows, ano_q_cols,
             fichier_date,
         )
 
-        hist_filepath = os.path.join("kpis", "indicateurs_kpis.xlsx")
-        try:
-            from core.github_publish import upload_file as _gh_upload, is_configured as _gh_configured
-            if _gh_configured() and os.path.exists(hist_filepath):
-                with open(hist_filepath, "rb") as _hf:
-                    _hist_bytes = _hf.read()
-                _ok, _msg = _gh_upload(
-                    "kpis/indicateurs_kpis.xlsx", _hist_bytes,
-                    f"Historique KPI — {fichier_date}",
-                )
-                if _ok:
-                    st.sidebar.success(f"☁️ Historique publié sur GitHub ({fichier_date})")
-                else:
-                    st.sidebar.warning(f"⚠️ Historique non publié sur GitHub : {_msg}")
-        except Exception as _e:
-            st.sidebar.warning(f"⚠️ Publication historique impossible : {_e}")
-
-        hist_df  = load_historical_kpis(hist_filepath)
+        # Lecture de l'historique DIRECTEMENT depuis GitHub (source unique)
+        from core.export_excel import charger_historique_depuis_github
+        hist_df, _hist_msg = charger_historique_depuis_github()
         var_df   = calculate_variations(hist_df)
         journal_df = generate_journal(var_df)
         top5_df, bot5_df = calculate_rankings(var_df)
@@ -527,37 +516,38 @@ def main() -> None:
         with tabs[3]:
             render_backlog_page(dfp, vp)
         with tabs[4]:
-            _hist_path = os.path.join("kpis", "indicateurs_kpis.xlsx")
             n_dates = 0
             if not hist_df.empty and "Date" in hist_df.columns:
                 n_dates = hist_df["Date"].nunique()
 
-            with st.expander(f"📁 Historique : {n_dates} date(s) enregistrée(s) — cliquez pour gérer", expanded=(n_dates < 2)):
+            with st.expander(f"📁 Historique : {n_dates} date(s) enregistrée(s) — cliquez pour détails", expanded=(n_dates < 2)):
+                st.caption(f"Source : GitHub — {_hist_msg}")
                 if n_dates < 2:
                     st.info(
                         "ℹ️ Il faut **au moins 2 dates** pour calculer des variations. "
                         "Actuellement, l'historique contient %d date(s).\n\n"
-                        "**Comment ajouter une date à l'historique permanent :**\n"
-                        "1. Chargez une nouvelle extraction (date.txt + ot.xlsx + avis.xlsx)\n"
-                        "2. Téléchargez le fichier historique mis à jour ci-dessous\n"
-                        "3. Committez-le sur GitHub dans le dossier `kpis/`\n"
-                        "4. L'app le rechargera automatiquement au prochain démarrage" % n_dates
+                        "**L'enregistrement est désormais automatique** : à chaque chargement "
+                        "d'une extraction avec une nouvelle date dans `date.txt`, la date est "
+                        "ajoutée directement à `kpis/indicateurs_kpis.xlsx` sur GitHub — "
+                        "aucune action manuelle n'est nécessaire." % n_dates
                     )
-                if os.path.exists(_hist_path):
-                    with open(_hist_path, "rb") as _hf:
+                else:
+                    st.success(
+                        f"✅ {n_dates} dates enregistrées sur GitHub. "
+                        f"Chaque nouvelle extraction (nouvelle date dans `date.txt`) est ajoutée automatiquement."
+                    )
+                try:
+                    from core.github_publish import download_file as _gh_dl
+                    _bytes_hist, _err_hist = _gh_dl("kpis/indicateurs_kpis.xlsx")
+                    if _bytes_hist:
                         st.download_button(
-                            "⬇️ Télécharger l'historique (indicateurs_kpis.xlsx)",
-                            data=_hf.read(),
-                            file_name="indicateurs_kpis.xlsx",
+                            "⬇️ Télécharger l'historique complet (indicateurs_kpis.xlsx)",
+                            data=_bytes_hist, file_name="indicateurs_kpis.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                             use_container_width=True,
                         )
-                    st.caption(
-                        "Après téléchargement : placez ce fichier dans `kpis/indicateurs_kpis.xlsx` "
-                        "sur GitHub (glisser-déposer dans le dossier + Commit)."
-                    )
-                else:
-                    st.warning("Aucun fichier historique généré pour l'instant.")
+                except Exception as _e_dl:
+                    st.caption(f"Téléchargement indisponible : {_e_dl}")
 
             render_evolution_tab(
                 hist_df, var_df, journal_df, top5_df, bot5_df,
@@ -690,7 +680,7 @@ def main() -> None:
 
         with tabs[8]:
             try:
-                render_suivi_hse_tab(avf, fichier_date)
+                render_suivi_hse_tab(dfp, vp, fichier_date)
             except Exception as _e:
                 st.error(f"Suivi HSE indisponible : {_e}")
 
