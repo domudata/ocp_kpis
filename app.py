@@ -704,7 +704,7 @@ def main() -> None:
 
         with tabs[8]:
             try:
-                render_suivi_hse_tab(dfp, vp, fichier_date)
+                render_suivi_hse_tab(dfp, avf, vp, fichier_date)
             except Exception as _e:
                 st.error(f"Suivi HSE indisponible : {_e}")
 
