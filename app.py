@@ -39,6 +39,7 @@ try:
     from pages.evolution import render_evolution_tab
     from pages.plan_action import render_plan_action_tab
     from pages.frequence_maintenance import render_frequence_maintenance_tab
+    from pages.suivi_hse import render_suivi_hse_tab
     _IMPORT_ERROR = None
 except Exception as _e:
     _IMPORT_ERROR = traceback.format_exc()
@@ -253,50 +254,17 @@ def main() -> None:
                 2
             ) if nombre_kpi else 0
 
-        # ── Score des CARTES SF1/SF2 basé sur le taux d'anomalie ────────────
-        # Pour chaque KPI : on compte le nombre de cellules NON en anomalie
-        # (nb_total - nb_anomalies), directement — pas via "100 - taux
-        # d'anomalie" (les deux donnent le même résultat mathématiquement
-        # pour les KPI "plus haut = mieux", mais ce calcul direct est plus
-        # clair). Pour les KPI "plus bas = mieux", l'anomalie correspond
-        # déjà à la mauvaise tranche : on garde donc le taux d'anomalie
-        # lui-même comme valeur à comparer, pas son complément.
-        # Utilisé UNIQUEMENT pour sf1_p/sf1_q/sf2_p/sf2_q — le score par
-        # poste individuel (pscores/qscores) et le Total general (plus
-        # bas, via calc_score_division) restent sur l'ancienne méthode.
+        # ── Score des CARTES SF1/SF2 ──────────────────────────────────────
+        # RE-CORRIGÉ (sur demande explicite) : retour à calc_score_division
+        # (gscore appliqué directement sur la valeur brute de CHAQUE cellule
+        # poste × KPI, comme pscore/qscore) — et non plus sur un taux
+        # d'anomalie agrégé sur l'ensemble des postes de la division.
         ano_map = build_ano_map(dfp, avf, now_ts)
 
-        def calc_score_anomalie(postes, liste_kpi):
-            total = 0
-            nb_kpi = 0
-            for kpi in liste_kpi:
-                nb_anom = sum(int(ano_map.get(kpi, pd.Series()).get(p, 0)) for p in postes)
-                if kpi in nd_full:
-                    _num, den = nd_full[kpi]
-                    nb_total = sum(int(den.get(p, 0)) for p in postes if p in den.index)
-                else:
-                    nb_total = 0
-                if nb_total <= 0:
-                    continue
-                lower = is_lb(kpi)
-                if lower:
-                    # "Plus bas = mieux" : l'anomalie EST la valeur
-                    # sémantique (être dans la mauvaise tranche).
-                    valeur_a_comparer = nb_anom / nb_total * 100
-                else:
-                    # "Plus haut = mieux" : on compte directement les
-                    # cellules NON en anomalie (conformes).
-                    nb_non_anom = nb_total - nb_anom
-                    valeur_a_comparer = nb_non_anom / nb_total * 100
-                s = gscore(kpi, valeur_a_comparer, CIBLE[kpi])
-                total += s
-                nb_kpi += 1
-            return round((total / nb_kpi) * 100, 2) if nb_kpi else 0
-
-        sf1_p = calc_score_anomalie(sf1_posts, QK)
-        sf1_q = calc_score_anomalie(sf1_posts, PK)
-        sf2_p = calc_score_anomalie(sf2_posts, QK)
-        sf2_q = calc_score_anomalie(sf2_posts, PK)
+        sf1_p = calc_score_division(sf1_posts, QK)
+        sf1_q = calc_score_division(sf1_posts, PK)
+        sf2_p = calc_score_division(sf2_posts, QK)
+        sf2_q = calc_score_division(sf2_posts, PK)
 
         ano_p_rows = build_ano_rows(vp, ano_map, QK)
         ano_q_rows = build_ano_rows(vp, ano_map, PK, fixed_zero=["OT Fiabilité","Total Avis de Panne"])
@@ -547,6 +515,7 @@ def main() -> None:
             "🎯 Plan d'action",
             "🤖 Assistant IA",
             "🔄 Fréquence Maintenance",
+            "🦺 Suivi HSE",
         ])
 
         with tabs[0]:
@@ -715,9 +684,15 @@ def main() -> None:
 
         with tabs[7]:
             try:
-                render_frequence_maintenance_tab("frequence_maintenance_avec_impact.csv")
+                render_frequence_maintenance_tab(df_full)
             except Exception as _e:
                 st.error(f"Fréquence de maintenance indisponible : {_e}")
+
+        with tabs[8]:
+            try:
+                render_suivi_hse_tab(avf, fichier_date)
+            except Exception as _e:
+                st.error(f"Suivi HSE indisponible : {_e}")
 
     except Exception as e:
         st.error("Erreur lors du chargement des donnees : %s" % str(e))
