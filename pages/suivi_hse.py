@@ -278,22 +278,49 @@ def _charger_documents_joints(vp_tuple, chemin="documents_joints.xlsx"):
     travail. Ce fichier est la SOURCE DE VÉRITÉ de cette information :
     l'application ne fait que l'afficher, elle ne la calcule pas (la
     donnée n'existe pas dans les extractions SAP disponibles).
-    Pour la mettre à jour : compléter la colonne dans le fichier Excel,
-    puis le committer sur GitHub.
+
+    Robustesse : la colonne de comptage est entièrement vide au départ,
+    ce qui peut faire échouer une lecture stricte. On accepte donc
+    plusieurs variantes de nom de colonne, et on recrée la colonne si
+    elle est absente. Retourne (DataFrame, message_diagnostic).
     """
     if not os.path.exists(chemin):
-        return None
-    df = pd.read_excel(chemin)
-    col_poste = "Poste travail princ."
-    col_nb = "Nombre documents joints"
-    if col_poste not in df.columns:
-        return None
-    if col_nb not in df.columns:
-        df[col_nb] = None
-    df = df[df[col_poste].isin(list(vp_tuple))]
-    return df[[col_poste, col_nb]].rename(
-        columns={col_poste: "Poste de travail", col_nb: "Nombre documents joints"}
-    ).sort_values("Poste de travail").reset_index(drop=True)
+        return None, f"Fichier `{chemin}` introuvable à la racine du dépôt."
+    try:
+        df = pd.read_excel(chemin)
+    except Exception as e:
+        return None, f"Lecture impossible : {e}"
+
+    # Détection souple du nom de la colonne des postes
+    col_poste = next((c for c in df.columns
+                      if "poste" in str(c).lower()), None)
+    if col_poste is None:
+        return None, (f"Colonne des postes introuvable. Colonnes présentes : "
+                      f"{list(df.columns)}")
+
+    # Détection souple de la colonne de comptage (créée si absente)
+    col_nb = next((c for c in df.columns
+                   if "doc" in str(c).lower() and c != col_poste), None)
+    if col_nb is None:
+        col_nb = "Nombre documents joints"
+        df[col_nb] = pd.NA
+
+    df[col_poste] = df[col_poste].astype(str).str.strip()
+    postes_connus = {str(p).strip() for p in vp_tuple}
+    df_filtre = df[df[col_poste].isin(postes_connus)]
+
+    msg = (f"{len(df_filtre)} poste(s) affiché(s) sur {len(df)} présents dans le fichier "
+           f"({len(postes_connus)} postes dans le périmètre courant).")
+    if df_filtre.empty and len(df) > 0:
+        msg += (f" ⚠️ Aucune correspondance : vérifiez que les noms de postes du fichier "
+                f"correspondent à ceux de SAP. Exemple dans le fichier : "
+                f"{df[col_poste].head(3).tolist()}")
+
+    resultat = (df_filtre[[col_poste, col_nb]]
+                .rename(columns={col_poste: "Poste de travail",
+                                  col_nb: "Nombre documents joints"})
+                .sort_values("Poste de travail").reset_index(drop=True))
+    return resultat, msg
 
 
 def _section_avis(df, titre, icone, couleur_principale, buffers, cle):
@@ -521,19 +548,22 @@ def render_suivi_hse_tab(dfp, avf, vp, date_str=""):
     # ── Documents joints par poste de travail ──
     st.markdown("---")
     st.markdown("### 📎 Documents joints par poste de travail")
-    tab_docs = _charger_documents_joints(tuple(vp))
+    tab_docs, msg_docs = _charger_documents_joints(tuple(vp))
     if tab_docs is None:
         st.warning(
-            "⚠️ Fichier `documents_joints.xlsx` introuvable à la racine du dépôt. "
-            "Committez-le sur GitHub : il doit contenir les colonnes "
-            "« Poste travail princ. » et « Nombre documents joints »."
+            f"⚠️ {msg_docs}\n\nLe fichier doit contenir une colonne de postes "
+            f"(« Poste travail princ. ») et une colonne de comptage "
+            f"(« Nombre documents joints »), et être committé sur GitHub."
         )
+    elif tab_docs.empty:
+        st.warning(f"⚠️ {msg_docs}")
     else:
         renseignes = int(tab_docs["Nombre documents joints"].notna().sum())
         st.caption(
-            f"Source : `documents_joints.xlsx` — {renseignes} poste(s) renseigné(s) "
-            f"sur {len(tab_docs)}. Complétez la colonne dans le fichier Excel, puis "
-            f"committez-le : le tableau ci-dessous se mettra à jour automatiquement."
+            f"Source : `documents_joints.xlsx` — {msg_docs} "
+            f"{renseignes} poste(s) avec un nombre renseigné. "
+            f"Complétez la colonne dans le fichier Excel puis committez-le : "
+            f"le tableau se mettra à jour automatiquement."
         )
         st.dataframe(tab_docs, use_container_width=True, hide_index=True, height=320)
 
