@@ -1,4 +1,5 @@
 streamlit==1.49.1
+typing_extensions>=4.12.0
 matplotlib
 pandas>=1.5.0
 numpy
