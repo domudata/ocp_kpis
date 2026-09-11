@@ -11,8 +11,8 @@ def get_previous_card_values(hist_df: pd.DataFrame) -> dict:
     enregistree) pour les 4 cartes SF1/SF2 Performance/Qualite.
 
     hist_df schema reel (depuis core/historique.py) :
-      colonnes = Date, Poste de travail, <KPI...>, Score Performance
-                 OU Score Qualite, _section ("perf"|"qual"), Date_parsed
+        colonnes = Date, Poste de travail, <KPI...>, Score Performance
+                   OU Score Qualite, _section ("perf"|"qual"), Date_parsed
     """
     prev = {
         "Performance SF1": None, "Qualité SF1": None,
@@ -61,38 +61,32 @@ def get_previous_card_values(hist_df: pd.DataFrame) -> dict:
 
 
 def format_card_variation(current, previous):
-    """Petit indicateur de variation affiché sous le score de la carte.
-    Conserve UNE décimale : une variation de « +0.4 % » entre deux
-    périodes reste une information utile, contrairement au score lui-même
-    qui est affiché en entier."""
     if previous is None:
-        return '<div class="cd" style="color:#94a3b8">→ 0.0 %</div>'
+        return '<div class="cd">→ 0.0 %</div>'
     diff = current - previous
     if abs(diff) < 0.05:
-        return '<div class="cd" style="color:#94a3b8">→ 0.0 %</div>'
+        return '<div class="cd">→ 0.0 %</div>'
     arrow = "↑" if diff > 0 else "↓"
     color = "#059669" if diff > 0 else "#dc2626"
     return '<div class="cd" style="color:%s">%s %.1f %%</div>' % (color, arrow, abs(diff))
 
 
 def render_cards(total_ot, avg_p_score, avg_q_score,
-                 total_ano, sf1_p, sf1_q, sf2_p, sf2_q,
-                 prev_values: dict) -> None:
+                  total_ano, sf1_p, sf1_q, sf2_p, sf2_q,
+                  prev_values: dict) -> None:
 
-    var_p1 = format_card_variation(sf1_p, prev_values.get("Performance SF1"))
-    var_q1 = format_card_variation(sf1_q, prev_values.get("Qualité SF1"))
-    var_p2 = format_card_variation(sf2_p, prev_values.get("Performance SF2"))
-    var_q2 = format_card_variation(sf2_q, prev_values.get("Qualité SF2"))
+    var_p1 = format_card_variation(sf1_p,     prev_values.get("Performance SF1"))
+    var_q1 = format_card_variation(sf1_q,     prev_values.get("Qualité SF1"))
+    var_p2 = format_card_variation(sf2_p,     prev_values.get("Performance SF2"))
+    var_q2 = format_card_variation(sf2_q,     prev_values.get("Qualité SF2"))
 
-    # 4 cartes sur une seule ligne.
-    # Les scores sont affichés SANS décimale (%.0f) : seule la partie
-    # entière est retenue, pour une lecture directe (ex. « 84% »).
+    # 4 cartes sur une seule ligne (OT Analyses et Anomalies Totales supprimees)
     st.markdown(
-        '<div class="cards">'
-        '<div class="card c1"><div class="cv">%.0f%%</div>%s<div class="cl">Performance SF1</div></div>'
-        '<div class="card c2"><div class="cv">%.0f%%</div>%s<div class="cl">Qualite SF1</div></div>'
-        '<div class="card c3"><div class="cv">%.0f%%</div>%s<div class="cl">Performance SF2</div></div>'
-        '<div class="card c4"><div class="cv">%.0f%%</div>%s<div class="cl">Qualite SF2</div></div>'
+        '<div class="cr">'
+        '<div class="cc c5"><div class="cv">%.1f%%</div>%s<div class="cl">Performance SF1</div></div>'
+        '<div class="cc c6"><div class="cv">%.1f%%</div>%s<div class="cl">Qualite SF1</div></div>'
+        '<div class="cc c7"><div class="cv">%.1f%%</div>%s<div class="cl">Performance SF2</div></div>'
+        '<div class="cc c8"><div class="cv">%.1f%%</div>%s<div class="cl">Qualite SF2</div></div>'
         '</div>' % (
             sf1_p, var_p1, sf1_q, var_q1,
             sf2_p, var_p2, sf2_q, var_q2
