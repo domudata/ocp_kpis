@@ -255,35 +255,45 @@ def main() -> None:
             ) if nombre_kpi else 0
 
         # ── Score des CARTES SF1/SF2 ──────────────────────────────────────
-        # NOUVELLE MÉTHODE (sur demande explicite) : au lieu d'appliquer
-        # gscore() cellule par cellule (poste × KPI) puis d'en faire la
-        # moyenne, on CONSOLIDE d'abord chaque colonne KPI sur l'ensemble
-        # des postes de la division — en additionnant son numérateur et
-        # son dénominateur réels — pour obtenir UNE valeur globale par
-        # KPI, représentative de toute la division. C'est seulement sur
-        # cette valeur consolidée qu'on applique ensuite la règle 0/1.
+        # MÉTHODE (sur demande explicite) : entièrement en 0/1, à deux
+        # niveaux successifs, sans aucune moyenne de valeurs brutes.
         #
-        # Exemple : pour "Performance Graissage", au lieu de moyenner les
-        # 22 verdicts 0/1 des 22 postes SF1, on calcule
-        # (somme des OT graissage clôturés SF1) / (somme des OT graissage
-        # planifiés SF1) × 100, puis on applique gscore() à ce taux global.
+        #   Niveau 1 — pour chaque colonne KPI, on applique gscore() à
+        #   CHAQUE cellule (poste × KPI) : chaque poste vaut 0 ou 1.
+        #   On somme ensuite ces verdicts sur toute la division, ce qui
+        #   donne « combien de postes sont conformes sur ce KPI ».
+        #
+        #   Niveau 2 — ce total de colonne est rapporté au nombre de
+        #   postes évalués (taux de conformité de la colonne, en %), puis
+        #   on lui applique de nouveau gscore() : la colonne entière vaut
+        #   alors 0 ou 1.
+        #
+        #   Score final = somme des verdicts 0/1 des colonnes / nombre de
+        #   colonnes évaluées × 100.
         ano_map = build_ano_map(dfp, avf, now_ts)
 
         def calc_score_division(postes, liste_kpi):
-            total = 0
-            nombre_kpi = 0
+            total_colonnes = 0
+            nombre_colonnes = 0
             for kpi in liste_kpi:
-                if kpi not in nd_full:
+                # Niveau 1 : verdict 0/1 par cellule, puis somme
+                somme_cellules = 0
+                cellules_valides = 0
+                for poste in postes:
+                    if poste not in ckdf.index:
+                        continue
+                    val = ckdf.loc[poste].get(kpi)
+                    if val is None or pd.isna(val):
+                        continue
+                    somme_cellules += gscore(kpi, float(val), CIBLE[kpi])
+                    cellules_valides += 1
+                if cellules_valides == 0:
                     continue
-                num_serie, den_serie = nd_full[kpi]
-                num = sum(float(num_serie.get(p, 0)) for p in postes if p in num_serie.index)
-                den = sum(float(den_serie.get(p, 0)) for p in postes if p in den_serie.index)
-                if den <= 0:
-                    continue
-                valeur_globale = (num / den) * 100
-                total += gscore(kpi, valeur_globale, CIBLE[kpi])
-                nombre_kpi += 1
-            return round((total / nombre_kpi) * 100, 2) if nombre_kpi else 0
+                # Niveau 2 : verdict 0/1 sur le total de la colonne
+                taux_colonne = (somme_cellules / cellules_valides) * 100
+                total_colonnes += gscore(kpi, taux_colonne, CIBLE[kpi])
+                nombre_colonnes += 1
+            return round((total_colonnes / nombre_colonnes) * 100, 2) if nombre_colonnes else 0
 
         sf1_p = calc_score_division(sf1_posts, QK)
         sf1_q = calc_score_division(sf1_posts, PK)
