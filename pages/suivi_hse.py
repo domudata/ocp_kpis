@@ -178,8 +178,128 @@ def _bar(pivot, titre, palette=None, xlabel="Nombre", max_postes=12):
 # Sections
 # ═══════════════════════════════════════════════════════════════════
 
+@st.cache_data(show_spinner="Analyse HSE en cours...", max_entries=8)
+def _calculer_sections_hse(_dfp, _avf, vp_tuple, date_str, sel_annee, sel_mois, sel_sem):
+    """
+    Calcule les découpages thématiques et TOUS les graphiques de la page.
+
+    MISE EN CACHE : la clé est constituée de la date d'extraction
+    (date.txt) et des filtres actifs — les DataFrames sont passés avec
+    un préfixe underscore (_dfp, _avf) pour que Streamlit NE les hache
+    PAS (opération très coûteuse sur 146 000 lignes). Conséquence : tant
+    que date.txt et les filtres ne changent pas, les 15 graphiques ne
+    sont calculés qu'une seule fois, au lieu d'être régénérés à chaque
+    interaction avec la page.
+    """
+    ot = _ajouter_periode(_dfp.copy(), "Créé le")
+    avis = _ajouter_periode(_avf.copy(), "Créé le") if _avf is not None and not _avf.empty else pd.DataFrame()
+    vp = list(vp_tuple)
+    if not avis.empty and "Poste travail princ." in avis.columns:
+        avis = avis[avis["Poste travail princ."].isin(vp)]
+
+    ot = _filtrer_periode(ot, sel_annee, sel_mois, sel_sem)
+    avis = _filtrer_periode(avis, sel_annee, sel_mois, sel_sem)
+
+    ot["_Statut"] = _statut_court(ot["Statut système"]) if "Statut système" in ot.columns else "Inconnu"
+    ot["_tw"] = ot["_tw_num"] if "_tw_num" in ot.columns else pd.to_numeric(ot.get("Type de travail"), errors="coerce")
+    desig = ot["Désignation"].fillna("").astype(str) if "Désignation" in ot.columns else pd.Series("", index=ot.index)
+    if not avis.empty:
+        avis["_Approbation"] = _approbation(avis)
+
+    ot_securite = ot[ot["_tw"] == TYPE_TRAVAIL_SECURITE]
+    masque_therm = desig.str.contains("thermograph", case=False, na=False)
+    masque_vib = desig.str.contains("vibration|vibratoire", case=False, na=False)
+    # OMS scindé en deux familles distinctes, chacune ayant sa propre
+    # section : les volumes et les problématiques diffèrent nettement.
+    ot_oms_therm = ot[masque_therm]
+    ot_oms_vib = ot[masque_vib & ~masque_therm]
+    ot_structure = ot[desig.str.contains("structure", case=False, na=False)]
+
+    avis_zi = avis[avis["Type d'avis"] == "ZI"] if not avis.empty and "Type d'avis" in avis.columns else pd.DataFrame()
+    avis_zh = avis[avis["Type d'avis"] == "ZH"] if not avis.empty and "Type d'avis" in avis.columns else pd.DataFrame()
+
+    # Pré-calcul de tous les graphiques (l'opération la plus coûteuse)
+    buffers = {}
+    for df, cle, couleur, titre in [(avis_zi, "zi", BLUE, "Avis Inspection"),
+                                      (avis_zh, "zh", TEAL, "Avis HSE")]:
+        if df.empty:
+            continue
+        total = len(df)
+        en_ot = int(df["Ordre"].notna().sum()) if "Ordre" in df.columns else 0
+        if "Poste travail princ." in df.columns:
+            piv = df.groupby("Poste travail princ.").size().to_frame(name=titre)
+            b = _bar(piv, f"Affectation des {titre.lower()} par poste de travail",
+                     {titre: couleur}, "Nombre d'avis")
+            if b:
+                buffers[f"bar_{cle}"] = b
+        p1 = _pie(df["_Approbation"].value_counts().to_dict(), "Statut d'approbation", PALETTE_APPROBATION)
+        if p1:
+            buffers[f"pie_appr_{cle}"] = p1
+        p2 = _pie({"Transformé en OT": en_ot, "Sans OT": total - en_ot},
+                   "Transformation en ordre de travail", {"Transformé en OT": BLUE, "Sans OT": GREY})
+        if p2:
+            buffers[f"pie_ot_{cle}"] = p2
+
+    for df, cle, titre in [
+            (ot_securite, "secu", "OT Sécurité"),
+            (ot_oms_therm, "therm", "OMS Thermographie"),
+            (ot_oms_vib, "vib", "OMS Vibration"),
+            (ot_structure, "struct", "Contrôle structure")]:
+        if df.empty:
+            continue
+        total = len(df)
+        avec_avis = int(df["Avis"].notna().sum()) if "Avis" in df.columns else 0
+        if "Poste travail princ." in df.columns:
+            piv = pd.crosstab(df["Poste travail princ."], df["_Statut"])
+            b = _bar(piv, f"{titre} par poste de travail et par statut", PALETTE_STATUT, "Nombre d'OT")
+            if b:
+                buffers[f"bar_{cle}"] = b
+        p1 = _pie(df["_Statut"].value_counts().to_dict(), "Répartition par statut", PALETTE_STATUT)
+        if p1:
+            buffers[f"pie_statut_{cle}"] = p1
+        p2 = _pie({"Avec avis": avec_avis, "Sans avis": total - avec_avis},
+                   "Rattachement à un avis", PALETTE_LIEN)
+        if p2:
+            buffers[f"pie_cat_{cle}"] = p2
+
+    return {"avis_zi": avis_zi, "avis_zh": avis_zh, "ot_securite": ot_securite,
+            "ot_oms_therm": ot_oms_therm, "ot_oms_vib": ot_oms_vib,
+            "ot_structure": ot_structure, "buffers": buffers,
+            "annees": sorted({int(a) for a in pd.concat(
+                [s for s in (ot.get("_Année"), avis.get("_Année")) if s is not None]
+            ).dropna().unique()}) if len(ot) or len(avis) else [],
+            }
+
+
+@st.cache_data(show_spinner=False, ttl=120)
+def _charger_documents_joints(vp_tuple, chemin="documents_joints.xlsx"):
+    """
+    Charge le fichier de référence des documents joints par poste de
+    travail. Ce fichier est la SOURCE DE VÉRITÉ de cette information :
+    l'application ne fait que l'afficher, elle ne la calcule pas (la
+    donnée n'existe pas dans les extractions SAP disponibles).
+    Pour la mettre à jour : compléter la colonne dans le fichier Excel,
+    puis le committer sur GitHub.
+    """
+    if not os.path.exists(chemin):
+        return None
+    df = pd.read_excel(chemin)
+    col_poste = "Poste travail princ."
+    col_nb = "Nombre documents joints"
+    if col_poste not in df.columns:
+        return None
+    if col_nb not in df.columns:
+        df[col_nb] = None
+    df = df[df[col_poste].isin(list(vp_tuple))]
+    return df[[col_poste, col_nb]].rename(
+        columns={col_poste: "Poste de travail", col_nb: "Nombre documents joints"}
+    ).sort_values("Poste de travail").reset_index(drop=True)
+
+
 def _section_avis(df, titre, icone, couleur_principale, buffers, cle):
-    """Section pour un type d'avis (Inspection ZI ou HSE ZH)."""
+    """Affiche une section d'avis. Les graphiques sont déjà calculés et
+    mis en cache par _calculer_sections_hse — cette fonction ne fait que
+    les afficher."""
     st.markdown(f"### {icone} {titre}")
     if df.empty:
         st.info(f"Aucun {titre.lower()} sur le périmètre et la période sélectionnés.")
@@ -197,28 +317,16 @@ def _section_avis(df, titre, icone, couleur_principale, buffers, cle):
     _carte(c4, "Rejetés", str(rejetes), INDIGO, f"{rejetes/total*100:.0f}% du total")
 
     g1, g2 = st.columns([3, 2])
-    if "Poste travail princ." in df.columns:
-        piv = df.groupby("Poste travail princ.").size().to_frame(name=titre)
-        b = _bar(piv, f"Affectation des {titre.lower()} par poste de travail",
-                 {titre: couleur_principale}, "Nombre d'avis")
-        if b:
-            buffers[f"bar_{cle}"] = b
-            g1.image(b, use_container_width=True)
-
+    if buffers.get(f"bar_{cle}"):
+        g1.image(buffers[f"bar_{cle}"], use_container_width=True)
     with g2:
-        p1 = _pie(df["_Approbation"].value_counts().to_dict(), "Statut d'approbation", PALETTE_APPROBATION)
-        if p1:
-            buffers[f"pie_appr_{cle}"] = p1
-            st.image(p1, use_container_width=True)
-        p2 = _pie({"Transformé en OT": en_ot, "Sans OT": total - en_ot},
-                   "Transformation en ordre de travail", {"Transformé en OT": BLUE, "Sans OT": GREY})
-        if p2:
-            buffers[f"pie_ot_{cle}"] = p2
-            st.image(p2, use_container_width=True)
+        for k in (f"pie_appr_{cle}", f"pie_ot_{cle}"):
+            if buffers.get(k):
+                st.image(buffers[k], use_container_width=True)
 
 
-def _section_ot(df, titre, icone, couleur_principale, buffers, cle, palette_extra=None, col_categorie=None):
-    """Section pour un ensemble d'ordres de travail (Sécurité, OMS, Structure)."""
+def _section_ot(df, titre, icone, couleur_principale, buffers, cle):
+    """Affiche une section d'ordres de travail (graphiques déjà en cache)."""
     st.markdown(f"### {icone} {titre}")
     if df.empty:
         st.info(f"Aucun ordre de travail « {titre} » sur le périmètre et la période sélectionnés.")
@@ -236,28 +344,12 @@ def _section_ot(df, titre, icone, couleur_principale, buffers, cle, palette_extr
     _carte(c4, "Rattachés à un avis", str(avec_avis), BLUE, f"{avec_avis/total*100:.0f}% du total")
 
     g1, g2 = st.columns([3, 2])
-    if "Poste travail princ." in df.columns:
-        # Répartition par poste ET par statut, pour visualiser d'un coup
-        # le volume et son avancement
-        piv = pd.crosstab(df["Poste travail princ."], df["_Statut"])
-        b = _bar(piv, f"{titre} par poste de travail et par statut", PALETTE_STATUT, "Nombre d'OT")
-        if b:
-            buffers[f"bar_{cle}"] = b
-            g1.image(b, use_container_width=True)
-
+    if buffers.get(f"bar_{cle}"):
+        g1.image(buffers[f"bar_{cle}"], use_container_width=True)
     with g2:
-        p1 = _pie(df["_Statut"].value_counts().to_dict(), "Répartition par statut", PALETTE_STATUT)
-        if p1:
-            buffers[f"pie_statut_{cle}"] = p1
-            st.image(p1, use_container_width=True)
-        if col_categorie and col_categorie in df.columns:
-            p2 = _pie(df[col_categorie].value_counts().to_dict(), "Répartition par type", palette_extra)
-        else:
-            p2 = _pie({"Avec avis": avec_avis, "Sans avis": total - avec_avis},
-                       "Rattachement à un avis", PALETTE_LIEN)
-        if p2:
-            buffers[f"pie_cat_{cle}"] = p2
-            st.image(p2, use_container_width=True)
+        for k in (f"pie_statut_{cle}", f"pie_cat_{cle}"):
+            if buffers.get(k):
+                st.image(buffers[k], use_container_width=True)
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -408,41 +500,42 @@ def render_suivi_hse_tab(dfp, avf, vp, date_str=""):
     sel_mois = "Tous" if sel_mois_lbl == "Tous" else str(MOIS_FR.index(sel_mois_lbl) + 1)
     sel_sem = f3.selectbox("Semaine", ["Toutes"] + list(semaines), key="hse_sem")
 
-    ot = _filtrer_periode(ot, sel_annee, sel_mois, sel_sem)
-    avis = _filtrer_periode(avis, sel_annee, sel_mois, sel_sem)
+    # ── Calcul (mis en cache : ne se relance que si date.txt ou les
+    #    filtres changent — voir _calculer_sections_hse) ──
+    res = _calculer_sections_hse(dfp, avf, tuple(vp), date_str, sel_annee, sel_mois, sel_sem)
+    buffers = res["buffers"]
 
-    # ── Préparation ──
-    ot["_Statut"] = _statut_court(ot["Statut système"]) if "Statut système" in ot.columns else "Inconnu"
-    ot["_tw"] = ot["_tw_num"] if "_tw_num" in ot.columns else pd.to_numeric(ot.get("Type de travail"), errors="coerce")
-    desig = ot["Désignation"].fillna("").astype(str) if "Désignation" in ot.columns else pd.Series("", index=ot.index)
-    if not avis.empty:
-        avis["_Approbation"] = _approbation(avis)
+    st.markdown("---")
+    _section_avis(res["avis_zi"], "Avis Inspection", "🔍", BLUE, buffers, "zi")
+    st.markdown("---")
+    _section_avis(res["avis_zh"], "Avis HSE", "🦺", TEAL, buffers, "zh")
+    st.markdown("---")
+    _section_ot(res["ot_securite"], "OT Sécurité", "🛡️", EMERAUDE, buffers, "secu")
+    st.markdown("---")
+    _section_ot(res["ot_oms_therm"], "OMS Thermographie", "🌡️", BLUE, buffers, "therm")
+    st.markdown("---")
+    _section_ot(res["ot_oms_vib"], "OMS Vibration", "📳", TEAL, buffers, "vib")
+    st.markdown("---")
+    _section_ot(res["ot_structure"], "Contrôle structure", "🏗️", CYAN, buffers, "struct")
 
-    # ── Découpage par thème ──
-    ot_securite = ot[ot["_tw"] == TYPE_TRAVAIL_SECURITE]
-    masque_therm = desig.str.contains("thermograph", case=False, na=False)
-    masque_vib = desig.str.contains("vibration|vibratoire", case=False, na=False)
-    ot_oms = ot[masque_therm | masque_vib].copy()
-    if not ot_oms.empty:
-        ot_oms["_Categorie"] = np.where(
-            ot_oms.index.isin(ot[masque_therm].index), "Thermographie", "Vibration")
-    ot_structure = ot[desig.str.contains("structure", case=False, na=False)]
-
-    avis_zi = avis[avis["Type d'avis"] == "ZI"] if not avis.empty and "Type d'avis" in avis.columns else pd.DataFrame()
-    avis_zh = avis[avis["Type d'avis"] == "ZH"] if not avis.empty and "Type d'avis" in avis.columns else pd.DataFrame()
-
-    buffers = {}
+    # ── Documents joints par poste de travail ──
     st.markdown("---")
-    _section_avis(avis_zi, "Avis Inspection", "🔍", BLUE, buffers, "zi")
-    st.markdown("---")
-    _section_avis(avis_zh, "Avis HSE", "🦺", TEAL, buffers, "zh")
-    st.markdown("---")
-    _section_ot(ot_securite, "OT Sécurité", "🛡️", EMERAUDE, buffers, "secu")
-    st.markdown("---")
-    _section_ot(ot_oms, "OMS — Thermographie & Vibration", "📡", INDIGO, buffers, "oms",
-                 PALETTE_OMS, "_Categorie")
-    st.markdown("---")
-    _section_ot(ot_structure, "Contrôle structure", "🏗️", CYAN, buffers, "struct")
+    st.markdown("### 📎 Documents joints par poste de travail")
+    tab_docs = _charger_documents_joints(tuple(vp))
+    if tab_docs is None:
+        st.warning(
+            "⚠️ Fichier `documents_joints.xlsx` introuvable à la racine du dépôt. "
+            "Committez-le sur GitHub : il doit contenir les colonnes "
+            "« Poste travail princ. » et « Nombre documents joints »."
+        )
+    else:
+        renseignes = int(tab_docs["Nombre documents joints"].notna().sum())
+        st.caption(
+            f"Source : `documents_joints.xlsx` — {renseignes} poste(s) renseigné(s) "
+            f"sur {len(tab_docs)}. Complétez la colonne dans le fichier Excel, puis "
+            f"committez-le : le tableau ci-dessous se mettra à jour automatiquement."
+        )
+        st.dataframe(tab_docs, use_container_width=True, hide_index=True, height=320)
 
     # ── Rapport PDF ──
     st.markdown("---")
@@ -477,11 +570,12 @@ def render_suivi_hse_tab(dfp, avf, vp, date_str=""):
                         ("Avec avis", av, BLUE, f"{av/n*100:.0f}%")]
 
             sections = [
-                ("Avis Inspection", "zi", _stats_avis(avis_zi, BLUE)),
-                ("Avis HSE", "zh", _stats_avis(avis_zh, TEAL)),
-                ("OT Sécurité (type 320)", "secu", _stats_ot(ot_securite, EMERAUDE)),
-                ("OMS — Thermographie & Vibration", "oms", _stats_ot(ot_oms, INDIGO)),
-                ("Contrôle structure", "struct", _stats_ot(ot_structure, CYAN)),
+                ("Avis Inspection", "zi", _stats_avis(res["avis_zi"], BLUE)),
+                ("Avis HSE", "zh", _stats_avis(res["avis_zh"], TEAL)),
+                ("OT Sécurité (type 320)", "secu", _stats_ot(res["ot_securite"], EMERAUDE)),
+                ("OMS Thermographie", "therm", _stats_ot(res["ot_oms_therm"], BLUE)),
+                ("OMS Vibration", "vib", _stats_ot(res["ot_oms_vib"], TEAL)),
+                ("Contrôle structure", "struct", _stats_ot(res["ot_structure"], CYAN)),
             ]
             sections = [s for s in sections if s[2]]
             pdf = _generer_rapport_pdf(buffers, sections, libelle, date_str, len(vp))
