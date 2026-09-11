@@ -255,50 +255,25 @@ def main() -> None:
             ) if nombre_kpi else 0
 
         # ── Score des CARTES SF1/SF2 ──────────────────────────────────────
-        # MÉTHODE (sur demande explicite) : entièrement en 0/1, à deux
-        # niveaux successifs, sans aucune moyenne de valeurs brutes.
+        # UNIFIÉ (sur proposition explicite) : les cartes utilisent
+        # EXACTEMENT la même méthode que la colonne « Score » de la ligne
+        # Total general, c'est-à-dire calc_score_cellules() : gscore()
+        # appliqué à CHAQUE cellule (poste × KPI), puis somme des verdicts
+        # 0/1 rapportée au nombre de cellules valides.
         #
-        #   Niveau 1 — pour chaque colonne KPI, on applique gscore() à
-        #   CHAQUE cellule (poste × KPI) : chaque poste vaut 0 ou 1.
-        #   On somme ensuite ces verdicts sur toute la division, ce qui
-        #   donne « combien de postes sont conformes sur ce KPI ».
-        #
-        #   Niveau 2 — ce total de colonne est rapporté au nombre de
-        #   postes évalués (taux de conformité de la colonne, en %), puis
-        #   on lui applique de nouveau gscore() : la colonne entière vaut
-        #   alors 0 ou 1.
-        #
-        #   Score final = somme des verdicts 0/1 des colonnes / nombre de
-        #   colonnes évaluées × 100.
+        # Avantage décisif : une seule définition du score dans toute
+        # l'application. La carte « Performance SF1 » affiche donc la même
+        # valeur que la colonne Score du Total general lorsque le filtre
+        # ne retient que les postes SF1 — plus aucune divergence possible
+        # entre deux endroits censés mesurer la même chose.
         ano_map = build_ano_map(dfp, avf, now_ts)
 
-        def calc_score_division(postes, liste_kpi):
-            total_colonnes = 0
-            nombre_colonnes = 0
-            for kpi in liste_kpi:
-                # Niveau 1 : verdict 0/1 par cellule, puis somme
-                somme_cellules = 0
-                cellules_valides = 0
-                for poste in postes:
-                    if poste not in ckdf.index:
-                        continue
-                    val = ckdf.loc[poste].get(kpi)
-                    if val is None or pd.isna(val):
-                        continue
-                    somme_cellules += gscore(kpi, float(val), CIBLE[kpi])
-                    cellules_valides += 1
-                if cellules_valides == 0:
-                    continue
-                # Niveau 2 : verdict 0/1 sur le total de la colonne
-                taux_colonne = (somme_cellules / cellules_valides) * 100
-                total_colonnes += gscore(kpi, taux_colonne, CIBLE[kpi])
-                nombre_colonnes += 1
-            return round((total_colonnes / nombre_colonnes) * 100, 2) if nombre_colonnes else 0
-
-        sf1_p = calc_score_division(sf1_posts, QK)
-        sf1_q = calc_score_division(sf1_posts, PK)
-        sf2_p = calc_score_division(sf2_posts, QK)
-        sf2_q = calc_score_division(sf2_posts, PK)
+        # Arrondi à l'entier : les cartes affichent uniquement la partie
+        # entière du score (pas de décimale), pour une lecture directe.
+        sf1_p = int(calc_score_cellules(sf1_posts, QK))
+        sf1_q = int(calc_score_cellules(sf1_posts, PK))
+        sf2_p = int(calc_score_cellules(sf2_posts, QK))
+        sf2_q = int(calc_score_cellules(sf2_posts, PK))
 
         ano_p_rows = build_ano_rows(vp, ano_map, QK)
         ano_q_rows = build_ano_rows(vp, ano_map, PK, fixed_zero=["OT Fiabilité","Total Avis de Panne"])
