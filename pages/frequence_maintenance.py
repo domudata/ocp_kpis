@@ -135,7 +135,47 @@ def render_frequence_maintenance_tab(df_ot, chemin_plan="poste_maintenace.xlsx",
         affichage.reset_index().rename(columns={"corps_metier": "Corps de métier"}),
         use_container_width=True, hide_index=True,
     )
-    st.bar_chart(tab_metier_pct)
+    # CORRIGÉ : st.bar_chart() s'appuie sur altair en interne, dont une
+    # incompatibilité connue avec les versions récentes de Python provoque
+    # « _TypedDictMeta.__new__() got an unexpected keyword argument 'closed' »
+    # sur Streamlit Cloud. On génère donc le graphique avec matplotlib,
+    # comme dans le reste de l'application — aucune dépendance à altair.
+    try:
+        import io as _io
+        import matplotlib
+        matplotlib.use("Agg")
+        import matplotlib.pyplot as _plt
+        import numpy as _np
+
+        _couleurs = {"Adéquat": "#10B981", "Insuffisant": "#EF4444", "Trop fréquent": "#F59E0B"}
+        _fig, _ax = _plt.subplots(figsize=(8, max(2.4, 0.75 * len(tab_metier_pct))), dpi=160)
+        _gauche = _np.zeros(len(tab_metier_pct))
+        for _col in tab_metier_pct.columns:
+            _vals = tab_metier_pct[_col].values.astype(float)
+            _ax.barh(tab_metier_pct.index.astype(str), _vals, left=_gauche, height=0.55,
+                     color=_couleurs.get(_col, "#64748B"), label=str(_col),
+                     edgecolor="white", linewidth=0.8)
+            for _i, (_v, _g) in enumerate(zip(_vals, _gauche)):
+                if _v >= 7:
+                    _ax.text(_g + _v / 2, _i, f"{_v:.0f}%", ha="center", va="center",
+                             fontsize=9, fontweight="bold", color="white")
+            _gauche += _vals
+        _ax.set_xlim(0, 100)
+        _ax.set_xlabel("Répartition (%)", fontsize=9)
+        _ax.legend(fontsize=8.5, frameon=False, ncol=3, loc="lower left", bbox_to_anchor=(0, 1.01))
+        _ax.grid(axis="x", color="#F1F5F9", linewidth=1)
+        _ax.set_axisbelow(True)
+        _ax.spines[["top", "right"]].set_visible(False)
+        _ax.tick_params(labelsize=9)
+        _plt.tight_layout()
+        _buf = _io.BytesIO()
+        _plt.savefig(_buf, format="png", dpi=160, bbox_inches="tight", facecolor="white")
+        _plt.close(_fig)
+        _buf.seek(0)
+        st.image(_buf, use_container_width=True)
+    except Exception as _e_chart:
+        st.caption(f"Graphique indisponible : {_e_chart}")
+        st.dataframe(tab_metier_pct.round(1), use_container_width=True)
 
     st.markdown("---")
 
