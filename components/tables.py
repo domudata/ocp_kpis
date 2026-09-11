@@ -72,43 +72,6 @@ def cs(v) -> str:
                   else "background:#ffc7ce;color:#9c0006;font-weight:700"))
 
 
-def tcs(v) -> str:
-    """Style d'une cellule de la ligne « Total general » (hors colonne Score).
-
-    AJOUTÉ — correction d'un défaut d'interprétation : la ligne Total
-    general ne contient PAS la même grandeur que les lignes de postes.
-
-      · ligne d'un poste  → VALEUR BRUTE du KPI pour ce poste
-          (ex. « 63,6 » dans la colonne "1mois< <3mois" = 63,6% des OT de
-           ce poste sont dans cette tranche d'âge → mauvais, donc rouge)
-
-      · ligne Total general → TAUX DE CONFORMITÉ de la colonne
-          (ex. « 63,6 » = 63,6% des postes sont conformes sur ce KPI →
-           grandeur pour laquelle PLUS C'EST HAUT, MIEUX C'EST, quelle
-           que soit la nature du KPI)
-
-    En appliquant ks() à cette ligne, deux anomalies apparaissaient :
-      · KPI « plus bas = mieux » (tranches d'âge) : un taux de conformité
-        élevé (95%) sortait en ROUGE, interprété comme « 95% des OT sont
-        en retard » ;
-      · KPI normaux : le taux de conformité étant presque toujours élevé,
-        la cellule ressortait systématiquement en VERT — d'où une ligne
-        Total general entièrement verte, sans valeur informative.
-
-    tcs() applique donc une échelle unique de taux de conformité,
-    identique pour tous les KPI.
-    """
-    try:
-        val = float(str(v).replace(' %', '').strip())
-    except Exception:
-        return ""
-    if val >= 90:
-        return "background:#c6efce;color:#006100;"
-    if val >= 70:
-        return "background:#ffeb9c;color:#9c6500;"
-    return "background:#ffc7ce;color:#9c0006;"
-
-
 def kas(v) -> str:
     if v == "N/A" or v is None:
         return "background:#f1f5f9;color:#94a3b8;font-style:italic"
@@ -140,11 +103,7 @@ def html_table(rows: list, cols: list, tc: str, sc_col=None) -> str:
             if is_cible:
                 h += '<td style="background:#1e3a5f;color:#FFFFFF;font-weight:bold;text-align:center;">%s</td>' % v
             elif is_total:
-                # CORRIGÉ : la colonne "Score" garde son échelle de score
-                # (cs), les autres colonnes utilisent l'échelle de TAUX DE
-                # CONFORMITÉ (tcs) — et non plus ks(), qui réinterprétait
-                # à tort cette valeur avec la sémantique du KPI d'origine.
-                s = cs(v) if sc_col and c in sc_col else tcs(v)
+                s = cs(v) if sc_col and c in sc_col else ks(v, c)
                 style = "font-weight:800;font-size:12px;text-align:center;"
                 if s:
                     clean = s.replace("font-weight:600", "").replace("font-weight:700", "")
