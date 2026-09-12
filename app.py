@@ -584,31 +584,48 @@ def main() -> None:
             st.markdown("---")
             st.markdown("#### 📤 Rapports KPI par poste (PDF + Excel)")
 
-            from core.publish_reports import generate_and_publish_all_postes
-            from core.github_publish import is_configured as _github_configured
-            from core.github_publish import debug_config as _github_debug_config
+            # CORRIGÉ : ces imports étaient hors try/except. Quand l'un
+            # d'eux échouait (module manquant), l'exception remontait et
+            # interrompait TOUT l'onglet — y compris le tableau du plan
+            # d'action affiché plus bas, qui disparaissait sans explication.
+            # Ils sont désormais isolés : une défaillance de la publication
+            # n'empêche plus la consultation du plan d'action.
+            _publication_ok = True
+            try:
+                from core.publish_reports import generate_and_publish_all_postes
+                from core.github_publish import is_configured as _github_configured
+                from core.github_publish import debug_config as _github_debug_config
+                st.caption(f"🔧 Config GitHub détectée : {_github_debug_config()}")
+            except Exception as _e_imp:
+                _publication_ok = False
+                st.error(
+                    f"❌ Module de publication des rapports indisponible : {_e_imp}\n\n"
+                    f"Le plan d'action reste consultable ci-dessous."
+                )
 
-            st.caption(f"🔧 Config GitHub détectée : {_github_debug_config()}")
-
-            if not _github_configured():
+            if _publication_ok and not _github_configured():
                 st.caption(
                     "⚠️ Publication GitHub non configurée (GITHUB_TOKEN / GITHUB_REPO "
                     "absents des secrets). Les rapports seront générés mais pas publiés."
                 )
 
-            _col_pub, _col_dry = st.columns(2)
-            with _col_pub:
+            # Les boutons de publication ne sont proposés que si le module
+            # correspondant a bien pu être importé.
+            _col_pub, _col_dry = st.columns(2) if _publication_ok else (None, None)
+            _launch_publish = _launch_dry = False
+            if _publication_ok:
+              with _col_pub:
                 _launch_publish = st.button(
                     f"🚀 Générer et publier les rapports ({len(vp)} poste(s))",
                     use_container_width=True, type="primary", key="btn_publish_all",
                 )
-            with _col_dry:
+              with _col_dry:
                 _launch_dry = st.button(
                     "🧪 Générer seulement (test, sans publier)",
                     use_container_width=True, key="btn_dry_all",
                 )
 
-            if _launch_publish or _launch_dry:
+            if _publication_ok and (_launch_publish or _launch_dry):
                 _progress = st.progress(0, text="Démarrage...")
                 _status_area = st.empty()
 
@@ -694,7 +711,7 @@ def main() -> None:
 
                                 _payload = {
                                     "date_extraction": fichier_date,
-                                    "dossier_onedrive": f"Rapports_KPI/{str(fichier_date).replace('/', '-')}",
+                                    "dossier_onedrive": "presentation",
                                     "repo": _repo,
                                     "branche": _branch,
                                     "nb_postes": len(_fichiers),
