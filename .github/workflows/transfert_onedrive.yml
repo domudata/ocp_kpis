@@ -1,0 +1,111 @@
+name: Transfert des rapports vers OneDrive
+
+# Déclenchement : dès qu'un commit modifie date.txt sur la branche main.
+# C'est le signal métier d'une nouvelle extraction SAP : les rapports du
+# dépôt correspondent alors à cette nouvelle date, et doivent être copiés
+# vers OneDrive en écrasant ceux de la date précédente.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'date.txt'
+  # Permet aussi un déclenchement manuel depuis l'onglet Actions,
+  # utile pour rejouer un transfert sans modifier date.txt.
+  workflow_dispatch:
+
+jobs:
+  transfert:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Récupérer le dépôt
+        uses: actions/checkout@v4
+
+      - name: Lire la date d'extraction
+        id: lire_date
+        run: |
+          DATE=$(cat date.txt | tr -d '\r\n' | xargs)
+          echo "date_extraction=$DATE" >> $GITHUB_OUTPUT
+          echo "Date lue dans date.txt : $DATE"
+
+      - name: Construire la liste des rapports publiés
+        id: liste
+        run: |
+          python3 << 'EOF' >> $GITHUB_OUTPUT
+          import json, os
+
+          RACINE = "presentation"
+          REPO = os.environ["GITHUB_REPOSITORY"]
+          BRANCHE = "main"
+          fichiers = []
+
+          if os.path.isdir(RACINE):
+              for dossier in sorted(os.listdir(RACINE)):
+                  chemin_pdf = os.path.join(RACINE, dossier, "rapport.pdf")
+                  if not os.path.isfile(chemin_pdf):
+                      continue
+                  entree = {
+                      "poste": dossier,
+                      "dossier": dossier,
+                      "pdf": chemin_pdf,
+                      "pdf_url": f"https://raw.githubusercontent.com/{REPO}/{BRANCHE}/{chemin_pdf}",
+                  }
+                  chemin_xlsx = os.path.join(RACINE, dossier, "anomalies.xlsx")
+                  if os.path.isfile(chemin_xlsx):
+                      entree["xlsx"] = chemin_xlsx
+                      entree["xlsx_url"] = f"https://raw.githubusercontent.com/{REPO}/{BRANCHE}/{chemin_xlsx}"
+                  fichiers.append(entree)
+
+          # Sortie sur une seule ligne : une sortie GitHub Actions ne peut
+          # pas contenir de saut de ligne brut sans délimiteur.
+          print(f"nb_postes={len(fichiers)}")
+          print(f"fichiers={json.dumps(fichiers, ensure_ascii=False)}")
+          EOF
+
+      - name: Envoyer à Power Automate
+        env:
+          WEBHOOK: ${{ secrets.POWER_AUTOMATE_WEBHOOK_URL }}
+        run: |
+          if [ -z "$WEBHOOK" ]; then
+            echo "::error::Le secret POWER_AUTOMATE_WEBHOOK_URL n'est pas défini dans le dépôt."
+            exit 1
+          fi
+
+          PAYLOAD=$(python3 -c "
+          import json, os
+          print(json.dumps({
+              'date_extraction': '''${{ steps.lire_date.outputs.date_extraction }}''',
+              'dossier_onedrive': 'presentation',
+              'ecraser': True,
+              'repo': os.environ['GITHUB_REPOSITORY'],
+              'branche': 'main',
+              'nb_postes': ${{ steps.liste.outputs.nb_postes }},
+              'fichiers': json.loads('''${{ steps.liste.outputs.fichiers }}'''),
+          }, ensure_ascii=False))
+          ")
+
+          echo "Envoi de ${{ steps.liste.outputs.nb_postes }} rapport(s) pour la date ${{ steps.lire_date.outputs.date_extraction }}"
+
+          CODE=$(curl -s -o reponse.txt -w "%{http_code}" \
+            -X POST "$WEBHOOK" \
+            -H "Content-Type: application/json" \
+            -d "$PAYLOAD")
+
+          echo "Réponse Power Automate : HTTP $CODE"
+          cat reponse.txt || true
+
+          if [ "$CODE" -ge 200 ] && [ "$CODE" -lt 300 ]; then
+            echo "Transfert déclenché avec succès."
+          else
+            echo "::error::Power Automate a répondu $CODE"
+            exit 1
+          fi
+
+      - name: Résumé
+        if: always()
+        run: |
+          echo "### Transfert OneDrive" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "- **Date d'extraction** : ${{ steps.lire_date.outputs.date_extraction }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Rapports transférés** : ${{ steps.liste.outputs.nb_postes }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Dossier OneDrive** : presentation (écrasement des fichiers existants)" >> $GITHUB_STEP_SUMMARY
