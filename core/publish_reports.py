@@ -1,25 +1,25 @@
 # -*- coding: utf-8 -*-
 """
 Orchestration : pour un poste de travail donné, génère le rapport KPI
-(PPTX), le convertit en PDF (via LibreOffice), génère le fichier Excel
-des anomalies OT+Avis, puis publie les 3 fichiers sur GitHub dans
+(PPTX ET PDF, tous deux en Python pur), génère le fichier Excel des
+anomalies OT+Avis, puis publie les fichiers sur GitHub dans
 presentation/<poste>/.
 
-⚠️ PRÉREQUIS IMPORTANT : la conversion PDF nécessite LibreOffice
-installé sur la machine qui exécute l'app. Sur Streamlit Cloud, ça
-nécessite d'ajouter un fichier `packages.txt` à la racine du dépôt
-contenant la ligne `libreoffice`, sinon la conversion PDF échouera
-(le PPTX sera quand même généré et publié normalement).
+CORRIGÉ : le PDF n'est plus obtenu par conversion du PPTX via
+LibreOffice (subprocess "soffice"), ce mécanisme s'étant révélé fragile
+sur Streamlit Cloud (dépendance système absente après suppression de
+packages.txt, elle-même nécessaire pour contourner un échec de dépôt
+Debian côté plateforme). Le PDF est désormais généré DIRECTEMENT et
+indépendamment via reportlab (core/generate_report_pdf.py), sans
+aucune dépendance système. Le PPTX continue d'être généré et publié
+séparément, pour ceux qui préfèrent l'éditer.
 """
 import io
-import os
-import subprocess
-import tempfile
-
 import pandas as pd
 import streamlit as st
 
-from core.generate_report import build_poste_report_pptx
+from core.generate_report import build_poste_report_pptx, SHORT_LABELS
+from core.generate_report_pdf import build_poste_report_pdf
 from core.anomalies import build_anomaly_dfs
 from core.export_anomalies import build_anomalies_workbook
 from core.github_publish import upload_file, is_configured
@@ -31,39 +31,13 @@ def _sanitize_poste_name(poste: str) -> str:
     return "".join(c if c.isalnum() or c in "-_" else "_" for c in str(poste))
 
 
-def pptx_bytes_to_pdf_bytes(pptx_bytes: bytes):
-    """
-    Convertit des bytes PPTX en bytes PDF via LibreOffice (soffice).
-    Retourne (pdf_bytes, error_message). error_message est None si OK.
-    """
-    with tempfile.TemporaryDirectory() as tmp:
-        pptx_path = os.path.join(tmp, "rapport.pptx")
-        with open(pptx_path, "wb") as f:
-            f.write(pptx_bytes)
-        try:
-            result = subprocess.run(
-                ["soffice", "--headless", "--convert-to", "pdf", "--outdir", tmp, pptx_path],
-                capture_output=True, text=True, timeout=60,
-            )
-        except FileNotFoundError:
-            return None, "LibreOffice ('soffice') introuvable sur ce serveur — ajoutez 'libreoffice' dans packages.txt."
-        except subprocess.TimeoutExpired:
-            return None, "Conversion PDF trop longue (timeout 60s)."
-
-        pdf_path = os.path.join(tmp, "rapport.pdf")
-        if not os.path.exists(pdf_path):
-            return None, f"Conversion PDF échouée : {result.stderr[:300]}"
-        with open(pdf_path, "rb") as f:
-            return f.read(), None
-
-
 def generate_and_publish_poste_report(
     poste: str, ckdf_row: pd.Series, pscore: float, qscore: float,
     ano_map: dict, dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
     date_str: str, dry_run: bool = False,
 ):
     """
-    Génère et publie (si dry_run=False) les 3 fichiers pour UN poste.
+    Génère et publie (si dry_run=False) les fichiers pour UN poste.
     Retourne un dict de statut : {"poste":, "pptx": bool, "pdf": bool,
     "xlsx": bool, "messages": [...]}.
     """
@@ -98,7 +72,7 @@ def generate_and_publish_poste_report(
             "action": ACT_MAP.get(kpi, ""),
         })
 
-    # ── 2) Génération PPTX ──
+    # ── 2) Génération PPTX (conservée, éditable par l'utilisateur) ──
     try:
         prs = build_poste_report_pptx(
             poste=poste, pscore=pscore, qscore=qscore,
@@ -112,14 +86,21 @@ def generate_and_publish_poste_report(
         status["pptx"] = True
     except Exception as e:
         status["messages"].append(f"Échec génération PPTX : {e}")
-        return status
+        pptx_bytes = None
 
-    # ── 3) Conversion PDF ──
-    pdf_bytes, pdf_err = pptx_bytes_to_pdf_bytes(pptx_bytes)
-    if pdf_err:
-        status["messages"].append(f"PDF non généré : {pdf_err}")
-    else:
+    # ── 3) Génération PDF — DIRECTEMENT via reportlab, sans LibreOffice ──
+    try:
+        pdf_bytes = build_poste_report_pdf(
+            poste=poste, pscore=pscore, qscore=qscore,
+            kpi_perf=kpi_perf, kpi_qual=kpi_qual, cibles=CIBLE,
+            anomalies=anomalies, total_anomalies=total_anomalies,
+            plan_action=plan_action, date_str=date_str,
+            short_labels=SHORT_LABELS,
+        )
         status["pdf"] = True
+    except Exception as e:
+        status["messages"].append(f"Échec génération PDF : {e}")
+        pdf_bytes = None
 
     # ── 4) Fichier Excel des anomalies (OT + Avis), filtré sur ce poste ──
     try:
@@ -139,11 +120,7 @@ def generate_and_publish_poste_report(
         status["_xlsx_bytes"] = xlsx_bytes
         return status
 
-    # ── 5) Publication sur GitHub ──
-    # CORRIGÉ (sur demande) : le PPTX n'est plus publié — seuls le PDF et
-    # l'Excel des anomalies sont envoyés sur GitHub. Le PPTX reste généré
-    # en interne (étape 2) car nécessaire pour produire le PDF, mais son
-    # contenu n'est jamais poussé vers presentation/<poste>/.
+    # ── 5) Publication sur GitHub (PDF + Excel) ──
     if not is_configured():
         status["messages"].append("GITHUB_TOKEN / GITHUB_REPO non configurés — fichiers générés mais non publiés.")
         return status
@@ -161,6 +138,132 @@ def generate_and_publish_poste_report(
     return status
 
 
+def generate_and_publish_division_report(
+    division: str, postes_division: list, ckdf: pd.DataFrame,
+    pscores: dict, qscores: dict, ano_map: dict, date_str: str,
+    dry_run: bool = False,
+):
+    """
+    Génère et publie UN rapport consolidé pour une division entière
+    (SF01 ou SF02), agrégeant l'ensemble de ses postes.
+
+    Différence assumée avec les rapports par poste : ce rapport de
+    synthèse ne s'accompagne PAS d'un fichier Excel d'anomalies. Le
+    détail ligne à ligne reste disponible dans les rapports par poste ;
+    ici l'objectif est une vue d'ensemble destinée au pilotage, pas à
+    l'exploitation opérationnelle.
+
+    Méthode d'agrégation des KPI : pour chaque indicateur, on applique
+    gscore() à la valeur de CHAQUE poste (verdict 0/1), puis on rapporte
+    la somme au nombre de postes évalués — soit le taux de conformité de
+    la division sur cet indicateur. C'est la même logique 0/1 que celle
+    utilisée pour les scores de l'application.
+    """
+    from core.calcul_kpi import gscore
+
+    status = {"poste": division, "pptx": False, "pdf": False, "xlsx": None,
+              "messages": [], "est_division": True}
+    folder = _sanitize_poste_name(division)
+
+    postes_valides = [p for p in postes_division if p in ckdf.index]
+    if not postes_valides:
+        status["messages"].append("Aucun poste de cette division dans les données.")
+        return status
+
+    def _taux_conformite(kpi):
+        """% de postes de la division conformes sur ce KPI."""
+        total = valides = 0
+        for p in postes_valides:
+            val = ckdf.loc[p].get(kpi)
+            if val is None or pd.isna(val):
+                continue
+            total += gscore(kpi, float(val), CIBLE.get(kpi, 100))
+            valides += 1
+        return (total / valides * 100) if valides else None
+
+    kpi_perf, kpi_qual = {}, {}
+    for k in QK:
+        t = _taux_conformite(k)
+        if t is not None:
+            kpi_perf[k] = round(t, 1)
+    for k in PK:
+        t = _taux_conformite(k)
+        if t is not None:
+            kpi_qual[k] = round(t, 1)
+
+    # Score global de la division = moyenne des verdicts 0/1 sur toutes
+    # les cellules (poste × KPI), cohérent avec les cartes de l'application
+    def _score_global(liste_kpi):
+        total = valides = 0
+        for p in postes_valides:
+            for k in liste_kpi:
+                val = ckdf.loc[p].get(k)
+                if val is None or pd.isna(val):
+                    continue
+                total += gscore(k, float(val), CIBLE.get(k, 100))
+                valides += 1
+        return round(total / valides * 100, 1) if valides else 0
+
+    pscore_div = _score_global(QK)
+    qscore_div = _score_global(PK)
+
+    # Anomalies cumulées sur toute la division
+    anomalies, total_anomalies = {}, 0
+    for k in list(QK) + list(PK):
+        serie = ano_map.get(k, pd.Series(dtype=float))
+        n = sum(int(serie.get(p, 0)) for p in postes_valides)
+        anomalies[k] = n
+        total_anomalies += n
+
+    # Plan d'action de la division, trié par volume d'anomalies
+    plan_action = []
+    for kpi in list(QK) + list(PK):
+        nb_anom = anomalies.get(kpi, 0)
+        if nb_anom <= 0:
+            continue
+        from core.calcul_kpi import is_lb
+        target = CIBLE.get(kpi, 100)
+        taux = kpi_perf.get(kpi, kpi_qual.get(kpi, 0))
+        # L'écart porte ici sur le taux de conformité de la division
+        ecart = taux - 100
+        plan_action.append({
+            "kpi": kpi, "actual": round(taux, 1), "target": target,
+            "ecart": round(ecart, 1), "nb_anom": nb_anom,
+            "responsable": KPI_RESP_MAP.get(kpi, "Non assigné"),
+            "action": ACT_MAP.get(kpi, ""),
+        })
+    plan_action.sort(key=lambda x: -x["nb_anom"])
+
+    titre = f"{division} — Synthèse division ({len(postes_valides)} postes)"
+    try:
+        pdf_bytes = build_poste_report_pdf(
+            poste=titre, pscore=pscore_div, qscore=qscore_div,
+            kpi_perf=kpi_perf, kpi_qual=kpi_qual, cibles=CIBLE,
+            anomalies=anomalies, total_anomalies=total_anomalies,
+            plan_action=plan_action, date_str=date_str,
+            short_labels=SHORT_LABELS, mode_conformite=True,
+        )
+        status["pdf"] = True
+    except Exception as e:
+        status["messages"].append(f"Échec génération PDF division : {e}")
+        return status
+
+    if dry_run:
+        status["messages"].append("Mode test (dry_run) : rapport généré mais NON publié.")
+        status["_pdf_bytes"] = pdf_bytes
+        return status
+
+    if not is_configured():
+        status["messages"].append("GitHub non configuré — rapport généré mais non publié.")
+        return status
+
+    ok, msg = upload_file(f"presentation/{folder}/rapport.pdf", pdf_bytes,
+                           f"Rapport de division {division} — {date_str}")
+    status["messages"].append(f"PDF division → GitHub : {'OK' if ok else msg}")
+    status["pdf_published"] = ok
+    return status
+
+
 def generate_and_publish_all_postes(
     ckdf: pd.DataFrame, pscores: dict, qscores: dict, ano_map: dict,
     dfp: pd.DataFrame, avf: pd.DataFrame, now_ts, date_str: str,
@@ -168,12 +271,15 @@ def generate_and_publish_all_postes(
 ):
     """
     Boucle sur tous les postes (ou la liste fournie) et publie leur
-    rapport. progress_callback(i, n, poste) est appelé avant chaque
-    poste, si fourni (utile pour une barre de progression Streamlit).
-    Retourne la liste des status par poste.
+    rapport, PUIS génère deux rapports de synthèse supplémentaires —
+    un par division (SF01 et SF02) — sans fichier Excel associé.
+    progress_callback(i, n, poste) est appelé avant chaque poste.
+    Retourne la liste des status.
     """
     postes = postes if postes is not None else list(ckdf.index)
     results = []
+
+    # ── Rapports par poste (inchangés : PDF + Excel d'anomalies) ──
     for i, poste in enumerate(postes):
         if progress_callback:
             progress_callback(i, len(postes), poste)
@@ -187,4 +293,19 @@ def generate_and_publish_all_postes(
             date_str=date_str, dry_run=dry_run,
         )
         results.append(res)
+
+    # ── Deux rapports de synthèse par division, SANS Excel ──
+    for division, prefixe in [("SF01", "SF1"), ("SF02", "SF2")]:
+        postes_div = [p for p in postes if str(p).startswith(prefixe)]
+        if not postes_div:
+            continue
+        if progress_callback:
+            progress_callback(len(postes), len(postes) + 2, f"Synthèse {division}")
+        res = generate_and_publish_division_report(
+            division=division, postes_division=postes_div, ckdf=ckdf,
+            pscores=pscores, qscores=qscores, ano_map=ano_map,
+            date_str=date_str, dry_run=dry_run,
+        )
+        results.append(res)
+
     return results
