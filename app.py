@@ -654,17 +654,70 @@ def main() -> None:
                         if _pa_url:
                             try:
                                 import requests as _requests
-                                _pa_resp = _requests.post(_pa_url, json={}, timeout=15)
+
+                                # CORRIGÉ : on envoie désormais à Power Automate
+                                # la liste précise des fichiers publiés, au lieu
+                                # d'un corps vide. Le flux sait ainsi exactement
+                                # quels chemins GitHub copier vers OneDrive, sans
+                                # avoir à parcourir tout le dépôt.
+                                try:
+                                    _repo = st.secrets.get("GITHUB_REPO", "")
+                                    _branch = st.secrets.get("GITHUB_BRANCH", "main")
+                                except Exception:
+                                    _repo, _branch = "", "main"
+
+                                _fichiers = []
+                                for _r in _results:
+                                    if not _r.get("pdf_published"):
+                                        continue
+                                    _dossier = "".join(
+                                        c if c.isalnum() or c in "-_" else "_"
+                                        for c in str(_r["poste"])
+                                    )
+                                    _base = f"presentation/{_dossier}"
+                                    _entree = {
+                                        "poste": _r["poste"],
+                                        "dossier": _dossier,
+                                        "pdf": f"{_base}/rapport.pdf",
+                                        "pdf_url": (
+                                            f"https://raw.githubusercontent.com/{_repo}/{_branch}/{_base}/rapport.pdf"
+                                            if _repo else ""
+                                        ),
+                                    }
+                                    if _r.get("xlsx_published"):
+                                        _entree["xlsx"] = f"{_base}/anomalies.xlsx"
+                                        _entree["xlsx_url"] = (
+                                            f"https://raw.githubusercontent.com/{_repo}/{_branch}/{_base}/anomalies.xlsx"
+                                            if _repo else ""
+                                        )
+                                    _fichiers.append(_entree)
+
+                                _payload = {
+                                    "date_extraction": fichier_date,
+                                    "dossier_onedrive": f"Rapports_KPI/{str(fichier_date).replace('/', '-')}",
+                                    "repo": _repo,
+                                    "branche": _branch,
+                                    "nb_postes": len(_fichiers),
+                                    "fichiers": _fichiers,
+                                }
+
+                                _pa_resp = _requests.post(_pa_url, json=_payload, timeout=30)
                                 if _pa_resp.status_code in (200, 201, 202):
-                                    st.success("☁️ Synchronisation OneDrive déclenchée (Power Automate).")
+                                    st.success(
+                                        f"☁️ Enregistrement OneDrive déclenché : {len(_fichiers)} rapport(s) "
+                                        f"envoyé(s) vers `{_payload['dossier_onedrive']}`."
+                                    )
+                                    with st.expander("Détail de ce qui a été transmis à Power Automate"):
+                                        st.json(_payload)
                                 else:
                                     st.warning(f"⚠️ Power Automate a répondu {_pa_resp.status_code} : {_pa_resp.text[:200]}")
                             except Exception as _pa_e:
                                 st.warning(f"⚠️ Impossible de déclencher Power Automate : {_pa_e}")
                         else:
-                            st.caption(
-                                "ℹ️ Ajoutez POWER_AUTOMATE_WEBHOOK_URL dans les secrets pour "
-                                "déclencher automatiquement la synchronisation OneDrive ici."
+                            st.warning(
+                                "⚠️ Les rapports sont publiés sur GitHub mais **pas encore copiés vers OneDrive** : "
+                                "le secret `POWER_AUTOMATE_WEBHOOK_URL` est absent. Ajoutez-le dans les secrets "
+                                "Streamlit (voir la procédure de création du flux dans la documentation du projet)."
                             )
 
             render_plan_action_tab(plan_actions_rows, sf1_rows, sf2_rows, anomaly_dfs, fichier_date=fichier_date, poste_stars=poste_stars)
