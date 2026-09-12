@@ -11,14 +11,67 @@ from core.constants import MP_KW, MPLAN_KW
 # Utilitaires basiques
 # ──────────────────────────────────────────────
 
+@st.cache_data(show_spinner=False, ttl=60)
+def _lire_date_github():
+    """Lit date.txt directement depuis le dépôt GitHub configuré.
+
+    Cache court (60 s) : évite un appel réseau à chaque interaction avec
+    l'application, tout en garantissant qu'un nouveau commit sur date.txt
+    est pris en compte en moins d'une minute.
+
+    Retourne (date_str, source) ou (None, message_erreur).
+    """
+    try:
+        from core.github_publish import download_file, is_configured
+    except Exception:
+        return None, "module github_publish indisponible"
+    if not is_configured():
+        return None, "GitHub non configuré"
+    contenu, err = download_file("date.txt")
+    if contenu:
+        try:
+            valeur = contenu.decode("utf-8").strip()
+            if valeur:
+                return valeur, "GitHub"
+        except Exception as e:
+            return None, f"contenu illisible : {e}"
+    return None, err or "date.txt absent du dépôt"
+
+
 def get_date_from_file() -> str:
+    """
+    Date de l'extraction courante, lue EN PRIORITÉ depuis GitHub.
+
+    CORRIGÉ : la version précédente lisait uniquement date.txt sur le
+    disque local. Or ce disque est une COPIE du dépôt figée au moment du
+    dernier redémarrage de l'application sur Streamlit Cloud. Après un
+    commit modifiant date.txt, l'application continuait donc à utiliser
+    l'ANCIENNE date tant qu'elle n'était pas redémarrée — et générait des
+    rapports datés de la période précédente, alors même que leur
+    publication sur GitHub réussissait (message de succès trompeur).
+
+    Ordre de priorité :
+      1. date.txt sur GitHub — source de vérité, reflète immédiatement un
+         nouveau commit sans nécessiter de redémarrage ;
+      2. date.txt sur le disque local — repli si GitHub est injoignable
+         ou non configuré (fonctionne aussi en exécution locale) ;
+      3. date du jour — dernier recours.
+    """
+    date_gh, _source = _lire_date_github()
+    if date_gh:
+        return date_gh
+
     if os.path.exists("date.txt"):
         try:
             with open("date.txt", "r", encoding="utf-8") as f:
-                return f.read().strip()
+                valeur = f.read().strip()
+                if valeur:
+                    return valeur
         except Exception:
             pass
+
     return pd.Timestamp.today().strftime("%d/%m/%Y")
+
 
 def contient_mot(t, lm) -> bool:
     """CORRIGÉ (bug majeur) : l'ancienne version vérifiait TOUS les mots de
@@ -34,6 +87,7 @@ def contient_mot(t, lm) -> bool:
     entrée), jamais le préfixe générique seul."""
     t = str(t).upper()
     return any(l.split()[-1].upper() in t for l in lm)
+
 
 def cat_age(a) -> str:
     """Catégorise l'âge d'un OT selon la règle officielle SAP PM (en JOURS,
@@ -57,6 +111,7 @@ def cat_age(a) -> str:
         return ">3 mois"
     return "1 mois < <3 mois"
 
+
 def excr(df: pd.DataFrame) -> pd.DataFrame:
     if "Poste travail princ." in df.columns:
         return df[
@@ -65,6 +120,7 @@ def excr(df: pd.DataFrame) -> pd.DataFrame:
             )
         ].copy()
     return df
+
 
 # ──────────────────────────────────────────────
 # Lecture Excel robuste
@@ -103,6 +159,7 @@ def read_excel_safe(bytes_data: bytes) -> pd.DataFrame:
         "Format de fichier non reconnu. Le fichier n'est ni un .xlsx ni un .xls valide.\n"
         "Vérifiez que le fichier n'est pas corrompu ou protégé par mot de passe."
     )
+
 
 # ──────────────────────────────────────────────
 # Préparation des données
@@ -146,7 +203,7 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
     )
     # CORRIGÉ : kw.split()[0] renvoyait le préfixe générique ("CRPR" ou
     # "ATPL") pour les entrées composées de MP_KW/MPLAN_KW (ex: "CRPR ATPD"
-    # -> "CRPR"), pas le code de caractérisation utile. Le code specifique
+    # -> "CRPR"), pas le code de caractérisation utile. Le code spécifique
     # (ATPD/ATMR/ATER/ATRS/ATMO ou ATEI/ATAL/ATAS/AGAR/ATHS) est le DERNIER
     # mot de l'entrée. kw.split()[-1] fonctionne aussi bien pour les
     # entrées composées ("CRPR ATPD" -> "ATPD") que pour les entrées à un
