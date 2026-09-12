@@ -18,7 +18,34 @@ import io
 import pandas as pd
 import streamlit as st
 
-from core.generate_report import build_poste_report_pptx, SHORT_LABELS
+# CORRIGÉ : plus aucune dépendance à core/generate_report.py ni au PPTX.
+# La génération PowerPoint a été abandonnée au profit du PDF direct
+# (reportlab), et l'import de build_poste_report_pptx faisait échouer
+# tout le module quand cette fonction n'existait plus. SHORT_LABELS,
+# seule autre chose qui en venait, est défini ici.
+SHORT_LABELS = {
+    "TAUX_REALISATION_CORRECTIF/PT": "Réalisation correctif",
+    "OT préparation <1 mois": "Prépa <1m",
+    "OT préparation 1mois< <3mois": "Prépa 1-3m",
+    "OT préparation >3 mois": "Prépa >3m",
+    "OT planification <1 mois": "Planif <1m",
+    "OT planification 1mois< <3mois": "Planif 1-3m",
+    "OT planification >3 mois": "Planif >3m",
+    "OT exécution <1 mois": "Exéc <1m",
+    "OT exécution 1mois< <3mois": "Exéc 1-3m",
+    "OT exécution >3 mois": "Exéc >3m",
+    "Performance Graissage": "Graissage",
+    "Performance Inspection": "Inspection",
+    "Performance Systématiques": "Systématiques",
+    "Taux d'approbation des Avis": "Approbation avis",
+    "OT LANC ESTIME": "OT estimés",
+    "Backlog préparation caractérisé": "Backlog prépa",
+    "Backlog planification caractérisé": "Backlog planif",
+    "OT CONFIME": "OT confirmés",
+    "OT_COR_EGAL": "Coûts égaux",
+    "OT Fiabilité": "Fiabilité",
+    "Total Avis de Panne": "Avis panne",
+}
 from core.generate_report_pdf import build_poste_report_pdf
 from core.anomalies import build_anomaly_dfs
 from core.export_anomalies import build_anomalies_workbook
@@ -38,10 +65,10 @@ def generate_and_publish_poste_report(
 ):
     """
     Génère et publie (si dry_run=False) les fichiers pour UN poste.
-    Retourne un dict de statut : {"poste":, "pptx": bool, "pdf": bool,
+    Retourne un dict de statut : {"poste":, "pdf": bool,
     "xlsx": bool, "messages": [...]}.
     """
-    status = {"poste": poste, "pptx": False, "pdf": False, "xlsx": False, "messages": []}
+    status = {"poste": poste, "pdf": False, "xlsx": False, "messages": []}
     folder = _sanitize_poste_name(poste)
 
     # ── 1) Données KPI + anomalies + plan d'action pour ce poste ──
@@ -72,22 +99,6 @@ def generate_and_publish_poste_report(
             "action": ACT_MAP.get(kpi, ""),
         })
 
-    # ── 2) Génération PPTX (conservée, éditable par l'utilisateur) ──
-    try:
-        prs = build_poste_report_pptx(
-            poste=poste, pscore=pscore, qscore=qscore,
-            kpi_perf=kpi_perf, kpi_qual=kpi_qual, cibles=CIBLE,
-            anomalies=anomalies, total_anomalies=total_anomalies,
-            plan_action=plan_action, date_str=date_str,
-        )
-        buf = io.BytesIO()
-        prs.save(buf)
-        pptx_bytes = buf.getvalue()
-        status["pptx"] = True
-    except Exception as e:
-        status["messages"].append(f"Échec génération PPTX : {e}")
-        pptx_bytes = None
-
     # ── 3) Génération PDF — DIRECTEMENT via reportlab, sans LibreOffice ──
     try:
         pdf_bytes = build_poste_report_pdf(
@@ -115,7 +126,6 @@ def generate_and_publish_poste_report(
 
     if dry_run:
         status["messages"].append("Mode test (dry_run) : fichiers générés mais NON publiés sur GitHub.")
-        status["_pptx_bytes"] = pptx_bytes
         status["_pdf_bytes"] = pdf_bytes
         status["_xlsx_bytes"] = xlsx_bytes
         return status
@@ -161,7 +171,7 @@ def generate_and_publish_division_report(
     """
     from core.calcul_kpi import gscore
 
-    status = {"poste": division, "pptx": False, "pdf": False, "xlsx": None,
+    status = {"poste": division, "pdf": False, "xlsx": None,
               "messages": [], "est_division": True}
     folder = _sanitize_poste_name(division)
 
