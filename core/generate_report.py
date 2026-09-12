@@ -1,77 +1,61 @@
 # -*- coding: utf-8 -*-
 """
-Génère un rapport KPI (1 slide) par poste de travail, en Python pur
-(python-pptx) — pas de dépendance Node.js, exécutable directement dans
-l'app Streamlit après chaque recalcul.
+Génère un rapport KPI (1 page) par poste de travail, DIRECTEMENT en PDF
+via reportlab (Python pur) — AUCUNE dépendance à LibreOffice/soffice.
 
-Reproduit le design déjà validé (voir gen_sf1_ecu_1page.js) :
-- En-tête : poste, date, 3 badges (Score Performance / Score Qualité / Anomalies)
-- 2 tableaux KPI compacts (Performance / Qualité), sans colonne "Anomalies"
-- Graphique (barres horizontales bleues) : anomalies par indicateur, noms abrégés
-- Bloc "Suivi d'évolution" (1 date pour l'instant)
-- Tableau "Plan d'action" : TOUS les indicateurs en anomalie, avec colonne
-  "Nécessité action" (Oui=rouge / Non=vert) à la place du nombre d'anomalies
-- Crédit applicatif sous l'en-tête
+CONTEXTE : la génération PDF reposait initialement sur une conversion
+PPTX -> PDF via LibreOffice (subprocess "soffice --headless
+--convert-to pdf"). Ce mécanisme s'est révélé fragile sur Streamlit
+Cloud : la suppression de packages.txt (nécessaire pour résoudre un
+échec de déploiement lié à un dépôt Debian expiré côté plateforme) a
+entraîné la disparition de LibreOffice, et donc l'échec systématique
+de la génération PDF (0/29 postes), sans affecter la génération Excel
+(pure Python). Cette version reconstruit le même contenu directement
+en PDF, éliminant cette dépendance système fragile.
 """
-from pptx import Presentation
-from pptx.util import Inches, Pt, Emu
-from pptx.dml.color import RGBColor
-from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
-from pptx.enum.shapes import MSO_SHAPE
-from pptx.chart.data import CategoryChartData
-from pptx.enum.chart import XL_CHART_TYPE, XL_LABEL_POSITION, XL_LEGEND_POSITION
-from pptx.oxml.ns import qn
+import io
+
+import matplotlib
+matplotlib.use("Agg")
+import matplotlib.pyplot as plt
+
+from reportlab.lib.pagesizes import landscape, A4
+from reportlab.lib.units import cm
+from reportlab.lib import colors
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image
+from reportlab.lib.enums import TA_LEFT, TA_CENTER
 
 from core.constants import LOWER_BETTER
 
-# ── Palette ──
-NAVY = RGBColor(0x1E, 0x3A, 0x5F)
-GREEN = RGBColor(0x10, 0xB9, 0x81)
-ORANGE = RGBColor(0xF5, 0x9E, 0x0B)
-RED = RGBColor(0xEF, 0x44, 0x44)
-BLUE = RGBColor(0x25, 0x63, 0xEB)
-GREY = RGBColor(0x64, 0x74, 0x8B)
-LGREY = RGBColor(0xF1, 0xF5, 0xF9)
-WHITE = RGBColor(0xFF, 0xFF, 0xFF)
-DARK = RGBColor(0x1E, 0x29, 0x3B)
-GREEN_ACCENT = RGBColor(0x05, 0x96, 0x69)
-BLUE_ACCENT = RGBColor(0x25, 0x63, 0xEB)
-
-SHORT_LABELS = {
-    "TAUX_REALISATION_CORRECTIF/PT": "Taux Réal. Correctif",
-    "OT préparation <1 mois": "Prép. <1 mois",
-    "OT préparation 1mois< <3mois": "Prép. 1-3 mois",
-    "OT préparation >3 mois": "Prép. >3 mois",
-    "OT planification <1 mois": "Planif. <1 mois",
-    "OT planification 1mois< <3mois": "Planif. 1-3 mois",
-    "OT planification >3 mois": "Planif. >3 mois",
-    "OT exécution <1 mois": "Exéc. <1 mois",
-    "OT exécution 1mois< <3mois": "Exéc. 1-3 mois",
-    "OT exécution >3 mois": "Exéc. >3 mois",
-    "Performance Graissage": "Perf. Graissage",
-    "Performance Inspection": "Perf. Inspection",
-    "Performance Systématiques": "Perf. Systématiques",
-    "Taux d'approbation des Avis": "Approb. Avis",
-    "OT LANC ESTIME": "OT Lancé Estimé",
-    "Backlog préparation caractérisé": "Backlog Prép. Caract.",
-    "Backlog planification caractérisé": "Backlog Planif. Caract.",
-    "OT CONFIME": "OT Confirmé",
-    "OT_COR_EGAL": "OT Coût Égal",
-    "OT Fiabilité": "OT Fiabilité",
-    "Total Avis de Panne": "Avis de Panne",
-}
-
-APP_URL = "https://tableaubordmc.streamlit.app"
+NAVY = colors.HexColor("#1E3A5F")
+GREEN = colors.HexColor("#10B981")
+ORANGE = colors.HexColor("#F59E0B")
+RED = colors.HexColor("#EF4444")
+BLUE = colors.HexColor("#2563EB")
+GREY = colors.HexColor("#64748B")
+LGREY = colors.HexColor("#F1F5F9")
+WHITE = colors.white
+DARK = colors.HexColor("#1E293B")
 
 
-def _color_for(val: float, cible: float, lower: bool) -> RGBColor:
-    # CORRIGÉ : arrondi à l'entier AVANT comparaison (même précision que
-    # l'affichage "f'{v:.0f}%'" dans les tableaux). Sans ça, une valeur
-    # comme 99.52% s'affiche "100%" mais était comparée à la cible sans
-    # arrondi (99.52 < 100) -> colorée orange alors que l'utilisateur voit
-    # "100%" et s'attend à du vert. Avec l'arrondi, round(99.52)=100
-    # correspond bien à la cible -> vert, cohérent avec l'affichage.
+def _color_for(val, cible, lower, mode_conformite=False):
+    """Couleur d'une cellule de valeur KPI.
+
+    mode_conformite=True : la valeur reçue est un TAUX DE CONFORMITÉ
+    (% de postes conformes sur ce KPI) et non la valeur brute du KPI.
+    Pour ce taux, plus c'est haut mieux c'est — quelle que soit la
+    nature du KPI. Sans ce mode, un taux de conformité de 96% sur un
+    indicateur « plus bas = mieux » serait affiché en rouge, car
+    interprété comme « 96% des OT sont en retard ».
+    """
     val = round(val)
+    if mode_conformite:
+        if val >= 90:
+            return GREEN
+        if val >= 70:
+            return ORANGE
+        return RED
     if lower:
         if val <= cible:
             return GREEN
@@ -86,238 +70,163 @@ def _color_for(val: float, cible: float, lower: bool) -> RGBColor:
         return RED
 
 
-def _set_cell(cell, text, size=8, color=DARK, bold=False, bg=None, align=PP_ALIGN.LEFT):
-    cell.text = text
-    p = cell.text_frame.paragraphs[0]
-    p.alignment = align
-    if not p.runs:
-        p.add_run()
-    for run in p.runs:
-        run.font.size = Pt(size)
-        run.font.bold = bold
-        run.font.color.rgb = color
-        run.font.name = "Arial"
-    cell.vertical_anchor = MSO_ANCHOR.MIDDLE
-    cell.margin_left = Emu(18288)
-    cell.margin_right = Emu(18288)
-    cell.margin_top = Emu(0)
-    cell.margin_bottom = Emu(0)
-    if bg is not None:
-        cell.fill.solid()
-        cell.fill.fore_color.rgb = bg
-    else:
-        cell.fill.solid()
-        cell.fill.fore_color.rgb = WHITE
+def _kpi_table_flowable(title, kpi_dict, cibles, accent_hex, styles, mode_conformite=False):
+    accent = colors.HexColor(accent_hex)
+    rows = [["Indicateur", "Val.", "Cible"]]
+    cell_colors = []
+    for k, v in kpi_dict.items():
+        cible = cibles[k]
+        lower = k in LOWER_BETTER
+        c = _color_for(v, cible, lower, mode_conformite)
+        rows.append([k, f"{v:.0f}%", f"{'≤' if lower else '≥'}{cible:.0f}"])
+        cell_colors.append(c)
+
+    t = Table(rows, colWidths=[6.2 * cm, 1.6 * cm, 1.6 * cm])
+    style = [
+        ("BACKGROUND", (0, 0), (-1, 0), accent),
+        ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
+        ("FONTSIZE", (0, 0), (-1, -1), 7.5),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"),
+        ("ALIGN", (1, 0), (-1, -1), "CENTER"),
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#E2E8F0")),
+        ("TOPPADDING", (0, 0), (-1, -1), 3),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+    ]
+    for i, c in enumerate(cell_colors, start=1):
+        style.append(("BACKGROUND", (1, i), (1, i), c))
+        style.append(("TEXTCOLOR", (1, i), (1, i), WHITE))
+        style.append(("FONTNAME", (1, i), (1, i), "Helvetica-Bold"))
+    t.setStyle(TableStyle(style))
+    return t
 
 
-def _remove_default_shadow(shape):
-    """Desactive proprement l'effet d'ombre par defaut applique par
-    PowerPoint/LibreOffice aux formes, SANS toucher au reste de spPr
-    (contrairement a shape.shadow._element, qui pointe en fait sur le
-    spPr entier quand aucune ombre n'existe deja -> le supprimer effacait
-    aussi le remplissage/bordure qu'on venait de definir juste avant)."""
-    spPr = shape._element.spPr
-    # Ajoute un effectLst vide -> "pas d'effet" explicite, sans supprimer spPr.
-    existing = spPr.find(qn('a:effectLst'))
-    if existing is not None:
-        spPr.remove(existing)
-    from lxml import etree
-    effect_lst = etree.SubElement(spPr, qn('a:effectLst'))
+def _graphique_anomalies_image(anomalies, short_labels):
+    ano_entries = sorted([(k, v) for k, v in anomalies.items() if v > 0], key=lambda x: x[1])
+    if not ano_entries:
+        return None
+    labels = [short_labels.get(k, k) for k, _ in ano_entries]
+    valeurs = [v for _, v in ano_entries]
+
+    fig, ax = plt.subplots(figsize=(4.2, 3.6), dpi=150)
+    bars = ax.barh(labels, valeurs, color="#2563EB", height=0.6)
+    for bar, v in zip(bars, valeurs):
+        ax.text(bar.get_width() + max(valeurs) * 0.02, bar.get_y() + bar.get_height() / 2,
+                str(v), va="center", fontsize=7, color="#1E293B")
+    ax.set_xticks([])
+    ax.tick_params(axis="y", labelsize=7)
+    for spine in ["top", "right", "bottom"]:
+        ax.spines[spine].set_visible(False)
+    plt.tight_layout(pad=0.3)
+    buf = io.BytesIO()
+    plt.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    buf.seek(0)
+    return buf
 
 
-def build_poste_report_pptx(
-    poste: str, pscore: float, qscore: float,
-    kpi_perf: dict, kpi_qual: dict, cibles: dict,
-    anomalies: dict, total_anomalies: int, plan_action: list,
-    date_str: str,
-) -> Presentation:
-    """Construit et retourne l'objet Presentation (1 slide) pour un poste."""
-    prs = Presentation()
-    prs.slide_width = Inches(13.333)
-    prs.slide_height = Inches(7.5)
-    slide = prs.slides.add_slide(prs.slide_layouts[6])  # layout vide
+def build_poste_report_pdf(
+    poste, pscore, qscore, kpi_perf, kpi_qual, cibles,
+    anomalies, total_anomalies, plan_action, date_str,
+    short_labels=None, mode_conformite=False,
+):
+    """Construit et retourne les bytes PDF (1 page, paysage) pour un poste — équivalent direct de build_poste_report_pptx, sans LibreOffice."""
+    short_labels = short_labels or {}
+    styles = getSampleStyleSheet()
+    styles.add(ParagraphStyle(name="TitrePoste", fontSize=20, textColor=WHITE, fontName="Helvetica-Bold", leading=24))
+    styles.add(ParagraphStyle(name="SousTitre", fontSize=9, textColor=colors.HexColor("#CBD5E1")))
+    styles.add(ParagraphStyle(name="SectionTitre", fontSize=10.5, textColor=NAVY, fontName="Helvetica-Bold", spaceBefore=8, spaceAfter=4))
+    styles.add(ParagraphStyle(name="Corps", fontSize=8.5, fontName="Helvetica", leading=11))
+    styles.add(ParagraphStyle(name="CorpsBlanc", fontSize=8.5, fontName="Helvetica", leading=11, textColor=WHITE))
 
-    def add_rect(x, y, w, h, color, shape_type=MSO_SHAPE.RECTANGLE, radius=None):
-        sh = slide.shapes.add_shape(shape_type, Inches(x), Inches(y), Inches(w), Inches(h))
-        sh.fill.solid()
-        sh.fill.fore_color.rgb = color
-        sh.line.fill.background()
-        _remove_default_shadow(sh)
-        if radius is not None and shape_type == MSO_SHAPE.ROUNDED_RECTANGLE:
-            try:
-                sh.adjustments[0] = radius
-            except Exception:
-                pass
-        return sh
+    story = []
 
-    def add_text(x, y, w, h, text, size=10, color=DARK, bold=False, italic=False, align=PP_ALIGN.LEFT):
-        tb = slide.shapes.add_textbox(Inches(x), Inches(y), Inches(w), Inches(h))
-        tf = tb.text_frame
-        tf.word_wrap = True
-        tf.margin_left = 0
-        tf.margin_right = 0
-        tf.margin_top = 0
-        tf.margin_bottom = 0
-        p = tf.paragraphs[0]
-        p.alignment = align
-        run = p.add_run()
-        run.text = text
-        run.font.size = Pt(size)
-        run.font.bold = bold
-        run.font.italic = italic
-        run.font.color.rgb = color
-        run.font.name = "Arial"
-        return tb
-
-    # ══════════════════════════════════════════════════════════════
-    # EN-TÊTE
-    # ══════════════════════════════════════════════════════════════
-    add_rect(0, 0, 13.333, 0.95, NAVY)
-    add_text(0.35, 0.12, 5.5, 0.5, poste, size=26, color=WHITE, bold=True)
-    add_text(0.35, 0.6, 6.5, 0.3, f"Rapport KPI Performance & Qualité — SAP PM OCP  •  {date_str}",
-             size=10.5, color=RGBColor(0xCB, 0xD5, 0xE1))
-    add_text(0.35, 0.99, 6.5, 0.16, f"Généré automatiquement depuis l'application {APP_URL}",
-             size=7.5, color=RGBColor(0x94, 0xA3, 0xB8), italic=True)
-
-    def badge(x, label, value, color):
-        add_rect(x, 0.13, 2.05, 0.7, WHITE, MSO_SHAPE.ROUNDED_RECTANGLE, radius=0.12)
-        add_text(x + 0.08, 0.17, 1.9, 0.24, label, size=8.5, bold=True, color=GREY)
-        add_text(x + 0.08, 0.38, 1.9, 0.4, value, size=20, bold=True, color=color)
-
+    # ── En-tête (bandeau bleu marine avec 3 badges de score) ──
     p_color = GREEN if pscore >= 90 else (ORANGE if pscore >= 80 else RED)
     q_color = GREEN if qscore >= 90 else (ORANGE if qscore >= 80 else RED)
-    badge(6.95, "SCORE PERFORMANCE", f"{pscore:.1f}%", p_color)
-    badge(9.1, "SCORE QUALITÉ", f"{qscore:.1f}%", q_color)
-    badge(11.25, "ANOMALIES", str(total_anomalies), RED)
 
-    # ══════════════════════════════════════════════════════════════
-    # Tableaux KPI (Performance / Qualité) — sans colonne Anomalies
-    # ══════════════════════════════════════════════════════════════
-    def kpi_table(x, y, w, title, kpi_dict, accent):
-        add_text(x, y, w, 0.24, title, size=11, bold=True, color=accent)
-        n = len(kpi_dict)
-        rows, cols = n + 1, 3
-        row_h = 0.185
-        gts = slide.shapes.add_table(rows, cols, Inches(x), Inches(y + 0.26), Inches(w), Inches(row_h * rows))
-        tbl = gts.table
-        tbl.columns[0].width = Inches(w * 0.68)
-        tbl.columns[1].width = Inches(w * 0.16)
-        tbl.columns[2].width = Inches(w * 0.16)
-        for j, h in enumerate(["Indicateur", "Val.", "Cible"]):
-            _set_cell(tbl.cell(0, j), h, size=7.5, color=WHITE, bold=True, bg=accent,
-                      align=PP_ALIGN.LEFT if j == 0 else PP_ALIGN.CENTER)
-        for i, (k, v) in enumerate(kpi_dict.items(), start=1):
-            cible = cibles[k]
-            lower = k in LOWER_BETTER
-            c = _color_for(v, cible, lower)
-            _set_cell(tbl.cell(i, 0), k, size=7.3, color=DARK)
-            _set_cell(tbl.cell(i, 1), f"{v:.0f}%", size=7.3, color=WHITE, bold=True, bg=c, align=PP_ALIGN.CENTER)
-            _set_cell(tbl.cell(i, 2), f"{'≤' if lower else '≥'}{cible:.0f}", size=7, color=GREY, align=PP_ALIGN.CENTER)
-        for r in tbl.rows:
-            r.height = Inches(row_h)
-        return tbl
+    entete_gauche = [
+        Paragraph(poste, styles["TitrePoste"]),
+        Spacer(1, 8),
+        Paragraph(f"Rapport KPI Performance & Qualité — SAP PM OCP • {date_str}", styles["SousTitre"]),
+    ]
+    badge_style = ParagraphStyle(name="Badge", fontSize=8, fontName="Helvetica-Bold", textColor=GREY, alignment=TA_CENTER)
 
-    kpi_table(0.35, 1.12, 4.15, "INDICATEURS DE PERFORMANCE", kpi_perf, GREEN_ACCENT)
-    kpi_table(4.7, 1.12, 4.15, "INDICATEURS DE QUALITÉ", kpi_qual, BLUE_ACCENT)
+    def badge_cell(label, valeur, couleur):
+        vs = ParagraphStyle(name="BadgeVal", fontSize=16, fontName="Helvetica-Bold", textColor=couleur, alignment=TA_CENTER)
+        return [Paragraph(label, badge_style), Paragraph(valeur, vs)]
 
-    # ══════════════════════════════════════════════════════════════
-    # Graphique anomalies par indicateur (barres horizontales bleues)
-    # ══════════════════════════════════════════════════════════════
-    ano_entries = sorted([(k, v) for k, v in anomalies.items() if v > 0], key=lambda x: x[1])
-    add_text(9.15, 1.12, 3.85, 0.24, "ANOMALIES PAR INDICATEUR", size=11, bold=True, color=BLUE_ACCENT)
+    badges_table = Table([[
+        badge_cell("SCORE PERFORMANCE", f"{pscore:.1f}%", p_color),
+        badge_cell("SCORE QUALITÉ", f"{qscore:.1f}%", q_color),
+        badge_cell("ANOMALIES", str(total_anomalies), RED),
+    ]], colWidths=[4 * cm, 4 * cm, 3 * cm])
+    badges_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), WHITE), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("BOX", (0, 0), (0, 0), 0.5, colors.HexColor("#E2E8F0")), ("BOX", (1, 0), (1, 0), 0.5, colors.HexColor("#E2E8F0")),
+        ("BOX", (2, 0), (2, 0), 0.5, colors.HexColor("#E2E8F0")),
+    ]))
 
-    if ano_entries:
-        chart_data = CategoryChartData()
-        chart_data.categories = [SHORT_LABELS.get(k, k) for k, _ in ano_entries]
-        chart_data.add_series("Anomalies", [v for _, v in ano_entries])
-        gframe = slide.shapes.add_chart(
-            XL_CHART_TYPE.BAR_CLUSTERED, Inches(9.15), Inches(1.38), Inches(3.85), Inches(3.55), chart_data
-        )
-        chart = gframe.chart
-        chart.has_legend = False
-        chart.has_title = False
-        plot = chart.plots[0]
-        plot.has_data_labels = True
-        dl = plot.data_labels
-        dl.font.size = Pt(6.8)
-        dl.font.color.rgb = DARK
-        dl.position = XL_LABEL_POSITION.OUTSIDE_END
-        series = plot.series[0]
-        series.format.fill.solid()
-        series.format.fill.fore_color.rgb = BLUE_ACCENT
-        plot.gap_width = 25
-        cat_ax = chart.category_axis
-        cat_ax.tick_labels.font.size = Pt(6.8)
-        cat_ax.tick_labels.font.color.rgb = DARK
-        cat_ax.has_major_gridlines = False
-        cat_ax.format.line.fill.background()
-        val_ax = chart.value_axis
-        val_ax.visible = False
-        val_ax.has_major_gridlines = False
+    entete_table = Table([[entete_gauche, badges_table]], colWidths=[16 * cm, 11 * cm])
+    entete_table.setStyle(TableStyle([
+        ("BACKGROUND", (0, 0), (-1, -1), NAVY), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("LEFTPADDING", (0, 0), (0, 0), 14), ("TOPPADDING", (0, 0), (-1, -1), 10), ("BOTTOMPADDING", (0, 0), (-1, -1), 10),
+    ]))
+    story.append(entete_table)
+    story.append(Spacer(1, 10))
+
+    # ── Tableaux KPI + graphique anomalies (3 colonnes) ──
+    perf_flow = [Paragraph("INDICATEURS DE PERFORMANCE", ParagraphStyle(name="t1", fontSize=9.5, fontName="Helvetica-Bold", textColor=colors.HexColor("#059669"))),
+                 Spacer(1, 4), _kpi_table_flowable("Performance", kpi_perf, cibles, "#059669", styles, mode_conformite)]
+    qual_flow = [Paragraph("INDICATEURS DE QUALITÉ", ParagraphStyle(name="t2", fontSize=9.5, fontName="Helvetica-Bold", textColor=BLUE)),
+                 Spacer(1, 4), _kpi_table_flowable("Qualité", kpi_qual, cibles, "#2563EB", styles, mode_conformite)]
+
+    img_buf = _graphique_anomalies_image(anomalies, short_labels)
+    if img_buf:
+        chart_flow = [Paragraph("ANOMALIES PAR INDICATEUR", ParagraphStyle(name="t3", fontSize=9.5, fontName="Helvetica-Bold", textColor=BLUE)),
+                      Spacer(1, 4), Image(img_buf, width=8 * cm, height=6.8 * cm)]
     else:
-        add_text(9.15, 1.5, 3.85, 0.4, "Aucune anomalie sur ce poste.", size=10, color=GREY, italic=True)
+        chart_flow = [Paragraph("ANOMALIES PAR INDICATEUR", ParagraphStyle(name="t3", fontSize=9.5, fontName="Helvetica-Bold", textColor=BLUE)),
+                      Spacer(1, 4), Paragraph("Aucune anomalie sur ce poste.", styles["Corps"])]
 
-    # ══════════════════════════════════════════════════════════════
-    # Suivi d'évolution (compact — historique limité pour l'instant)
-    # ══════════════════════════════════════════════════════════════
-    add_text(9.15, 5.1, 3.85, 0.24, "SUIVI D'ÉVOLUTION", size=11, bold=True, color=NAVY)
-    add_rect(9.15, 5.35, 3.85, 1.85, LGREY, MSO_SHAPE.ROUNDED_RECTANGLE, radius=0.05)
+    trois_colonnes = Table([[perf_flow, qual_flow, chart_flow]], colWidths=[9.2 * cm, 9.2 * cm, 9 * cm])
+    trois_colonnes.setStyle(TableStyle([("VALIGN", (0, 0), (-1, -1), "TOP")]))
+    story.append(trois_colonnes)
+    story.append(Spacer(1, 12))
 
-    evo_box = slide.shapes.add_textbox(Inches(9.3), Inches(5.45), Inches(3.6), Inches(1.65))
-    tf = evo_box.text_frame
-    tf.word_wrap = True
-    tf.margin_left = 0
-    tf.margin_top = 0
-
-    def evo_line(text_parts, first=False):
-        p = tf.paragraphs[0] if first else tf.add_paragraph()
-        for txt, color, bold, size in text_parts:
-            r = p.add_run()
-            r.text = txt
-            r.font.size = Pt(size)
-            r.font.bold = bold
-            r.font.color.rgb = color
-            r.font.name = "Arial"
-        return p
-
-    evo_line([("●  ", GREEN, True, 10), (f"Performance : {pscore:.1f}%", DARK, True, 10)], first=True)
-    evo_line([("●  ", BLUE, True, 10), (f"Qualité : {qscore:.1f}%", DARK, True, 10)])
-    evo_line([("●  ", RED, True, 10), (f"Anomalies : {total_anomalies}", DARK, True, 10)])
-    evo_line([("", DARK, False, 6)])
-    evo_line([("1 seule date enregistrée — tendance disponible dès la 2e extraction.", GREY, False, 8)])
-    for p in tf.paragraphs:
-        p.space_after = Pt(4)
-
-    # ══════════════════════════════════════════════════════════════
-    # Plan d'action — TOUS les indicateurs en anomalie
-    # ══════════════════════════════════════════════════════════════
+    # ── Plan d'action ──
     plan_sorted = sorted(plan_action, key=lambda p: -p["nb_anom"])
-    add_text(0.35, 4.55, 8.5, 0.24, f"PLAN D'ACTION — TOUS LES INDICATEURS EN ANOMALIE ({len(plan_sorted)})",
-             size=11, bold=True, color=NAVY)
+    story.append(Paragraph(f"PLAN D'ACTION — TOUS LES INDICATEURS EN ANOMALIE ({len(plan_sorted)})", styles["SectionTitre"]))
 
-    n = len(plan_sorted)
-    rows, cols = n + 1, 5
-    row_h = 0.185
-    gts = slide.shapes.add_table(rows, cols, Inches(0.35), Inches(4.82), Inches(8.5), Inches(row_h * rows))
-    tbl = gts.table
-    col_widths = [2.0, 0.6, 0.85, 1.05, 4.0]
-    for j, cw in enumerate(col_widths):
-        tbl.columns[j].width = Inches(cw)
-    headers = ["Indicateur", "Écart", "Nécessité action", "Responsable", "Action"]
-    for j, h in enumerate(headers):
-        _set_cell(tbl.cell(0, j), h, size=6.8, color=WHITE, bold=True, bg=NAVY,
-                  align=PP_ALIGN.LEFT if j in (0, 4) else PP_ALIGN.CENTER)
-    for i, p_row in enumerate(plan_sorted, start=1):
-        ecart = p_row["ecart"]
-        needs_action = ecart < 0
-        ecart_txt = f"{'+' if ecart > 0 else ''}{ecart}%"
-        _set_cell(tbl.cell(i, 0), p_row["kpi"], size=6.8, color=DARK)
-        _set_cell(tbl.cell(i, 1), ecart_txt, size=6.8, color=(RED if ecart < 0 else GREEN), bold=True, align=PP_ALIGN.CENTER)
-        _set_cell(tbl.cell(i, 2), "Oui" if needs_action else "Non", size=7, color=WHITE, bold=True,
-                  bg=(RED if needs_action else GREEN), align=PP_ALIGN.CENTER)
-        _set_cell(tbl.cell(i, 3), p_row["responsable"], size=6.6, color=DARK)
-        _set_cell(tbl.cell(i, 4), p_row["action"], size=6.0, color=GREY)
-    for r in tbl.rows:
-        r.height = Inches(row_h)
+    cell_style = ParagraphStyle(name="cell", fontSize=7.5, fontName="Helvetica", leading=9)
+    rows = [["Indicateur", "Écart", "Nécessité action", "Responsable", "Action"]]
+    necessite_colors = []
+    for p in plan_sorted:
+        necessite = "Oui" if p["nb_anom"] > 0 else "Non"
+        necessite_colors.append(RED if necessite == "Oui" else GREEN)
+        rows.append([
+            Paragraph(p["kpi"], cell_style), f"{p['ecart']:+.1f}", necessite,
+            Paragraph(p["responsable"], cell_style), Paragraph(p["action"], cell_style),
+        ])
+    t = Table(rows, colWidths=[4.5 * cm, 1.8 * cm, 2.8 * cm, 3.5 * cm, 14.4 * cm])
+    style = [
+        ("BACKGROUND", (0, 0), (-1, 0), NAVY), ("TEXTCOLOR", (0, 0), (-1, 0), WHITE),
+        ("FONTNAME", (0, 0), (-1, 0), "Helvetica-Bold"), ("FONTSIZE", (0, 0), (-1, -1), 7.5),
+        ("ALIGN", (1, 0), (2, -1), "CENTER"), ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#E2E8F0")),
+        ("TOPPADDING", (0, 0), (-1, -1), 3), ("BOTTOMPADDING", (0, 0), (-1, -1), 3),
+        ("ROWBACKGROUNDS", (0, 1), (-1, -1), [WHITE, LGREY]),
+    ]
+    for i, c in enumerate(necessite_colors, start=1):
+        style.append(("BACKGROUND", (2, i), (2, i), c))
+        style.append(("TEXTCOLOR", (2, i), (2, i), WHITE))
+        style.append(("FONTNAME", (2, i), (2, i), "Helvetica-Bold"))
+    t.setStyle(TableStyle(style))
+    story.append(t)
 
-    return prs
+    buf = io.BytesIO()
+    doc = SimpleDocTemplate(buf, pagesize=landscape(A4), topMargin=1 * cm, bottomMargin=1 * cm,
+                             leftMargin=1 * cm, rightMargin=1 * cm)
+    doc.build(story)
+    buf.seek(0)
+    return buf.getvalue()
