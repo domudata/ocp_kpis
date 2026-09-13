@@ -11,31 +11,46 @@ from core.constants import MP_KW, MPLAN_KW
 # Utilitaires basiques
 # ──────────────────────────────────────────────
 
-@st.cache_data(show_spinner=False, ttl=60)
+@st.cache_data(show_spinner=False, ttl=300)
 def _lire_date_github():
     """Lit date.txt directement depuis le dépôt GitHub configuré.
 
-    Cache court (60 s) : évite un appel réseau à chaque interaction avec
-    l'application, tout en garantissant qu'un nouveau commit sur date.txt
-    est pris en compte en moins d'une minute.
+    PROTECTION CONTRE LES BLOCAGES (ajoutée après incident) : si le jeton
+    GitHub est invalide, expiré ou révoqué, chaque appel réseau échoue
+    après un délai d'attente. Répété à chaque interaction de
+    l'utilisateur, ce comportement saturait l'application jusqu'à la
+    faire redémarrer en boucle. Trois garde-fous sont donc en place :
+
+      1. cache de 300 s (au lieu de 60 s) : au maximum un appel réseau
+         toutes les 5 minutes, quel que soit le nombre d'interactions ;
+      2. drapeau de session : après un premier échec, plus aucune
+         tentative n'est faite pendant la session en cours ;
+      3. l'appel réseau est encapsulé dans un try/except large : aucune
+         exception ne peut remonter jusqu'à l'interface.
 
     Retourne (date_str, source) ou (None, message_erreur).
     """
+    # Garde-fou 2 : ne pas réessayer si un échec a déjà eu lieu
+    if st.session_state.get("_github_date_indisponible"):
+        return None, "GitHub désactivé pour cette session (échec précédent)"
+
     try:
         from core.github_publish import download_file, is_configured
-    except Exception:
-        return None, "module github_publish indisponible"
-    if not is_configured():
-        return None, "GitHub non configuré"
-    contenu, err = download_file("date.txt")
-    if contenu:
-        try:
+        if not is_configured():
+            st.session_state["_github_date_indisponible"] = True
+            return None, "GitHub non configuré"
+        contenu, err = download_file("date.txt")
+        if contenu:
             valeur = contenu.decode("utf-8").strip()
             if valeur:
                 return valeur, "GitHub"
-        except Exception as e:
-            return None, f"contenu illisible : {e}"
-    return None, err or "date.txt absent du dépôt"
+        st.session_state["_github_date_indisponible"] = True
+        return None, err or "date.txt absent du dépôt"
+    except Exception as e:
+        # Garde-fou 3 : toute erreur (réseau, jeton, décodage) désactive
+        # la lecture distante sans jamais interrompre l'application.
+        st.session_state["_github_date_indisponible"] = True
+        return None, f"lecture GitHub impossible : {e}"
 
 
 def get_date_from_file() -> str:
