@@ -19,7 +19,7 @@ import requests
 import streamlit as st
 
 API_ROOT = "https://api.github.com"
-TIMEOUT = 30
+TIMEOUT = 8
 
 
 def _get_config():
