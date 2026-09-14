@@ -144,8 +144,13 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
             raw_av[c] = pd.to_datetime(raw_av[c], errors="coerce")
 
     now_ts = pd.Timestamp.today()
+    # NOTE : pas de copie "df_toutes_dates" ici — inutile. La valeur "df"
+    # retournée par cette fonction EST déjà la version complète, sans
+    # aucun filtre de date (le filtre de période est appliqué plus tard,
+    # dans app.py, uniquement sur la copie destinée aux autres KPI).
+    # app.py réutilise directement ce "df" (sous le nom df_full) comme
+    # df_toutes_dates lors de l'appel à calc_kpis().
     df = raw_ot.copy()
-    df_toutes_dates = raw_ot.copy()
 
     df["Backlog preparation"] = np.where(
         df["Statut utilisateur"].apply(lambda x: contient_mot(x, MP_KW)),
@@ -211,4 +216,10 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
         ]["Poste travail princ."].dropna().unique().tolist()
     )
 
-    return df, avf, apm, now_ts
+    # AJOUTÉ : avis complet (non restreint aux types ZU/Z4/ZR/ZP), destiné
+    # aux usages autres que le Taux d'approbation des Avis — notamment le
+    # suivi HSE, qui a besoin des types ZI (Inspection) et ZH (HSE),
+    # structurellement absents de "avf" ci-dessus.
+    avis_complet = raw_av.copy()
+
+    return df, avf, apm, now_ts, avis_complet
