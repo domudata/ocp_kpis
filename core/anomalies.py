@@ -18,9 +18,15 @@ def _backlogs_non_caracterises(dfp_all: pd.DataFrame):
     ]
     non_prep = zcor_cree[~zcor_cree["Statut utilisateur"].apply(lambda x: match_exact_token(x, CODES_PREP_EXACT))]
 
-    zcor_lanc = zcor[
-        zcor["Statut système"].fillna("").astype(str).str.strip().str.split().str[0] == "LANC"
-    ]
+    zcor_lanc =zcor[
+    (zcor["Statut système"]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+        .str.split()
+        .str[0] == "LANC")
+    & (zcor["Contient SOPL"] == 0)
+]
     non_plan = zcor_lanc[~zcor_lanc["Statut utilisateur"].apply(lambda x: match_exact_token(x, CODES_PLAN_EXACT))]
     return non_prep, non_plan
 
