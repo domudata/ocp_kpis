@@ -105,6 +105,18 @@ def main() -> None:
     [data-testid="stDecoration"] { display: none !important; }
     #MainMenu { visibility: hidden !important; }
     header { visibility: hidden !important; }
+    /* CORRIGÉ : le bouton "◀ ▶" qui affiche/masque le sidebar vit dans le
+       même conteneur que le header masqué ci-dessus. Sans cette règle, si
+       le sidebar se replie (fréquent sur petit écran / mobile), il devient
+       impossible de le rouvrir — le bouton étant lui aussi invisible. */
+    [data-testid="collapsedControl"] {
+        visibility: visible !important;
+        display: block !important;
+        position: fixed !important;
+        top: 0.5rem !important;
+        left: 0.5rem !important;
+        z-index: 999999 !important;
+    }
     footer { visibility: hidden !important; }
     .stAppDeployButton { display: none !important; }
     .viewerBadge_container__1QSob { display: none !important; }
@@ -274,6 +286,15 @@ def main() -> None:
         # ═══════════════════════════════════════════════════════════════
         ano_map = build_ano_map(dfp, avf, now_ts, dfp_toutes_dates=df_full)
 
+        # ── Score des CARTES SF1/SF2 — IDENTIQUE À TOTAL GÉNÉRAL (demande
+        # explicite) : réutilise EXACTEMENT calc_score_cellules(), la même
+        # fonction qui calcule tot_p["Score Performance"] / tot_q["Score
+        # Qualite"] plus bas (calc_score_cellules(vp, QK) / (vp, PK)).
+        # Seul le périmètre de postes change (sf1_posts/sf2_posts au lieu
+        # de vp) — la formule est rigoureusement la même, garantissant
+        # qu'une carte affiche la même valeur que Total général lorsque le
+        # filtre du tableau de bord ne retient que les postes de cette
+        # division.
         sf1_p = int(calc_score_cellules(sf1_posts, QK))
         sf1_q = int(calc_score_cellules(sf1_posts, PK))
         sf2_p = int(calc_score_cellules(sf2_posts, QK))
