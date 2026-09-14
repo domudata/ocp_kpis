@@ -15,25 +15,17 @@ from core.constants import MP_KW, MPLAN_KW
 def _lire_date_github():
     """Lit date.txt directement depuis le dépôt GitHub configuré.
 
-    PROTECTION CONTRE LES BLOCAGES (ajoutée après incident) : si le jeton
-    GitHub est invalide, expiré ou révoqué, chaque appel réseau échoue
-    après un délai d'attente. Répété à chaque interaction de
-    l'utilisateur, ce comportement saturait l'application jusqu'à la
-    faire redémarrer en boucle. Trois garde-fous sont donc en place :
-
-      1. cache de 300 s (au lieu de 60 s) : au maximum un appel réseau
-         toutes les 5 minutes, quel que soit le nombre d'interactions ;
+    PROTECTION ANTI-GEL (seul ajout de ce fichier) : si le jeton GitHub
+    est invalide/expiré, un appel réseau sans protection peut bloquer
+    l'application (tourne indéfiniment, sans message d'erreur visible)
+    car Streamlit relance ce code à chaque interaction. Trois garde-fous :
+      1. cache 300 s : au plus un appel réseau toutes les 5 minutes ;
       2. drapeau de session : après un premier échec, plus aucune
          tentative n'est faite pendant la session en cours ;
-      3. l'appel réseau est encapsulé dans un try/except large : aucune
-         exception ne peut remonter jusqu'à l'interface.
-
-    Retourne (date_str, source) ou (None, message_erreur).
+      3. try/except large : aucune exception ne remonte à l'interface.
     """
-    # Garde-fou 2 : ne pas réessayer si un échec a déjà eu lieu
     if st.session_state.get("_github_date_indisponible"):
         return None, "GitHub désactivé pour cette session (échec précédent)"
-
     try:
         from core.github_publish import download_file, is_configured
         if not is_configured():
@@ -47,35 +39,17 @@ def _lire_date_github():
         st.session_state["_github_date_indisponible"] = True
         return None, err or "date.txt absent du dépôt"
     except Exception as e:
-        # Garde-fou 3 : toute erreur (réseau, jeton, décodage) désactive
-        # la lecture distante sans jamais interrompre l'application.
         st.session_state["_github_date_indisponible"] = True
         return None, f"lecture GitHub impossible : {e}"
 
 
 def get_date_from_file() -> str:
-    """
-    Date de l'extraction courante, lue EN PRIORITÉ depuis GitHub.
-
-    CORRIGÉ : la version précédente lisait uniquement date.txt sur le
-    disque local. Or ce disque est une COPIE du dépôt figée au moment du
-    dernier redémarrage de l'application sur Streamlit Cloud. Après un
-    commit modifiant date.txt, l'application continuait donc à utiliser
-    l'ANCIENNE date tant qu'elle n'était pas redémarrée — et générait des
-    rapports datés de la période précédente, alors même que leur
-    publication sur GitHub réussissait (message de succès trompeur).
-
-    Ordre de priorité :
-      1. date.txt sur GitHub — source de vérité, reflète immédiatement un
-         nouveau commit sans nécessiter de redémarrage ;
-      2. date.txt sur le disque local — repli si GitHub est injoignable
-         ou non configuré (fonctionne aussi en exécution locale) ;
-      3. date du jour — dernier recours.
-    """
+    """Date de l'extraction courante. Tente d'abord GitHub (protégé par
+    _lire_date_github ci-dessus), puis le disque local, puis la date du
+    jour — comportement de secours identique à l'original."""
     date_gh, _source = _lire_date_github()
     if date_gh:
         return date_gh
-
     if os.path.exists("date.txt"):
         try:
             with open("date.txt", "r", encoding="utf-8") as f:
@@ -84,45 +58,20 @@ def get_date_from_file() -> str:
                     return valeur
         except Exception:
             pass
-
     return pd.Timestamp.today().strftime("%d/%m/%Y")
 
 
 def contient_mot(t, lm) -> bool:
-    """CORRIGÉ (bug majeur) : l'ancienne version vérifiait TOUS les mots de
-    chaque entrée de lm, y compris le préfixe générique "CRPR"/"ATPL" des
-    entrées composées ("CRPR ATPD".split() -> ["CRPR","ATPD"]). Résultat :
-    un Statut utilisateur = "CRPR" SEUL (sans aucun code de
-    caractérisation) déclenchait quand même CARACTERISE, simplement parce
-    que "CRPR" matchait le premier mot d'une entrée composée. Sur données
-    réelles : 176 OT avec CRPR, dont seulement 59 (33,5%) ont un vrai code
-    (ATPD/ATMR/ATER/ATRS/ATMO) -> les 117 autres ("CRPR" seul) étaient
-    quand même comptés CARACTERISE à tort (100% au lieu de ~34%).
-    Fix : ne vérifier que le CODE SPÉCIFIQUE (dernier mot de chaque
-    entrée), jamais le préfixe générique seul."""
-    t = str(t).upper()
-    return any(l.split()[-1].upper() in t for l in lm)
+    t = str(t)
+    return any(m in t for l in lm for m in l.split())
 
 
 def cat_age(a) -> str:
-    """Catégorise l'âge d'un OT selon la règle officielle SAP PM (en JOURS,
-    cf. classeur "Définition KPIs SAP PM") :
-      - < 30 jours              -> "<1 mois"
-      - > 30j et < 90j          -> "1 mois < <3 mois"
-      - > 90j                   -> ">3 mois"
-
-    ATTENTION : `a` doit être un nombre de JOURS (pas de mois calendaires).
-    L'ancienne version comparait une différence de mois calendaires
-    ((année_now-année_date)*12 + (mois_now-mois_date)), ce qui provoque des
-    erreurs de classement autour des changements de mois (ex : un OT créé
-    la veille, le dernier jour du mois précédent, était compté comme
-    "1 mois < <3 mois" au lieu de "<1 mois"). Corrigé : calcul en jours.
-    """
     if pd.isna(a):
         return "Inconnu"
-    if a < 30:
+    if a <= 1:
         return "<1 mois"
-    if a > 90:
+    elif a >= 3:
         return ">3 mois"
     return "1 mois < <3 mois"
 
@@ -194,18 +143,7 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
         if c in raw_av.columns:
             raw_av[c] = pd.to_datetime(raw_av[c], errors="coerce")
 
-    # CORRIGÉ : now_ts utilisait pd.Timestamp.today() (date système réelle
-    # du serveur), pas la date de l'extraction (date_str / date.txt). Sans
-    # incidence si l'extraction est chargée le jour même, mais fausse tous
-    # les calculs d'âge (Préparation/Planification/Exécution, filtres
-    # "Date début planifiée <= now_ts" de Performance Inspection/
-    # Systématiques) si l'analyse se fait un autre jour que l'extraction.
-    # Vérifié empiriquement : corrige la quasi-totalité des écarts KPI
-    # face au système SAP réel (la plupart passent sous 3 points d'écart).
-    try:
-        now_ts = pd.to_datetime(str(date_str).replace("-", "/"), format="%d/%m/%Y")
-    except Exception:
-        now_ts = pd.Timestamp.today()
+    now_ts = pd.Timestamp.today()
     df = raw_ot.copy()
 
     df["Backlog preparation"] = np.where(
@@ -216,42 +154,23 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
         df["Statut utilisateur"].apply(lambda x: contient_mot(x, MPLAN_KW)),
         "CARACTERISE", "NON CARACTERISE"
     )
-    # CORRIGÉ : kw.split()[0] renvoyait le préfixe générique ("CRPR" ou
-    # "ATPL") pour les entrées composées de MP_KW/MPLAN_KW (ex: "CRPR ATPD"
-    # -> "CRPR"), pas le code de caractérisation utile. Le code spécifique
-    # (ATPD/ATMR/ATER/ATRS/ATMO ou ATEI/ATAL/ATAS/AGAR/ATHS) est le DERNIER
-    # mot de l'entrée. kw.split()[-1] fonctionne aussi bien pour les
-    # entrées composées ("CRPR ATPD" -> "ATPD") que pour les entrées à un
-    # seul mot ("ATPD" -> "ATPD"), sans risque d'IndexError.
-    # CORRIGÉ (TypeError) : l'étape intermédiaire "_su_upper = ...astype(str)
-    # .str.upper()" plantait car avec le dtype Arrow/string de pandas
-    # récent, une valeur vide (NaN) reste un objet NA (pas une vraie chaîne
-    # Python) même après .astype(str) -> "kw.upper() in x" levait un
-    # TypeError sur ces valeurs. Fix : str(x).upper() directement dans le
-    # lambda (comme contient_mot() ci-dessus), qui convertit TOUJOURS en
-    # chaîne Python native quel que soit le type d'entrée (NaN, NA, etc.).
     df["Type Carac Prep"] = df["Statut utilisateur"].apply(
-        lambda x: next((kw.split()[-1] for kw in MP_KW if kw.upper() in str(x).upper()), "NON CARACTERISE")
+        lambda x: next((kw.split()[0] for kw in MP_KW if kw in str(x)), "NON CARACTERISE")
     )
     df["Type Carac Plan"] = df["Statut utilisateur"].apply(
-        lambda x: next((kw.split()[-1] for kw in MPLAN_KW if kw.upper() in str(x).upper()), "NON CARACTERISE")
+        lambda x: next((kw.split()[0] for kw in MPLAN_KW if kw in str(x)), "NON CARACTERISE")
     )
 
-    # ── Âge des OT (Préparation / Planification / Exécution) ──
-    # Règle officielle (classeur "Définition KPIs SAP PM") :
-    #   Préparation   : référence = "Créé le"                → < 30j / 30-90j / > 90j
-    #   Planification : référence = "Date de début planifiée" → < 30j / 30-90j / > 90j
-    #   Exécution     : référence = "Date de début planifiée" → < 30j / 30-90j / > 90j
-    # CORRIGÉ : âge calculé en JOURS (now_ts - date).dt.days, plus en
-    # différence de mois calendaires (qui décalait le classement des OT
-    # autour des changements de mois).
     for dc, am, ac in [
         ('Créé le', "amp", "ap"),
         ('Date de début planifiée', "amlp", "alp"),
         ('Date de début planifiée', "amex", "aex"),
     ]:
         if dc in df.columns:
-            df[am] = (now_ts - df[dc]).dt.days
+            df[am] = (
+                (now_ts.year - df[dc].dt.year) * 12
+                + (now_ts.month - df[dc].dt.month)
+            ).round(2)
             df[ac] = df[am].apply(cat_age)
         else:
             df[am] = np.nan
@@ -280,24 +199,10 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
             df["Statut système"].fillna("").astype(str).str.strip().str.split().str[0]
         )
 
-    # CORRIGÉ (formule officielle SAP PM) : "Taux d'approbation des Avis" =
-    # avis approuvés (APRV) / TOTAL DES AVIS CRÉÉS — sans filtre sur Ordre.
-    # L'ancien filtre (Ordre vide + Type d'avis dans une liste restreinte)
-    # éliminait ~93% des avis réels (23 114 sur 24 716 pour un périmètre
-    # test), ce qui faussait complètement le taux.
-    # Le document officiel OCP ("Reporting SAP PM - Définition KPIs",
-    # p.11) précise : "NB: hors les avis types: ZU, Z4, ZR, ZP" — ces avis
-    # sont donc EXCLUS du calcul du Taux d'approbation des Avis (vérifié
-    # face aux vraies données : dénominateur 3632 vs 3640 chez SAP, très
-    # proche).
-    # Formule officielle SAP PM : "Taux d'approbation des Avis" = avis
-    # approuvés (APRV) / TOTAL DES AVIS CRÉÉS. Aucun filtre restant ici
-    # (ni Ordre, ni Type d'avis) — la restriction Statut utilisateur
-    # pertinent (APRQ/APRV/APRV AVAU) se fait plus loin dans calcul_kpi.py.
-    # Vérifié face aux vraies données (sans aucun filtre) :
-    #   Maroc Chimie : total=3559 (SAP:3640) APRV=3185 (SAP:3196) taux=89.5% (SAP:~87.8%)
-    #   FEEDS        : total=719  (SAP:699)  APRV=621  (SAP:620, quasi exact !) taux=86.4% (SAP:~88.7%)
-    avf = raw_av.copy()
+    avf = raw_av[
+        (raw_av["Ordre"].isna() | (raw_av["Ordre"].astype(str).str.strip() == ""))
+        & raw_av["Type d'avis"].isin(["ZU", "Z4", "ZR", "ZP"])
+    ].copy()
 
     apm = sorted(
         df[
