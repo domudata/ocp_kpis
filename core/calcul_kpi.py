@@ -2,8 +2,11 @@
 import numpy as np
 import pandas as pd
 
-from core.constants import MP_KW, MPLAN_KW, QK, PK, ALL_KPI, CIBLE, LOWER_BETTER
+from core.constants import MP_KW, MPLAN_KW, QK, PK, CIBLE, LOWER_BETTER
 
+# ──────────────────────────────────────────────
+# Utilitaires de calcul
+# ──────────────────────────────────────────────
 
 def ckpi(n, d, sz=100):
     return np.where(d == 0, sz, (n / d) * 100)
@@ -18,68 +21,98 @@ def cpiv(df: pd.DataFrame, f, c: str, p: list) -> pd.DataFrame:
     )
 
 
-def gscore(k: str, a, t) -> int:
-    if pd.isna(a):
-        return 0
-    try:
-        a = float(a)
-    except Exception:
-        return 0
+def get_text_col(df: pd.DataFrame):
+    for c in ["Désignation", "Designation", "Désignation OT", "Texte ordre",
+              "Texte", "Description", "Libellé", "Libelle"]:
+        if c in df.columns:
+            return c
+    for c in df.columns:
+        if df[c].dtype == 'object' and any(
+            kw in str(c).lower() for kw in ['sign', 'text', 'desc', 'libell']
+        ):
+            return c
+    return None
 
+
+def build_statut_pivot(df_sub: pd.DataFrame, posts: list) -> pd.DataFrame:
+    if df_sub.empty:
+        return (
+            pd.DataFrame(index=posts, columns=["CRÉÉ", "LANC", "CLOT", "TCLO", "Total"])
+            .fillna(0).astype(int)
+        )
+    piv = pd.pivot_table(
+        df_sub, index="Poste travail princ.", columns="Statut OT",
+        values="Ordre", aggfunc="count", fill_value=0
+    )
+    for s in ["CRÉÉ", "LANC", "CLOT", "TCLO"]:
+        if s not in piv.columns:
+            piv[s] = 0
+    piv["Total"] = piv[["CRÉÉ", "LANC", "CLOT", "TCLO"]].sum(axis=1)
+    return piv.reindex(posts, fill_value=0).fillna(0).astype(int)
+
+
+def gscore(k: str, a, t) -> int:
+    if pd.isna(a) or pd.isna(t):
+        return 0
     if k in ["OT préparation <1 mois", "OT planification <1 mois", "OT exécution <1 mois"]:
-        return 0 if a < 75 else 1
+        return 1 if a >= 75 else 0
     if k in ["OT préparation 1mois< <3mois", "OT planification 1mois< <3mois", "OT exécution 1mois< <3mois"]:
-        return 0 if a > 15 else 1
+        return 1 if a <= 15 else 0
     if k in ["OT préparation >3 mois", "OT planification >3 mois", "OT exécution >3 mois"]:
-        return 0 if a > 5 else 1
-    if k in ["TAUX_REALISATION_CORRECTIF/PT", "Performance Systématiques"]:
-        return 0 if a < 80 else 1
+        return 1 if a <= 5 else 0
+    if k == "TAUX_REALISATION_CORRECTIF/PT":
+        return 1 if a >= 80 else 0
     if k == "Taux d'approbation des Avis":
-        return 0 if a < 90 else 1
+        return 1 if a >= 90 else 0
     if k in ["OT LANC ESTIME", "Backlog préparation caractérisé",
              "Backlog planification caractérisé", "OT CONFIME", "OT_COR_EGAL"]:
-        return 0 if a < 95 else 1
-    if k in ["Performance Graissage", "Performance Inspection"]:
-        return 0 if a <= 90 else 1
+        return 1 if a >= 95 else 0
+    if k in ["Performance Graissage", "Performance Inspection", "Performance Systématiques"]:
+        return 1 if a >= 95 else 0
     if k in ["OT Fiabilité", "Total Avis de Panne"]:
-        return 1
-    return 0 if a < 80 else 1
+        return 1 if a >= 100 else 0
+    return 0
 
 
 def is_lb(k: str) -> bool:
     return k in LOWER_BETTER
 
 
-def match_exact_token(statut, codes: set) -> bool:
-    """Retourne True si Statut utilisateur, une fois débarrassé des
-    espaces superflus, est ÉGAL STRICTEMENT à l'un des CODES — aucune
-    addition avant ou après n'est tolérée.
-
-    CORRIGÉ (précision explicite, deuxième itération) : la version
-    précédente acceptait les formes composées ("CRPR ATPD", "ATPL ATEI")
-    dès lors que l'un des mots correspondait à un code. Sur demande
-    explicite, ce comportement est resserré : une valeur composée comme
-    "CRPR ATPD" est désormais NON CARACTERISE, seule la valeur "ATPD"
-    seule (sans aucun préfixe/suffixe) est CARACTERISE.
-    """
-    if statut is None or (isinstance(statut, float) and pd.isna(statut)):
-        return False
-    return str(statut).strip().upper() in codes
-
+# ──────────────────────────────────────────────
+# Correspondance EXACTE pour Backlog préparation/planification
+# (AJOUTÉ — logique convenue explicitement) :
+#   CARACTERISE = Statut utilisateur ÉGAL STRICTEMENT (après suppression
+#   des espaces superflus) à l'un des codes ci-dessous — aucune addition
+#   avant ou après n'est tolérée (ex. "CRPR ATPD" NE compte PAS, seul
+#   "ATPD" seul compte). Périmètre : OT de type ZCOR uniquement.
+# ──────────────────────────────────────────────
 
 CODES_PREP_EXACT = {"ATPD", "ATMR", "ATER", "ATRS", "ATMO"}
 CODES_PLAN_EXACT = {"ATEI", "ATAL", "ATAS", "AGAR", "ATHS"}
 
 
+def match_exact_token(statut, codes: set) -> bool:
+    """True si statut, une fois débarrassé des espaces superflus, est
+    ÉGAL STRICTEMENT à l'un des codes — aucune tolérance de préfixe/suffixe."""
+    if statut is None or (isinstance(statut, float) and pd.isna(statut)):
+        return False
+    return str(statut).strip().upper() in codes
+
+
+# ──────────────────────────────────────────────
+# Calcul principal des KPI
+# ──────────────────────────────────────────────
+
 def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
-               df_toutes_dates: pd.DataFrame = None) -> dict:
+              df_toutes_dates: pd.DataFrame = None) -> dict:
     """
-    df_toutes_dates : DataFrame OT SANS le filtre de période de la barre
-    latérale (mêmes colonnes que df_i). Utilisé UNIQUEMENT pour les deux
-    indicateurs Backlog préparation/planification caractérisé, dont le
-    calcul doit porter sur l'historique complet des OT ZCOR quelle que
-    soit la période sélectionnée par l'utilisateur (demande explicite).
-    Si non fourni, df_i est réutilisé (comportement inchangé).
+    df_toutes_dates : DataFrame OT identique à df_i mais SANS le filtre de
+    période de la barre latérale (mêmes colonnes). Utilisé UNIQUEMENT pour
+    les indicateurs Backlog préparation/planification caractérisé (et les
+    OT préparation/planification par âge qui en découlent désormais),
+    dont le calcul doit porter sur l'historique complet quelle que soit la
+    période sélectionnée par l'utilisateur (demande explicite). Si non
+    fourni, df_i est réutilisé (comportement inchangé, rétrocompatible).
     """
     res = {}
     df = df_i.copy()
@@ -87,6 +120,7 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     res['dfp'] = df
     df_all = df_toutes_dates.copy() if df_toutes_dates is not None else df
 
+    # ── Taux réalisation correctif ──
     filt_corr = (df["Nº appel pl.entret."].fillna(0) == 0) & (df["Contient SOPL"] == 1)
     an = cpiv(df, filt_corr, "Statut OT", posts)
     for c in ["CLOT", "CRÉÉ", "LANC", "TCLO"]:
@@ -97,12 +131,7 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
         an["TOTAL_OT"] == 0, 100.0, ckpi(an["OT_CLOTURES"], an["TOTAL_OT"])
     )
 
-    # (pr et pl — OT préparation/planification par âge — sont désormais
-    # calculés plus bas, juste après pc/plc, car ils réutilisent la même
-    # population NON CARACTERISE issue de _zcor_all / _zcor_lanc_all.)
-
-
-
+    # ── Exécution (inchangé) ──
     ex = cpiv(
         df,
         (df["Statut OT"] == "LANC") & (df["Contient SOPL"] == 1),
@@ -115,9 +144,9 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     ex["OT exécution >3 mois"] = ckpi(ex[">3 mois"], ex["Total"], 0)
     ex["OT exécution 1mois< <3mois"] = ckpi(ex["1 mois < <3 mois"], ex["Total"], 0)
 
+    # ── OT lancé estimé (inchangé) ──
     la = pd.pivot_table(
-        df[(df["Statut OT"] == "LANC") & (df["Type d'ordre"] == "ZCOR") & (df["Contient SOPL"] == 1)],
-        index="Poste travail princ.",
+        df[df["Statut OT"] == "LANC"], index="Poste travail princ.",
         columns="OT LANC ESTIME", values="Ordre", aggfunc="count", fill_value=0
     ).reindex(posts, fill_value=0)
     for c in ["OUI", "NON"]:
@@ -125,11 +154,9 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     la["Total"] = la["OUI"] + la["NON"]
     la["OT LANC ESTIME"] = ckpi(la["OUI"], la["Total"])
 
-    # ── Backlog préparation caractérisé — NOUVELLE LOGIQUE (demande explicite) ──
-    # Périmètre : OT de type ZCOR (correctifs) uniquement, sur TOUTES les
-    # dates (df_all, indépendant du filtre de période de la barre latérale).
-    # Caractérisé = Statut utilisateur contient, en token exact, l'un des
-    # codes ATPD / ATMR / ATER / ATRS / ATMO.
+    # ── Backlog préparation caractérisé — NOUVELLE LOGIQUE (convenue) ──
+    # Périmètre : Type d'ordre == "ZCOR", sur df_all (toutes dates).
+    # Caractérisé = Statut utilisateur égal STRICTEMENT à ATPD/ATMR/ATER/ATRS/ATMO.
     _zcor_all = df_all[df_all["Type d'ordre"] == "ZCOR"].copy()
     _zcor_all["_prep_carac"] = np.where(
         _zcor_all["Statut utilisateur"].apply(lambda x: match_exact_token(x, CODES_PREP_EXACT)),
@@ -144,10 +171,9 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     pc["Total"] = pc["CARACTERISE"] + pc["NON CARACTERISE"]
     pc["Backlog préparation caractérisé"] = ckpi(pc["CARACTERISE"], pc["Total"])
 
-    # ── Backlog planification caractérisé — NOUVELLE LOGIQUE (demande explicite) ──
-    # Périmètre : OT ZCOR ET Statut système = LANC, sur TOUTES les dates.
-    # Caractérisé = Statut utilisateur contient, en token exact, l'un des
-    # codes ATEI / ATAL / ATAS / AGAR / ATHS.
+    # ── Backlog planification caractérisé — NOUVELLE LOGIQUE (convenue) ──
+    # Périmètre : ZCOR ET Statut système == LANC, sur df_all.
+    # Caractérisé = Statut utilisateur égal STRICTEMENT à ATEI/ATAL/ATAS/AGAR/ATHS.
     _zcor_lanc_all = _zcor_all[
         _zcor_all["Statut système"].fillna("").astype(str).str.strip().str.split().str[0] == "LANC"
     ].copy()
@@ -164,9 +190,10 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     plc["Total"] = plc["CARACTERISE"] + plc["NON CARACTERISE"]
     plc["Backlog planification caractérisé"] = ckpi(plc["CARACTERISE"], plc["Total"])
 
-    # ── OT préparation <1/1-3/>3 mois — NOUVELLE LOGIQUE (demande explicite) ──
-    # Base = OT NON CARACTERISE du Backlog préparation (même population
-    # que ci-dessus), répartis selon leur âge ("ap" = jours depuis "Créé le").
+    # ── OT préparation <1/1-3/>3 mois — NOUVELLE LOGIQUE (convenue) ──
+    # Base = OT NON CARACTERISE du Backlog préparation ci-dessus, répartis
+    # selon leur âge ("ap" = jours depuis "Créé le"). Remplace l'ancien
+    # périmètre indépendant (Statut OT=CRÉÉ + contient CRPR).
     _non_prep_age = _zcor_all[_zcor_all["_prep_carac"] == "NON CARACTERISE"]
     pr = cpiv(_non_prep_age, pd.Series(True, index=_non_prep_age.index), "ap", posts)
     for c in ["<1 mois", ">3 mois", "1 mois < <3 mois", "Inconnu"]:
@@ -186,36 +213,24 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     pl["OT planification >3 mois"] = ckpi(pl[">3 mois"], pl["Total"], 0)
     pl["OT planification 1mois< <3mois"] = ckpi(pl["1 mois < <3 mois"], pl["Total"], 0)
 
-    pv_conf = pd.pivot_table(
-        df[df["Statut OT"].isin(["CLOT", "TCLO"])],
-        index="Poste travail princ.", columns="OT CONFIME",
-        values="Ordre", aggfunc="count", fill_value=0
-    ).reindex(posts, fill_value=0)
-    for c in ["OUI", "NON"]:
-        pv_conf[c] = pv_conf.get(c, 0)
-    pv_conf["Total"] = pv_conf["OUI"] + pv_conf["NON"]
-    pv_conf["OT CONFIME"] = ckpi(pv_conf["OUI"], pv_conf["Total"])
-    res["ot_confime"] = pv_conf
+    # ── OT confirmé / coûts égaux (inchangé) ──
+    for kn, cn in [("OT CONFIME", "OT CONFIME"), ("OT_COR_EGAL", "OT_COR_EGAL")]:
+        pv = pd.pivot_table(
+            df[df["Statut OT"].isin(["CLOT", "TCLO"])],
+            index="Poste travail princ.", columns="OT_COR_EGAL",
+            values="Ordre", aggfunc="count", fill_value=0
+        ).reindex(posts, fill_value=0)
+        for c in ["OUI", "NON"]:
+            pv[c] = pv.get(c, 0)
+        pv["Total"] = pv["OUI"] + pv["NON"]
+        pv[cn] = ckpi(pv["OUI"], pv["Total"])
+        res[kn.lower().replace(" ", "_")] = pv
 
-    pv_cor = pd.pivot_table(
-        df[(df["Statut OT"].isin(["CLOT", "TCLO"])) & (df["Type d'ordre"] == "ZCOR")],
-        index="Poste travail princ.", columns="OT_COR_EGAL",
-        values="Ordre", aggfunc="count", fill_value=0
-    ).reindex(posts, fill_value=0)
-    for c in ["OUI", "NON"]:
-        pv_cor[c] = pv_cor.get(c, 0)
-    pv_cor["Total"] = pv_cor["OUI"] + pv_cor["NON"]
-    pv_cor["OT_COR_EGAL"] = ckpi(pv_cor["NON"], pv_cor["Total"])
-    res["ot_cor_egal"] = pv_cor
-
+    # ── Taux approbation avis — AJOUT exclusion ZU/Z4/ZR/ZP (ré-intégrée) ──
+    # Le document officiel SAP PM précise : "hors les avis types : ZU, Z4,
+    # ZR, ZP". Ce filtre, absent du code, est réintégré ici.
     avf = av.copy()
     res['avf'] = avf
-    # CORRIGÉ (ré-ajouté sur demande) : le document officiel SAP PM précise
-    # "hors les avis types : ZU, Z4, ZR, ZP" pour le Taux d'approbation des
-    # Avis. Ce filtre avait disparu du code ; il est réintégré ici. Impact
-    # mesuré sur données réelles : marginal sur ce KPI (population -1,1%,
-    # taux +0,3 point), car ZP/ZR concernent surtout des avis hors du
-    # périmètre Statut utilisateur (APRQ/APRV/APRV AVAU) déjà retenu.
     avf_filtre = avf[~avf["Type d'avis"].isin(["ZU", "Z4", "ZR", "ZP"])] if "Type d'avis" in avf.columns else avf
     tca = pd.pivot_table(
         avf_filtre, index="Poste travail princ.", columns="Statut utilisateur",
@@ -223,18 +238,20 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     ).reindex(posts, fill_value=0)
     for c in ["APRQ", "APRV", "APRV AVAU", "REJT"]:
         tca[c] = tca.get(c, 0)
-    tca["Total"] = tca[["APRQ", "APRV", "APRV AVAU"]].sum(axis=1)
+    tca["Total"] = tca[["APRQ", "APRV", "APRV AVAU", "REJT"]].sum(axis=1)
     tca["Taux d'approbation des Avis"] = ckpi(tca["APRV"], tca["Total"])
 
+    # ── Performance Graissage (inchangé) ──
     g_num = df[(df["Statut OT"].isin(["CLOT", "TCLO"])) & (df["_tw_num"] == 350)].groupby(
         "Poste travail princ.")["Ordre"].count()
     g_den = df[(df["Contient SOPL"] == 1) & (df["_tw_num"] == 350)].groupby(
         "Poste travail princ.")["Ordre"].count()
-    g_df = pd.DataFrame({"_n": g_num, "_d": g_den}).reindex(posts, fill_value=0).fillna(0)
+    g_df = pd.DataFrame({"_n": g_num, "_d": g_den}).reindex(posts, fill_value=0)
     g_df["Performance Graissage"] = np.where(
         g_df["_d"] == 0, 100.0, (g_df["_n"] / g_df["_d"]) * 100
     )
 
+    # ── Performance Inspection (inchangé) ──
     ins_types = [290, 300, 310]
     ins_base = (
         (df["_tw_num"].isin(ins_types))
@@ -245,11 +262,12 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
         "Poste travail princ.")["Ordre"].count()
     ins_den = df[(df["Contient SOPL"] == 1) & ins_base].groupby(
         "Poste travail princ.")["Ordre"].count()
-    ins_df = pd.DataFrame({"_n": ins_num, "_d": ins_den}).reindex(posts, fill_value=0).fillna(0)
+    ins_df = pd.DataFrame({"_n": ins_num, "_d": ins_den}).reindex(posts, fill_value=0)
     ins_df["Performance Inspection"] = np.where(
         ins_df["_d"] == 0, 100.0, (ins_df["_n"] / ins_df["_d"]) * 100
     )
 
+    # ── Performance Systématiques (inchangé) ──
     sys_base = (
         (df["_tw_num"] == 360)
         & (df["Date de début planifiée"].notna())
@@ -259,37 +277,13 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
         "Poste travail princ.")["Ordre"].count()
     sys_den = df[(df["Contient SOPL"] == 1) & sys_base].groupby(
         "Poste travail princ.")["Ordre"].count()
-    sys_df = pd.DataFrame({"_n": sys_num, "_d": sys_den}).reindex(posts, fill_value=0).fillna(0)
+    sys_df = pd.DataFrame({"_n": sys_num, "_d": sys_den}).reindex(posts, fill_value=0)
     sys_df["Performance Systématiques"] = np.where(
         sys_df["_d"] == 0, 100.0, (sys_df["_n"] / sys_df["_d"]) * 100
     )
 
     fiab_s = pd.Series(100.0, index=posts)
     avpan_s = pd.Series(100.0, index=posts)
-
-    res['nd'] = {
-        "TAUX_REALISATION_CORRECTIF/PT": (an["OT_CLOTURES"], an["TOTAL_OT"]),
-        "OT préparation <1 mois": (pr["<1 mois"], pr["Total"]),
-        "OT préparation 1mois< <3mois": (pr["1 mois < <3 mois"], pr["Total"]),
-        "OT préparation >3 mois": (pr[">3 mois"], pr["Total"]),
-        "OT planification <1 mois": (pl["<1 mois"], pl["Total"]),
-        "OT planification 1mois< <3mois": (pl["1 mois < <3 mois"], pl["Total"]),
-        "OT planification >3 mois": (pl[">3 mois"], pl["Total"]),
-        "OT exécution <1 mois": (ex["<1 mois"], ex["Total"]),
-        "OT exécution 1mois< <3mois": (ex["1 mois < <3 mois"], ex["Total"]),
-        "OT exécution >3 mois": (ex[">3 mois"], ex["Total"]),
-        "Performance Graissage": (g_df["_n"], g_df["_d"]),
-        "Performance Inspection": (ins_df["_n"], ins_df["_d"]),
-        "Performance Systématiques": (sys_df["_n"], sys_df["_d"]),
-        "Taux d'approbation des Avis": (tca["APRV"], tca["Total"]),
-        "OT LANC ESTIME": (la["OUI"], la["Total"]),
-        "Backlog préparation caractérisé": (pc["CARACTERISE"], pc["Total"]),
-        "Backlog planification caractérisé": (plc["CARACTERISE"], plc["Total"]),
-        "OT CONFIME": (pv_conf["OUI"], pv_conf["Total"]),
-        "OT_COR_EGAL": (pv_cor["NON"], pv_cor["Total"]),
-        "OT Fiabilité": (fiab_s, fiab_s),
-        "Total Avis de Panne": (avpan_s, avpan_s),
-    }
 
     res['ckdf'] = pd.DataFrame({
         "TAUX_REALISATION_CORRECTIF/PT": an["TAUX_REALISATION_CORRECTIF/PT"],
@@ -314,5 +308,33 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
         "OT Fiabilité": fiab_s,
         "Total Avis de Panne": avpan_s,
     })
+
+    # ── Dictionnaire numérateur/dénominateur (AJOUTÉ, additif uniquement) ──
+    # N'existait pas dans le fichier de production ; ajouté sans rien
+    # retirer, pour permettre les totaux consolidés (business case,
+    # comparaisons). N'affecte aucun calcul existant.
+    res['nd'] = {
+        "TAUX_REALISATION_CORRECTIF/PT": (an["OT_CLOTURES"], an["TOTAL_OT"]),
+        "OT préparation <1 mois": (pr["<1 mois"], pr["Total"]),
+        "OT préparation 1mois< <3mois": (pr["1 mois < <3 mois"], pr["Total"]),
+        "OT préparation >3 mois": (pr[">3 mois"], pr["Total"]),
+        "OT planification <1 mois": (pl["<1 mois"], pl["Total"]),
+        "OT planification 1mois< <3mois": (pl["1 mois < <3 mois"], pl["Total"]),
+        "OT planification >3 mois": (pl[">3 mois"], pl["Total"]),
+        "OT exécution <1 mois": (ex["<1 mois"], ex["Total"]),
+        "OT exécution 1mois< <3mois": (ex["1 mois < <3 mois"], ex["Total"]),
+        "OT exécution >3 mois": (ex[">3 mois"], ex["Total"]),
+        "Performance Graissage": (g_df["_n"], g_df["_d"]),
+        "Performance Inspection": (ins_df["_n"], ins_df["_d"]),
+        "Performance Systématiques": (sys_df["_n"], sys_df["_d"]),
+        "Taux d'approbation des Avis": (tca["APRV"], tca["Total"]),
+        "OT LANC ESTIME": (la["OUI"], la["Total"]),
+        "Backlog préparation caractérisé": (pc["CARACTERISE"], pc["Total"]),
+        "Backlog planification caractérisé": (plc["CARACTERISE"], plc["Total"]),
+        "OT CONFIME": (res['ot_confime']["OUI"], res['ot_confime']["Total"]),
+        "OT_COR_EGAL": (res['ot_cor_egal']["OUI"], res['ot_cor_egal']["Total"]),
+        "OT Fiabilité": (fiab_s, fiab_s),
+        "Total Avis de Panne": (avpan_s, avpan_s),
+    }
 
     return res
