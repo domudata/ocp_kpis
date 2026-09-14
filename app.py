@@ -68,9 +68,13 @@ def _calc_signature():
 CALC_VERSION, _CALC_SIG_OK = _calc_signature()
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# MODIFICATION 1/3 : ajout du parametre df_toutes_dates, transmis tel quel a
+# calc_kpis(). Le reste de la fonction est inchange.
+# ═══════════════════════════════════════════════════════════════════════════
 @st.cache_data(show_spinner="Calcul des KPIs en cours...")
-def calc_kpis_cached(df_period, avdf_period, now_ts, apm_tuple, fichier_date, sdt, edt, calc_version=CALC_VERSION):
-    return calc_kpis(df_period, avdf_period, now_ts, list(apm_tuple))
+def calc_kpis_cached(df_period, avdf_period, now_ts, apm_tuple, fichier_date, sdt, edt, df_toutes_dates, calc_version=CALC_VERSION):
+    return calc_kpis(df_period, avdf_period, now_ts, list(apm_tuple), df_toutes_dates=df_toutes_dates)
 
 
 def main() -> None:
@@ -183,7 +187,14 @@ def main() -> None:
         if "Créé le" in avdf_period.columns:
             avdf_period = avdf_period[avdf_period["Créé le"].between(sdt, edt)]
 
-        res = calc_kpis_cached(df_period, avdf_period, now_ts, tuple(apm), fichier_date, sdt, edt)
+        # ═══════════════════════════════════════════════════════════════
+        # MODIFICATION 2/3 : df_full (complet, avant tout filtre de date -
+        # voir plus haut, sdt/edt ne sont appliques qu'a df_period ci-dessus)
+        # est transmis comme df_toutes_dates. Les Backlogs preparation et
+        # planification l'utiliseront exclusivement ; tous les autres KPI
+        # continuent de recevoir df_period, filtre par periode comme avant.
+        # ═══════════════════════════════════════════════════════════════
+        res = calc_kpis_cached(df_period, avdf_period, now_ts, tuple(apm), fichier_date, sdt, edt, df_full)
 
         ckdf_full = res['ckdf']
         nd_full = res.get('nd', {})
@@ -218,10 +229,6 @@ def main() -> None:
         sf2_posts = [p for p in vp if str(p).startswith("SF2")]
 
         # ── Score cellule par cellule — conservé pour le Total general ────
-        # Applique gscore() sur CHAQUE cellule (poste × KPI) puis fait la
-        # moyenne des verdicts 0/1. Utilisé UNIQUEMENT pour la ligne
-        # "Total general" des tableaux Performance/Qualité — les cartes
-        # SF1/SF2 utilisent désormais la méthode consolidée (voir plus bas).
         def calc_score_cellules(postes, liste_kpi):
             total = 0
             nombre_kpi = 0
@@ -254,22 +261,14 @@ def main() -> None:
                 2
             ) if nombre_kpi else 0
 
-        # ── Score des CARTES SF1/SF2 ──────────────────────────────────────
-        # UNIFIÉ (sur proposition explicite) : les cartes utilisent
-        # EXACTEMENT la même méthode que la colonne « Score » de la ligne
-        # Total general, c'est-à-dire calc_score_cellules() : gscore()
-        # appliqué à CHAQUE cellule (poste × KPI), puis somme des verdicts
-        # 0/1 rapportée au nombre de cellules valides.
-        #
-        # Avantage décisif : une seule définition du score dans toute
-        # l'application. La carte « Performance SF1 » affiche donc la même
-        # valeur que la colonne Score du Total general lorsque le filtre
-        # ne retient que les postes SF1 — plus aucune divergence possible
-        # entre deux endroits censés mesurer la même chose.
-        ano_map = build_ano_map(dfp, avf, now_ts)
+        # ═══════════════════════════════════════════════════════════════
+        # MODIFICATION 3/3 : dfp_toutes_dates=df_full transmis a build_ano_map
+        # (et plus bas a build_anomaly_dfs), pour que les listes d'anomalies
+        # des deux Backlogs restent cohérentes avec leurs nouvelles
+        # populations (calculées sur toutes les dates dans calc_kpis).
+        # ═══════════════════════════════════════════════════════════════
+        ano_map = build_ano_map(dfp, avf, now_ts, dfp_toutes_dates=df_full)
 
-        # Arrondi à l'entier : les cartes affichent uniquement la partie
-        # entière du score (pas de décimale), pour une lecture directe.
         sf1_p = int(calc_score_cellules(sf1_posts, QK))
         sf1_q = int(calc_score_cellules(sf1_posts, PK))
         sf2_p = int(calc_score_cellules(sf2_posts, QK))
@@ -279,7 +278,7 @@ def main() -> None:
         ano_q_rows = build_ano_rows(vp, ano_map, PK, fixed_zero=["OT Fiabilité","Total Avis de Panne"])
         ano_p_cols = ["Poste de travail"] + QK + ["Total Anomalies"]
         ano_q_cols = ["Poste de travail"] + PK + ["Total Anomalies"]
-        anomaly_dfs = build_anomaly_dfs(dfp, avf, now_ts)
+        anomaly_dfs = build_anomaly_dfs(dfp, avf, now_ts, dfp_toutes_dates=df_full)
 
         with st.sidebar:
             with st.expander("📥 Export anomalies (OT + Avis)", expanded=False):
@@ -331,14 +330,6 @@ def main() -> None:
         cible_q["Score Qualite"] = "100"
         qrows.append(cible_q)
 
-        # ── Total general PAR KPI ────────────────────────────────────────
-        # RE-CORRIGÉ (sur nouvelle demande explicite) : les 9 KPI d'âge
-        # (Préparation/Planification/Exécution × <1mois/1-3mois/>3mois)
-        # reviennent à une MOYENNE SIMPLE des valeurs (pas gscore), pour
-        # garantir que les 3 tranches somment à 100% sur la ligne Total
-        # general — propriété perdue avec le passage au gscore uniforme
-        # demandé précédemment. Tous les AUTRES KPI restent en gscore
-        # (comptage de cellules conformes / cellules valides × 100).
         _AGE_KPIS = {
             "OT préparation <1 mois", "OT préparation 1mois< <3mois", "OT préparation >3 mois",
             "OT planification <1 mois", "OT planification 1mois< <3mois", "OT planification >3 mois",
@@ -370,11 +361,6 @@ def main() -> None:
                             pass
                 tot_p[k] = ("%.1f" % ((cc / tc) * 100)) if tc > 0 else "nan"
 
-        # ── Score Performance du Total general ──────────────────────────
-        # INCHANGÉ : reste calculé DIRECTEMENT sur toutes les cellules KPI
-        # Performance de tous les postes sélectionnés, via
-        # calc_score_cellules(vp, QK) — n'utilise PAS les valeurs tot_p[k]
-        # ci-dessus (donc pas affecté par la moyenne des KPI d'âge).
         tot_p["Score Performance"] = "%.2f" % calc_score_cellules(vp, QK)
         prows.append(tot_p)
 
@@ -392,23 +378,15 @@ def main() -> None:
                         pass
             tot_q[k] = ("%.1f" % ((cc / tc) * 100)) if tc > 0 else "nan"
 
-        # ── Score Qualite du Total general ──────────────────────────────
-        # Même principe : directement sur toutes les cellules KPI Qualité
-        # de tous les postes sélectionnés, via calc_score_cellules.
         tot_q["Score Qualite"] = "%.2f" % calc_score_cellules(vp, PK)
         qrows.append(tot_q)
 
-        # ── Historisation : entièrement gérée dans save_kpis_to_excel ──
-        # (téléchargement GitHub → ajout de la date → republication GitHub,
-        # le tout en mémoire). Plus aucune publication séparée ici, ni
-        # aucune dépendance au disque local, éphémère sur Streamlit Cloud.
         save_kpis_to_excel(
             prows, pcols, qrows, qcols,
             ano_p_rows, ano_p_cols, ano_q_rows, ano_q_cols,
             fichier_date,
         )
 
-        # Lecture de l'historique DIRECTEMENT depuis GitHub (source unique)
         from core.export_excel import charger_historique_depuis_github
         hist_df, _hist_msg = charger_historique_depuis_github()
         var_df   = calculate_variations(hist_df)
@@ -481,10 +459,6 @@ def main() -> None:
                 stars = 0
             poste_stars[poste] = {"score": score_global, "stars": stars}
 
-        # ── avg_p_score / avg_q_score (cartes du dashboard) ─────────────
-        # Reprend directement le Score Performance/Qualite du Total
-        # general déjà calculé ci-dessus (via calc_score_division) —
-        # garantit le même chiffre affiché dans les cartes et les tableaux.
         try:
             avg_p_score = float(tot_p["Score Performance"])
         except Exception:
@@ -584,12 +558,6 @@ def main() -> None:
             st.markdown("---")
             st.markdown("#### 📤 Rapports KPI par poste (PDF + Excel)")
 
-            # CORRIGÉ : ces imports étaient hors try/except. Quand l'un
-            # d'eux échouait (module manquant), l'exception remontait et
-            # interrompait TOUT l'onglet — y compris le tableau du plan
-            # d'action affiché plus bas, qui disparaissait sans explication.
-            # Ils sont désormais isolés : une défaillance de la publication
-            # n'empêche plus la consultation du plan d'action.
             _publication_ok = True
             try:
                 from core.publish_reports import generate_and_publish_all_postes
@@ -609,8 +577,6 @@ def main() -> None:
                     "absents des secrets). Les rapports seront générés mais pas publiés."
                 )
 
-            # Les boutons de publication ne sont proposés que si le module
-            # correspondant a bien pu être importé.
             _col_pub, _col_dry = st.columns(2) if _publication_ok else (None, None)
             _launch_publish = _launch_dry = False
             if _publication_ok:
@@ -672,11 +638,6 @@ def main() -> None:
                             try:
                                 import requests as _requests
 
-                                # CORRIGÉ : on envoie désormais à Power Automate
-                                # la liste précise des fichiers publiés, au lieu
-                                # d'un corps vide. Le flux sait ainsi exactement
-                                # quels chemins GitHub copier vers OneDrive, sans
-                                # avoir à parcourir tout le dépôt.
                                 try:
                                     _repo = st.secrets.get("GITHUB_REPO", "")
                                     _branch = st.secrets.get("GITHUB_BRANCH", "main")
