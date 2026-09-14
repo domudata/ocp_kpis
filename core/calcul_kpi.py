@@ -65,8 +65,12 @@ def gscore(k: str, a, t) -> int:
     if k == "Taux d'approbation des Avis":
         return 1 if a >= 90 else 0
     if k in ["OT LANC ESTIME", "Backlog préparation caractérisé",
-             "Backlog planification caractérisé", "OT CONFIME", "OT_COR_EGAL"]:
+             "Backlog planification caractérisé", "OT CONFIME"]:
         return 1 if a >= 95 else 0
+    if k == "OT_COR_EGAL":
+        # INVERSÉ (demande explicite) : ce KPI représente désormais le taux
+        # de NON-concordance (NON/Total) — plus bas est meilleur.
+        return 1 if a <= 5 else 0
     if k in ["Performance Graissage", "Performance Inspection", "Performance Systématiques"]:
         return 1 if a >= 95 else 0
     if k in ["OT Fiabilité", "Total Avis de Panne"]:
@@ -251,15 +255,29 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     res["ot_confime"] = pv_conf
 
     # ── OT_COR_EGAL — AJOUT du périmètre ZCOR (demande explicite) ──
+    # ── OT_COR_EGAL — RECALCULÉ DIRECTEMENT (demande explicite) ──
+    # Ne dépend plus de la colonne "OT_COR_EGAL" pré-calculée dans
+    # prepare_data.py : la comparaison budget/réel est refaite ici, sur
+    # les colonnes sources brutes, pour éliminer toute dépendance à un
+    # calcul amont potentiellement en cause.
+    _scope_cor = df[(df["Statut OT"].isin(["CLOT", "TCLO"])) & (df["Type d'ordre"] == "ZCOR")].copy()
+    _budget = pd.to_numeric(_scope_cor["Total coûts budgétés"], errors="coerce").fillna(0)
+    _reel = pd.to_numeric(_scope_cor["Total coûts réels"], errors="coerce").fillna(0)
+    _scope_cor["_cor_egal_recalcule"] = np.where(_budget == _reel, "OUI", "NON")
+
     pv_cor = pd.pivot_table(
-        df[(df["Statut OT"].isin(["CLOT", "TCLO"])) & (df["Type d'ordre"] == "ZCOR")],
-        index="Poste travail princ.", columns="OT_COR_EGAL",
+        _scope_cor,
+        index="Poste travail princ.", columns="_cor_egal_recalcule",
         values="Ordre", aggfunc="count", fill_value=0
     ).reindex(posts, fill_value=0)
     for c in ["OUI", "NON"]:
         pv_cor[c] = pv_cor.get(c, 0)
     pv_cor["Total"] = pv_cor["OUI"] + pv_cor["NON"]
-    pv_cor["OT_COR_EGAL"] = ckpi(pv_cor["OUI"], pv_cor["Total"])
+    # INVERSÉ (demande explicite) : le KPI représente désormais le TAUX DE
+    # NON-CONCORDANCE (NON/Total), et non plus le taux de concordance
+    # (OUI/Total). Plus cette valeur est BASSE, meilleur est le résultat
+    # (voir LOWER_BETTER et gscore() dans constants.py / calcul_kpi.py).
+    pv_cor["OT_COR_EGAL"] = ckpi(pv_cor["NON"], pv_cor["Total"])
     res["ot_cor_egal"] = pv_cor
 
     # NOTE : le filtre d'exclusion ZU/Z4/ZR/ZP a été retiré ici. avf, tel
@@ -369,7 +387,7 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
         "Backlog préparation caractérisé": (pc["CARACTERISE"], pc["Total"]),
         "Backlog planification caractérisé": (plc["CARACTERISE"], plc["Total"]),
         "OT CONFIME": (res['ot_confime']["OUI"], res['ot_confime']["Total"]),
-        "OT_COR_EGAL": (res['ot_cor_egal']["OUI"], res['ot_cor_egal']["Total"]),
+        "OT_COR_EGAL": (res['ot_cor_egal']["NON"], res['ot_cor_egal']["Total"]),
         "OT Fiabilité": (fiab_s, fiab_s),
         "Total Avis de Panne": (avpan_s, avpan_s),
     }
