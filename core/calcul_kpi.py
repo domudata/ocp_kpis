@@ -187,8 +187,14 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     # Périmètre : ZCOR ET Statut système == LANC, sur df_all.
     # Caractérisé = Statut utilisateur égal STRICTEMENT à ATEI/ATAL/ATAS/AGAR/ATHS.
     _zcor_lanc_all = _zcor_all[
-        _zcor_all["Statut système"].fillna("").astype(str).str.strip().str.split().str[0] == "LANC"
-    ].copy()
+    (_zcor_all["Statut système"]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+        .str.split()
+        .str[0] == "LANC")
+    & (_zcor_all["Contient SOPL"] == 0)
+].copy()
     _zcor_lanc_all["_plan_carac"] = np.where(
         _zcor_lanc_all["Statut utilisateur"].apply(lambda x: match_exact_token(x, CODES_PLAN_EXACT)),
         "CARACTERISE", "NON CARACTERISE",
