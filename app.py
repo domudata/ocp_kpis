@@ -274,10 +274,34 @@ def main() -> None:
         # ═══════════════════════════════════════════════════════════════
         ano_map = build_ano_map(dfp, avf, now_ts, dfp_toutes_dates=df_full)
 
-        sf1_p = int(calc_score_cellules(sf1_posts, QK))
-        sf1_q = int(calc_score_cellules(sf1_posts, PK))
-        sf2_p = int(calc_score_cellules(sf2_posts, QK))
-        sf2_q = int(calc_score_cellules(sf2_posts, PK))
+        # ── Score des CARTES SF1/SF2 — MÉTHODE (demande explicite) ──
+        # Pour chaque KPI : calculer la MOYENNE SIMPLE de la colonne (valeur
+        # du KPI) sur les postes du groupe — chaque poste pèse autant,
+        # quelle que soit la taille de son dénominateur sous-jacent — puis
+        # appliquer gscore() à cette moyenne pour obtenir un verdict 0/1
+        # par KPI. Le score final est la moyenne de ces verdicts sur le
+        # nombre de KPI.
+        def calc_score_moyenne_colonne(postes, liste_kpi):
+            if not liste_kpi:
+                return 0
+            verdicts = 0
+            nb_kpi = 0
+            for kpi in liste_kpi:
+                valeurs = [
+                    ckdf.loc[p, kpi] for p in postes
+                    if p in ckdf.index and kpi in ckdf.columns and pd.notna(ckdf.loc[p, kpi])
+                ]
+                if not valeurs:
+                    continue
+                moyenne = sum(valeurs) / len(valeurs)
+                verdicts += gscore(kpi, moyenne, CIBLE[kpi])
+                nb_kpi += 1
+            return round((verdicts / nb_kpi) * 100, 2) if nb_kpi else 0
+
+        sf1_p = int(calc_score_moyenne_colonne(sf1_posts, QK))
+        sf1_q = int(calc_score_moyenne_colonne(sf1_posts, PK))
+        sf2_p = int(calc_score_moyenne_colonne(sf2_posts, QK))
+        sf2_q = int(calc_score_moyenne_colonne(sf2_posts, PK))
 
         ano_p_rows = build_ano_rows(vp, ano_map, QK)
         ano_q_rows = build_ano_rows(vp, ano_map, PK, fixed_zero=["OT Fiabilité","Total Avis de Panne"])
