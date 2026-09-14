@@ -160,9 +160,10 @@ def main() -> None:
             av_bytes = f.read()
 
     if ot_bytes and av_bytes:
-        df_full, av_full, apm, now_ts = prepare_data(ot_bytes, av_bytes, fichier_date)
+        df_full, av_full, apm, now_ts, avis_complet_full = prepare_data(ot_bytes, av_bytes, fichier_date)
     else:
         df_full, av_full, apm, now_ts = pd.DataFrame(), pd.DataFrame(), [], pd.Timestamp.now()
+        avis_complet_full = pd.DataFrame()
 
     ctx = render_sidebar(fichier_date, apm, df_full, av_full, now_ts)
     vp      = ctx["vp"]
@@ -205,6 +206,10 @@ def main() -> None:
         ckdf = ckdf_full.loc[vp_present] if vp_present else ckdf_full.iloc[0:0]
         dfp  = dfp_full[dfp_full["Poste travail princ."].isin(vp)]
         avf  = avf_full[avf_full["Poste travail princ."].isin(vp)] if "Poste travail princ." in avf_full.columns else avf_full
+        avis_complet = (
+            avis_complet_full[avis_complet_full["Poste travail princ."].isin(vp)]
+            if "Poste travail princ." in avis_complet_full.columns else avis_complet_full
+        )
         df   = dfp
 
         pa = {k: round(ckdf[k].mean(skipna=True), 2) for k in QK}
@@ -720,7 +725,7 @@ def main() -> None:
 
         with tabs[8]:
             try:
-                render_suivi_hse_tab(dfp, avf, vp, fichier_date)
+                render_suivi_hse_tab(dfp, avis_complet, vp, fichier_date)
             except Exception as _e:
                 st.error(f"Suivi HSE indisponible : {_e}")
 
