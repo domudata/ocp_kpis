@@ -145,6 +145,7 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
 
     now_ts = pd.Timestamp.today()
     df = raw_ot.copy()
+    df_toutes_dates = raw_ot.copy()
 
     df["Backlog preparation"] = np.where(
         df["Statut utilisateur"].apply(lambda x: contient_mot(x, MP_KW)),
