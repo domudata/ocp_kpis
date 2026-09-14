@@ -207,6 +207,11 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     # ── OT préparation <1/1-3/>3 mois — NOUVELLE LOGIQUE (convenue) ──
     # Base = OT NON CARACTERISE du Backlog préparation ci-dessus (ZCOR +
     # Statut=CRÉÉ), répartis selon leur âge ("ap" = depuis "Créé le").
+    # ── OT préparation <1/1-3/>3 mois — CONFIRMÉ (clarification explicite) ──
+    # Base = uniquement la part NON CARACTERISE du Backlog préparation
+    # (ZCOR + CRÉÉ + non caractérisé), répartie selon l'âge ("ap" = depuis
+    # "Créé le"). La somme des 3 tranches d'âge est donc égale au nombre
+    # de NON CARACTERISE — PAS au Total (caractérisé + non caractérisé).
     _non_prep_age = _zcor_cree_all[_zcor_cree_all["_prep_carac"] == "NON CARACTERISE"]
     pr = cpiv(_non_prep_age, pd.Series(True, index=_non_prep_age.index), "ap", posts)
     for c in ["<1 mois", ">3 mois", "1 mois < <3 mois", "Inconnu"]:
@@ -217,6 +222,7 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     pr["OT préparation 1mois< <3mois"] = ckpi(pr["1 mois < <3 mois"], pr["Total"], 0)
 
     # ── OT planification <1/1-3/>3 mois — même logique, sur "alp" ──
+    # ── OT planification <1/1-3/>3 mois — même principe, sur "alp" ──
     _non_plan_age = _zcor_lanc_all[_zcor_lanc_all["_plan_carac"] == "NON CARACTERISE"]
     pl = cpiv(_non_plan_age, pd.Series(True, index=_non_plan_age.index), "alp", posts)
     for c in ["<1 mois", ">3 mois", "1 mois < <3 mois", "Inconnu"]:
