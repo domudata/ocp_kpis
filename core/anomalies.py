@@ -62,10 +62,10 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
     ano_map["Performance Inspection"] = dfp[perf_filt & (dfp["_tw_num"].isin([290, 300, 310])) & (dfp["Date de début planifiée"] <= now_ts)].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["Performance Systématiques"] = dfp[perf_filt & (dfp["_tw_num"] == 360) & (dfp["Date de début planifiée"] <= now_ts)].groupby("Poste travail princ.")["Ordre"].count()
 
-    # ── Taux approbation avis — AJOUT exclusion ZU/Z4/ZR/ZP (ré-intégrée) ──
-    avf_filtre = avf[~avf["Type d'avis"].isin(["ZU", "Z4", "ZR", "ZP"])] if "Type d'avis" in avf.columns else avf
-    avf_tot = avf_filtre.groupby("Poste travail princ.")["Avis"].count()
-    avf_aprv = avf_filtre[avf_filtre["Statut utilisateur"].isin(["APRV", "APRV AVAU"])].groupby("Poste travail princ.")["Avis"].count()
+    # NOTE : filtre ZU/Z4/ZR/ZP retiré (voir calcul_kpi.py) — avf est déjà
+    # restreint à ces types en amont dans prepare_data.py.
+    avf_tot = avf.groupby("Poste travail princ.")["Avis"].count()
+    avf_aprv = avf[avf["Statut utilisateur"].isin(["APRV", "APRV AVAU"])].groupby("Poste travail princ.")["Avis"].count()
     ano_map["Taux d'approbation des Avis"] = avf_tot.sub(avf_aprv, fill_value=0)
 
     ano_map["OT LANC ESTIME"] = dfp[(dfp["Statut OT"] == "LANC") & (dfp["OT LANC ESTIME"] == "NON")].groupby("Poste travail princ.")["Ordre"].count()
