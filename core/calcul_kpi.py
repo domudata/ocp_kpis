@@ -145,8 +145,10 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     ex["OT exécution 1mois< <3mois"] = ckpi(ex["1 mois < <3 mois"], ex["Total"], 0)
 
     # ── OT lancé estimé (inchangé) ──
+    # ── OT LANC ESTIME — AJOUT SOPL + ZCOR (demande explicite) ──
     la = pd.pivot_table(
-        df[df["Statut OT"] == "LANC"], index="Poste travail princ.",
+        df[(df["Statut OT"] == "LANC") & (df["Contient SOPL"] == 1) & (df["Type d'ordre"] == "ZCOR")],
+        index="Poste travail princ.",
         columns="OT LANC ESTIME", values="Ordre", aggfunc="count", fill_value=0
     ).reindex(posts, fill_value=0)
     for c in ["OUI", "NON"]:
@@ -158,12 +160,22 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     # Périmètre : Type d'ordre == "ZCOR", sur df_all (toutes dates).
     # Caractérisé = Statut utilisateur égal STRICTEMENT à ATPD/ATMR/ATER/ATRS/ATMO.
     _zcor_all = df_all[df_all["Type d'ordre"] == "ZCOR"].copy()
-    _zcor_all["_prep_carac"] = np.where(
-        _zcor_all["Statut utilisateur"].apply(lambda x: match_exact_token(x, CODES_PREP_EXACT)),
+
+    # AJOUTÉ (demande explicite) : le périmètre de la Préparation doit
+    # être ZCOR ET Statut système == CRÉÉ (symétrique à Planification,
+    # qui exige déjà ZCOR ET Statut système == LANC ci-dessous). Cette
+    # restriction est appliquée à une COPIE dédiée (_zcor_cree_all) pour
+    # ne pas restreindre _zcor_all, dont dérive aussi la population
+    # Planification (ZCOR seul, puis filtrée sur LANC séparément).
+    _zcor_cree_all = _zcor_all[
+        _zcor_all["Statut système"].fillna("").astype(str).str.strip().str.split().str[0] == "CRÉÉ"
+    ].copy()
+    _zcor_cree_all["_prep_carac"] = np.where(
+        _zcor_cree_all["Statut utilisateur"].apply(lambda x: match_exact_token(x, CODES_PREP_EXACT)),
         "CARACTERISE", "NON CARACTERISE",
     )
     pc = pd.pivot_table(
-        _zcor_all, index="Poste travail princ.", columns="_prep_carac",
+        _zcor_cree_all, index="Poste travail princ.", columns="_prep_carac",
         values="Ordre", aggfunc="count", fill_value=0
     ).reindex(posts, fill_value=0)
     for c in ["CARACTERISE", "NON CARACTERISE"]:
@@ -191,10 +203,9 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     plc["Backlog planification caractérisé"] = ckpi(plc["CARACTERISE"], plc["Total"])
 
     # ── OT préparation <1/1-3/>3 mois — NOUVELLE LOGIQUE (convenue) ──
-    # Base = OT NON CARACTERISE du Backlog préparation ci-dessus, répartis
-    # selon leur âge ("ap" = jours depuis "Créé le"). Remplace l'ancien
-    # périmètre indépendant (Statut OT=CRÉÉ + contient CRPR).
-    _non_prep_age = _zcor_all[_zcor_all["_prep_carac"] == "NON CARACTERISE"]
+    # Base = OT NON CARACTERISE du Backlog préparation ci-dessus (ZCOR +
+    # Statut=CRÉÉ), répartis selon leur âge ("ap" = depuis "Créé le").
+    _non_prep_age = _zcor_cree_all[_zcor_cree_all["_prep_carac"] == "NON CARACTERISE"]
     pr = cpiv(_non_prep_age, pd.Series(True, index=_non_prep_age.index), "ap", posts)
     for c in ["<1 mois", ">3 mois", "1 mois < <3 mois", "Inconnu"]:
         pr[c] = pr.get(c, 0)
@@ -214,17 +225,34 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     pl["OT planification 1mois< <3mois"] = ckpi(pl["1 mois < <3 mois"], pl["Total"], 0)
 
     # ── OT confirmé / coûts égaux (inchangé) ──
-    for kn, cn in [("OT CONFIME", "OT CONFIME"), ("OT_COR_EGAL", "OT_COR_EGAL")]:
-        pv = pd.pivot_table(
-            df[df["Statut OT"].isin(["CLOT", "TCLO"])],
-            index="Poste travail princ.", columns="OT_COR_EGAL",
-            values="Ordre", aggfunc="count", fill_value=0
-        ).reindex(posts, fill_value=0)
-        for c in ["OUI", "NON"]:
-            pv[c] = pv.get(c, 0)
-        pv["Total"] = pv["OUI"] + pv["NON"]
-        pv[cn] = ckpi(pv["OUI"], pv["Total"])
-        res[kn.lower().replace(" ", "_")] = pv
+    # ── OT CONFIME — CORRIGÉ (bug de colonne) ──
+    # L'ancienne boucle calculait OT CONFIME et OT_COR_EGAL à partir de la
+    # MÊME colonne "OT_COR_EGAL", ce qui faisait afficher pour OT CONFIME
+    # exactement la même valeur que OT_COR_EGAL au lieu de sa propre
+    # logique (Statut système contient CLOT/TCLO ET CONF). Périmètre
+    # confirmé : Statut OT ∈ {CLOT, TCLO}.
+    pv_conf = pd.pivot_table(
+        df[df["Statut OT"].isin(["CLOT", "TCLO"])],
+        index="Poste travail princ.", columns="OT CONFIME",
+        values="Ordre", aggfunc="count", fill_value=0
+    ).reindex(posts, fill_value=0)
+    for c in ["OUI", "NON"]:
+        pv_conf[c] = pv_conf.get(c, 0)
+    pv_conf["Total"] = pv_conf["OUI"] + pv_conf["NON"]
+    pv_conf["OT CONFIME"] = ckpi(pv_conf["OUI"], pv_conf["Total"])
+    res["ot_confime"] = pv_conf
+
+    # ── OT_COR_EGAL — AJOUT du périmètre ZCOR (demande explicite) ──
+    pv_cor = pd.pivot_table(
+        df[(df["Statut OT"].isin(["CLOT", "TCLO"])) & (df["Type d'ordre"] == "ZCOR")],
+        index="Poste travail princ.", columns="OT_COR_EGAL",
+        values="Ordre", aggfunc="count", fill_value=0
+    ).reindex(posts, fill_value=0)
+    for c in ["OUI", "NON"]:
+        pv_cor[c] = pv_cor.get(c, 0)
+    pv_cor["Total"] = pv_cor["OUI"] + pv_cor["NON"]
+    pv_cor["OT_COR_EGAL"] = ckpi(pv_cor["OUI"], pv_cor["Total"])
+    res["ot_cor_egal"] = pv_cor
 
     # NOTE : le filtre d'exclusion ZU/Z4/ZR/ZP a été retiré ici. avf, tel
     # que construit par prepare_data.py, est DÉJÀ restreint à ces mêmes
