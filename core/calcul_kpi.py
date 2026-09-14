@@ -226,14 +226,15 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
         pv[cn] = ckpi(pv["OUI"], pv["Total"])
         res[kn.lower().replace(" ", "_")] = pv
 
-    # ── Taux approbation avis — AJOUT exclusion ZU/Z4/ZR/ZP (ré-intégrée) ──
-    # Le document officiel SAP PM précise : "hors les avis types : ZU, Z4,
-    # ZR, ZP". Ce filtre, absent du code, est réintégré ici.
+    # NOTE : le filtre d'exclusion ZU/Z4/ZR/ZP a été retiré ici. avf, tel
+    # que construit par prepare_data.py, est DÉJÀ restreint à ces mêmes
+    # types (avec Ordre vide) — un filtre d'exclusion supplémentaire ici
+    # viderait la population presque entièrement (107 → 0 lignes constaté
+    # sur données réelles). Voir prepare_data.py pour la définition d'avf.
     avf = av.copy()
     res['avf'] = avf
-    avf_filtre = avf[~avf["Type d'avis"].isin(["ZU", "Z4", "ZR", "ZP"])] if "Type d'avis" in avf.columns else avf
     tca = pd.pivot_table(
-        avf_filtre, index="Poste travail princ.", columns="Statut utilisateur",
+        avf, index="Poste travail princ.", columns="Statut utilisateur",
         values="Avis", aggfunc="count", fill_value=0
     ).reindex(posts, fill_value=0)
     for c in ["APRQ", "APRV", "APRV AVAU", "REJT"]:
