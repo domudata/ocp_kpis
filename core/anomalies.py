@@ -37,18 +37,9 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
     """
     Construit le dictionnaire ano_map :
     {kpi_name → pd.Series(index=poste, values=nb_anomalies)}
-
-    dfp_toutes_dates : DataFrame OT sans le filtre de période de la barre
-    latérale, utilisé UNIQUEMENT pour les deux indicateurs Backlog
-    préparation/planification caractérisé (demande explicite). Si non
-    fourni, dfp est réutilisé (comportement inchangé).
     """
     dfp_all = dfp_toutes_dates.copy() if dfp_toutes_dates is not None else dfp
 
-    # ── Populations Backlog préparation/planification — CALCULÉES UNE
-    # SEULE FOIS ici, réutilisées à la fois pour l'indicateur Backlog
-    # caractérisé ET pour la répartition par âge (SYNCHRONISÉ avec
-    # calcul_kpi.py — demande explicite de cohérence KPI / anomalies).
     non_prep, non_plan = _backlogs_non_caracterises(dfp_all)
 
     plan_filt = (dfp["Statut OT"] == "LANC") & (dfp["Statut utilisateur"].str.contains("ATPL", case=False, na=False))
@@ -64,44 +55,52 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
         .groupby("Poste travail princ.")["Ordre"].count()
     )
 
-    # ── OT préparation <1/1-3/>3 mois — SYNCHRONISÉ avec calcul_kpi.py ──
-    # Base = non_prep (NON CARACTERISE du Backlog préparation), pas
-    # l'ancien périmètre indépendant (Statut OT=CRÉÉ + contient CRPR).
-    ano_map["OT préparation <1 mois"] = non_prep[non_prep["ap"] != "<1 mois"].groupby("Poste travail princ.")["Ordre"].count()
-    ano_map["OT préparation >3 mois"] = non_prep[non_prep["ap"] == ">3 mois"].groupby("Poste travail princ.")["Ordre"].count()
-    ano_map["OT préparation 1mois< <3mois"] = non_prep[non_prep["ap"] == "1 mois < <3 mois"].groupby("Poste travail princ.")["Ordre"].count()
+    # ── MODIFICATION 1 : Exclure 'Inconnu' des calculs des anomalies d'âge ──
+    valid_ages = ["<1 mois", "1 mois < <3 mois", ">3 mois"]
 
-    # ── OT planification <1/1-3/>3 mois — SYNCHRONISÉ avec calcul_kpi.py ──
-    # Base = non_plan (NON CARACTERISE du Backlog planification).
-    ano_map["OT planification <1 mois"] = non_plan[non_plan["alp"] != "<1 mois"].groupby("Poste travail princ.")["Ordre"].count()
-    ano_map["OT planification >3 mois"] = non_plan[non_plan["alp"] == ">3 mois"].groupby("Poste travail princ.")["Ordre"].count()
-    ano_map["OT planification 1mois< <3mois"] = non_plan[non_plan["alp"] == "1 mois < <3 mois"].groupby("Poste travail princ.")["Ordre"].count()
+    non_prep_age = non_prep[non_prep["ap"].isin(valid_ages)]
+    non_plan_age = non_plan[non_plan["alp"].isin(valid_ages)]
+    
+    dfp_exec = dfp[exec_filt]
+    exec_age = dfp_exec[dfp_exec["aex"].isin(valid_ages)]
 
-    ano_map["OT exécution <1 mois"] = dfp[exec_filt & (dfp["aex"] != "<1 mois")].groupby("Poste travail princ.")["Ordre"].count()
-    ano_map["OT exécution >3 mois"] = dfp[exec_filt & (dfp["aex"] == ">3 mois")].groupby("Poste travail princ.")["Ordre"].count()
-    ano_map["OT exécution 1mois< <3mois"] = dfp[exec_filt & (dfp["aex"] == "1 mois < <3 mois")].groupby("Poste travail princ.")["Ordre"].count()
+    # ── OT préparation <1/1-3/>3 mois ──
+    ano_map["OT préparation <1 mois"] = non_prep_age[non_prep_age["ap"] != "<1 mois"].groupby("Poste travail princ.")["Ordre"].count()
+    ano_map["OT préparation >3 mois"] = non_prep_age[non_prep_age["ap"] == ">3 mois"].groupby("Poste travail princ.")["Ordre"].count()
+    ano_map["OT préparation 1mois< <3mois"] = non_prep_age[non_prep_age["ap"] == "1 mois < <3 mois"].groupby("Poste travail princ.")["Ordre"].count()
+
+    # ── OT planification <1/1-3/>3 mois ──
+    ano_map["OT planification <1 mois"] = non_plan_age[non_plan_age["alp"] != "<1 mois"].groupby("Poste travail princ.")["Ordre"].count()
+    ano_map["OT planification >3 mois"] = non_plan_age[non_plan_age["alp"] == ">3 mois"].groupby("Poste travail princ.")["Ordre"].count()
+    ano_map["OT planification 1mois< <3mois"] = non_plan_age[non_plan_age["alp"] == "1 mois < <3 mois"].groupby("Poste travail princ.")["Ordre"].count()
+
+    # ── OT exécution <1/1-3/>3 mois ──
+    ano_map["OT exécution <1 mois"] = exec_age[exec_age["aex"] != "<1 mois"].groupby("Poste travail princ.")["Ordre"].count()
+    ano_map["OT exécution >3 mois"] = exec_age[exec_age["aex"] == ">3 mois"].groupby("Poste travail princ.")["Ordre"].count()
+    ano_map["OT exécution 1mois< <3mois"] = exec_age[exec_age["aex"] == "1 mois < <3 mois"].groupby("Poste travail princ.")["Ordre"].count()
+
 
     ano_map["Performance Graissage"] = dfp[perf_filt & (dfp["_tw_num"] == 350)].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["Performance Inspection"] = dfp[perf_filt & (dfp["_tw_num"].isin([290, 300, 310])) & (dfp["Date de début planifiée"] <= now_ts)].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["Performance Systématiques"] = dfp[perf_filt & (dfp["_tw_num"] == 360) & (dfp["Date de début planifiée"] <= now_ts)].groupby("Poste travail princ.")["Ordre"].count()
 
-    # NOTE : filtre ZU/Z4/ZR/ZP retiré (voir calcul_kpi.py) — avf est déjà
-    # restreint à ces types en amont dans prepare_data.py.
     avf_tot = avf.groupby("Poste travail princ.")["Avis"].count()
     avf_aprv = avf[avf["Statut utilisateur"].isin(["APRV", "APRV AVAU"])].groupby("Poste travail princ.")["Avis"].count()
     ano_map["Taux d'approbation des Avis"] = avf_tot.sub(avf_aprv, fill_value=0)
 
     ano_map["OT LANC ESTIME"] = dfp[(dfp["Statut OT"] == "LANC") & (dfp["Contient SOPL"] == 1) & (dfp["Type d'ordre"] == "ZCOR") & (dfp["OT LANC ESTIME"] == "NON")].groupby("Poste travail princ.")["Ordre"].count()
 
-    # ── Backlog préparation/planification — populations déjà calculées ──
     ano_map["Backlog préparation caractérisé"] = non_prep.groupby("Poste travail princ.")["Ordre"].count()
     ano_map["Backlog planification caractérisé"] = non_plan.groupby("Poste travail princ.")["Ordre"].count()
 
     ano_map["OT CONFIME"] = dfp[(dfp["Statut OT"].isin(["CLOT", "TCLO"])) & (dfp["OT CONFIME"] == "NON")].groupby("Poste travail princ.")["Ordre"].count()
-    _scope_cor_ano = dfp[(dfp["Statut OT"].isin(["CLOT", "TCLO"])) & (dfp["Type d'ordre"] == "ZCOR")].copy()
+    
+    # ── MODIFICATION 2 : OT_COR_EGAL (Calcul Direct) ──
+    _scope_cor_ano = dfp[(dfp["Statut OT"].isin(["CLOT", "TCLO"])) & (dfp["Type d'ordre"] == "ZCOR")]
     _budget_ano = pd.to_numeric(_scope_cor_ano["Total coûts budgétés"], errors="coerce").fillna(0)
     _reel_ano = pd.to_numeric(_scope_cor_ano["Total coûts réels"], errors="coerce").fillna(0)
-    ano_map["OT_COR_EGAL"] = _scope_cor_ano[_budget_ano == _reel_ano].groupby("Poste travail princ.")["Ordre"].count()
+    # L'anomalie ici correspond au NON-concordant (Mizaniya != Réel) car c'est la valeur ciblée par le KPI de NON-concordance
+    ano_map["OT_COR_EGAL"] = _scope_cor_ano[_budget_ano != _reel_ano].groupby("Poste travail princ.")["Ordre"].count()
 
     return ano_map
 
@@ -147,18 +146,37 @@ def build_anomaly_dfs(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
 
     avf_filtre = avf[~avf["Type d'avis"].isin(["ZU", "Z4", "ZR", "ZP"])] if "Type d'avis" in avf.columns else avf
 
+    # ── Préparation des bases d'âge (sans Inconnu) ──
+    valid_ages = ["<1 mois", "1 mois < <3 mois", ">3 mois"]
+    
+    non_prep_age = non_prep[non_prep["ap"].isin(valid_ages)]
+    non_plan_age = non_plan[non_plan["alp"].isin(valid_ages)]
+    
+    dfp_exec = dfp[exec_filt]
+    exec_age = dfp_exec[dfp_exec["aex"].isin(valid_ages)]
+
+    # ── Préparation OT_COR_EGAL ──
+    _scope_cor_df = dfp[(dfp["Statut OT"].isin(["CLOT", "TCLO"])) & (dfp["Type d'ordre"] == "ZCOR")]
+    _budget_df = pd.to_numeric(_scope_cor_df["Total coûts budgétés"], errors="coerce").fillna(0)
+    _reel_df = pd.to_numeric(_scope_cor_df["Total coûts réels"], errors="coerce").fillna(0)
+    _df_cor_egal_ano = _scope_cor_df[_budget_df != _reel_df].copy()
+
     return {
         "TAUX_REALISATION_CORRECTIF/PT": dfp[(dfp["Nº appel pl.entret."].fillna(0) == 0) & (dfp["Contient SOPL"] == 1) & (~dfp["Statut OT"].isin(["CLOT", "TCLO"]))].copy(),
-        # SYNCHRONISÉ avec calcul_kpi.py / build_ano_map : base = NON CARACTERISE.
-        "OT préparation <1 mois": non_prep[non_prep["ap"] != "<1 mois"].copy(),
-        "OT préparation >3 mois": non_prep[non_prep["ap"] == ">3 mois"].copy(),
-        "OT préparation 1mois< <3mois": non_prep[non_prep["ap"] == "1 mois < <3 mois"].copy(),
-        "OT planification <1 mois": non_plan[non_plan["alp"] != "<1 mois"].copy(),
-        "OT planification >3 mois": non_plan[non_plan["alp"] == ">3 mois"].copy(),
-        "OT planification 1mois< <3mois": non_plan[non_plan["alp"] == "1 mois < <3 mois"].copy(),
-        "OT exécution <1 mois": dfp[exec_filt & (dfp["aex"] != "<1 mois")].copy(),
-        "OT exécution >3 mois": dfp[exec_filt & (dfp["aex"] == ">3 mois")].copy(),
-        "OT exécution 1mois< <3mois": dfp[exec_filt & (dfp["aex"] == "1 mois < <3 mois")].copy(),
+        
+        # ── Utilisation des DataFrames propres (sans inconnu) ──
+        "OT préparation <1 mois": non_prep_age[non_prep_age["ap"] != "<1 mois"].copy(),
+        "OT préparation >3 mois": non_prep_age[non_prep_age["ap"] == ">3 mois"].copy(),
+        "OT préparation 1mois< <3mois": non_prep_age[non_prep_age["ap"] == "1 mois < <3 mois"].copy(),
+        
+        "OT planification <1 mois": non_plan_age[non_plan_age["alp"] != "<1 mois"].copy(),
+        "OT planification >3 mois": non_plan_age[non_plan_age["alp"] == ">3 mois"].copy(),
+        "OT planification 1mois< <3mois": non_plan_age[non_plan_age["alp"] == "1 mois < <3 mois"].copy(),
+        
+        "OT exécution <1 mois": exec_age[exec_age["aex"] != "<1 mois"].copy(),
+        "OT exécution >3 mois": exec_age[exec_age["aex"] == ">3 mois"].copy(),
+        "OT exécution 1mois< <3mois": exec_age[exec_age["aex"] == "1 mois < <3 mois"].copy(),
+        
         "Performance Graissage": dfp[perf_filt & (dfp["_tw_num"] == 350)].copy(),
         "Performance Inspection": dfp[perf_filt & (dfp["_tw_num"].isin([290, 300, 310])) & (dfp["Date de début planifiée"] <= now_ts)].copy(),
         "Performance Systématiques": dfp[perf_filt & (dfp["_tw_num"] == 360) & (dfp["Date de début planifiée"] <= now_ts)].copy(),
@@ -167,5 +185,7 @@ def build_anomaly_dfs(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
         "Backlog préparation caractérisé": non_prep.copy(),
         "Backlog planification caractérisé": non_plan.copy(),
         "OT CONFIME": dfp[(dfp["Statut OT"].isin(["CLOT", "TCLO"])) & (dfp["OT CONFIME"] == "NON")].copy(),
-        "OT_COR_EGAL": (lambda _s: _s[pd.to_numeric(_s["Total coûts budgétés"], errors="coerce").fillna(0) == pd.to_numeric(_s["Total coûts réels"], errors="coerce").fillna(0)])(dfp[(dfp["Statut OT"].isin(["CLOT", "TCLO"])) & (dfp["Type d'ordre"] == "ZCOR")]).copy(),
+        
+        # ── Résultat OT_COR_EGAL Direct ──
+        "OT_COR_EGAL": _df_cor_egal_ano,
     }
