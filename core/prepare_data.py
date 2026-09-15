@@ -69,9 +69,9 @@ def contient_mot(t, lm) -> bool:
 def cat_age(a) -> str:
     if pd.isna(a):
         return "Inconnu"
-    if a <= 1:
+    if a <= 30:
         return "<1 mois"
-    elif a >= 3:
+    elif a > 90:
         return ">3 mois"
     return "1 mois < <3 mois"
 
@@ -143,7 +143,8 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
         if c in raw_av.columns:
             raw_av[c] = pd.to_datetime(raw_av[c], errors="coerce")
 
-    now_ts = pd.Timestamp.today()
+    ref_date = pd.to_datetime(date_str, format="%d/%m/%Y", errors="coerce")
+    now_ts = ref_date.normalize() if pd.notna(ref_date) else pd.Timestamp.today().normalize()
     # NOTE : pas de copie "df_toutes_dates" ici — inutile. La valeur "df"
     # retournée par cette fonction EST déjà la version complète, sans
     # aucun filtre de date (le filtre de période est appliqué plus tard,
@@ -173,10 +174,7 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
         ('Date de début planifiée', "amex", "aex"),
     ]:
         if dc in df.columns:
-            df[am] = (
-                (now_ts.year - df[dc].dt.year) * 12
-                + (now_ts.month - df[dc].dt.month)
-            ).round(2)
+            df[am] = (now_ts - df[dc].dt.normalize()).dt.days
             df[ac] = df[am].apply(cat_age)
         else:
             df[am] = np.nan
