@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+l# -*- coding: utf-8 -*-
 import numpy as np
 import pandas as pd
 
@@ -113,7 +113,7 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
         an["TOTAL_OT"] == 0, 100.0, ckpi(an["OT_CLOTURES"], an["TOTAL_OT"])
     )
 
-    # ── Exécution (Modifié : exclusion de Inconnu du denominator) ──
+    # ── Exécution ──
     ex = cpiv(
         df,
         (df["Statut OT"] == "LANC") & (df["Contient SOPL"] == 1),
@@ -121,12 +121,13 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     )
     for c in ["<1 mois", ">3 mois", "1 mois < <3 mois", "Inconnu"]:
         ex[c] = ex.get(c, 0)
+    ex["Total"] = ex[["<1 mois", "1 mois < <3 mois", ">3 mois", "Inconnu"]].sum(axis=1)
     
+    # ── MODIFICATION AGE EXÉCUTION (Inconnu exclu du denominator) ──
     total_age_ex = ex["<1 mois"] + ex["1 mois < <3 mois"] + ex[">3 mois"]
-    ex["Total"] = total_age_ex
-    ex["OT exécution <1 mois"] = ckpi(ex["<1 mois"], total_age_ex, 100)
-    ex["OT exécution >3 mois"] = ckpi(ex[">3 mois"], total_age_ex, 0)
-    ex["OT exécution 1mois< <3mois"] = ckpi(ex["1 mois < <3 mois"], total_age_ex, 0)
+    ex["OT exécution <1 mois"] = np.where(total_age_ex == 0, 100.0, (ex["<1 mois"] / total_age_ex) * 100)
+    ex["OT exécution 1mois< <3mois"] = np.where(total_age_ex == 0, 0.0, (ex["1 mois < <3 mois"] / total_age_ex) * 100)
+    ex["OT exécution >3 mois"] = np.where(total_age_ex == 0, 0.0, (ex[">3 mois"] / total_age_ex) * 100)
 
     # ── OT lancé estimé ──
     la = pd.pivot_table(
@@ -141,6 +142,7 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
 
     # ── Backlog préparation caractérisé ──
     _zcor_all = df_all[df_all["Type d'ordre"] == "ZCOR"].copy()
+
     _zcor_cree_all = _zcor_all[
         _zcor_all["Statut système"].fillna("").astype(str).str.strip().str.split().str[0] == "CRÉÉ"
     ].copy()
@@ -175,29 +177,31 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     plc["Total"] = plc["CARACTERISE"] + plc["NON CARACTERISE"]
     plc["Backlog planification caractérisé"] = ckpi(plc["CARACTERISE"], plc["Total"])
 
-    # ── OT préparation <1/1-3/>3 mois (Modifié : exclusion de Inconnu du denominator) ──
+    # ── OT préparation <1/1-3/>3 mois ──
     _non_prep_age = _zcor_cree_all[_zcor_cree_all["_prep_carac"] == "NON CARACTERISE"]
     pr = cpiv(_non_prep_age, pd.Series(True, index=_non_prep_age.index), "ap", posts)
     for c in ["<1 mois", ">3 mois", "1 mois < <3 mois", "Inconnu"]:
         pr[c] = pr.get(c, 0)
-        
+    pr["Total"] = pr[["<1 mois", "1 mois < <3 mois", ">3 mois", "Inconnu"]].sum(axis=1)
+    
+    # ── MODIFICATION AGE PRÉPARATION (Inconnu exclu du denominator) ──
     total_age_pr = pr["<1 mois"] + pr["1 mois < <3 mois"] + pr[">3 mois"]
-    pr["Total"] = total_age_pr
-    pr["OT préparation <1 mois"] = ckpi(pr["<1 mois"], total_age_pr, 100)
-    pr["OT préparation >3 mois"] = ckpi(pr[">3 mois"], total_age_pr, 0)
-    pr["OT préparation 1mois< <3mois"] = ckpi(pr["1 mois < <3 mois"], total_age_pr, 0)
+    pr["OT préparation <1 mois"] = np.where(total_age_pr == 0, 100.0, (pr["<1 mois"] / total_age_pr) * 100)
+    pr["OT préparation 1mois< <3mois"] = np.where(total_age_pr == 0, 0.0, (pr["1 mois < <3 mois"] / total_age_pr) * 100)
+    pr["OT préparation >3 mois"] = np.where(total_age_pr == 0, 0.0, (pr[">3 mois"] / total_age_pr) * 100)
 
-    # ── OT planification <1/1-3/>3 mois (Modifié : exclusion de Inconnu du denominator) ──
+    # ── OT planification <1/1-3/>3 mois ──
     _non_plan_age = _zcor_lanc_all[_zcor_lanc_all["_plan_carac"] == "NON CARACTERISE"]
     pl = cpiv(_non_plan_age, pd.Series(True, index=_non_plan_age.index), "alp", posts)
     for c in ["<1 mois", ">3 mois", "1 mois < <3 mois", "Inconnu"]:
         pl[c] = pl.get(c, 0)
-        
+    pl["Total"] = pl[["<1 mois", "1 mois < <3 mois", ">3 mois", "Inconnu"]].sum(axis=1)
+    
+    # ── MODIFICATION AGE PLANIFICATION (Inconnu exclu du denominator) ──
     total_age_pl = pl["<1 mois"] + pl["1 mois < <3 mois"] + pl[">3 mois"]
-    pl["Total"] = total_age_pl
-    pl["OT planification <1 mois"] = ckpi(pl["<1 mois"], total_age_pl, 100)
-    pl["OT planification >3 mois"] = ckpi(pl[">3 mois"], total_age_pl, 0)
-    pl["OT planification 1mois< <3mois"] = ckpi(pl["1 mois < <3 mois"], total_age_pl, 0)
+    pl["OT planification <1 mois"] = np.where(total_age_pl == 0, 100.0, (pl["<1 mois"] / total_age_pl) * 100)
+    pl["OT planification 1mois< <3mois"] = np.where(total_age_pl == 0, 0.0, (pl["1 mois < <3 mois"] / total_age_pl) * 100)
+    pl["OT planification >3 mois"] = np.where(total_age_pl == 0, 0.0, (pl[">3 mois"] / total_age_pl) * 100)
 
     # ── OT confirmé / coûts égaux ──
     pv_conf = pd.pivot_table(
@@ -306,18 +310,18 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
         "Total Avis de Panne": avpan_s,
     })
 
-    # ── Dictionnaire numérateur/dénominateur ──
+    # ── Dictionnaire numérateur/dénominateur mis à jour pour Age ──
     res['nd'] = {
         "TAUX_REALISATION_CORRECTIF/PT": (an["OT_CLOTURES"], an["TOTAL_OT"]),
-        "OT préparation <1 mois": (pr["<1 mois"], pr["Total"]),
-        "OT préparation 1mois< <3mois": (pr["1 mois < <3 mois"], pr["Total"]),
-        "OT préparation >3 mois": (pr[">3 mois"], pr["Total"]),
-        "OT planification <1 mois": (pl["<1 mois"], pl["Total"]),
-        "OT planification 1mois< <3mois": (pl["1 mois < <3 mois"], pl["Total"]),
-        "OT planification >3 mois": (pl[">3 mois"], pl["Total"]),
-        "OT exécution <1 mois": (ex["<1 mois"], ex["Total"]),
-        "OT exécution 1mois< <3mois": (ex["1 mois < <3 mois"], ex["Total"]),
-        "OT exécution >3 mois": (ex[">3 mois"], ex["Total"]),
+        "OT préparation <1 mois": (pr["<1 mois"], total_age_pr),
+        "OT préparation 1mois< <3mois": (pr["1 mois < <3 mois"], total_age_pr),
+        "OT préparation >3 mois": (pr[">3 mois"], total_age_pr),
+        "OT planification <1 mois": (pl["<1 mois"], total_age_pl),
+        "OT planification 1mois< <3mois": (pl["1 mois < <3 mois"], total_age_pl),
+        "OT planification >3 mois": (pl[">3 mois"], total_age_pl),
+        "OT exécution <1 mois": (ex["<1 mois"], total_age_ex),
+        "OT exécution 1mois< <3mois": (ex["1 mois < <3 mois"], total_age_ex),
+        "OT exécution >3 mois": (ex[">3 mois"], total_age_ex),
         "Performance Graissage": (g_df["_n"], g_df["_d"]),
         "Performance Inspection": (ins_df["_n"], ins_df["_d"]),
         "Performance Systématiques": (sys_df["_n"], sys_df["_d"]),
