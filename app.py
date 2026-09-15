@@ -364,16 +364,21 @@ def main() -> None:
         tot_p = {"Poste de travail": "Total general", "_t": "total"}
         for k in QK:
             if k in _AGE_KPIS:
-                vals = []
-                for rw in prows:
-                    if k in rw and rw.get("_t") not in ("cible", "total"):
-                        try:
-                            fv = float(rw[k])
-                            if pd.notna(fv):
-                                vals.append(fv)
-                        except Exception:
-                            pass
-                tot_p[k] = ("%.1f" % (sum(vals) / len(vals))) if vals else "nan"
+                if k in nd_full:
+                    s_num = sum(float(nd_full[k][0].get(p, 0)) for p in vp if p in ckdf.index)
+                    s_den = sum(float(nd_full[k][1].get(p, 0)) for p in vp if p in ckdf.index)
+                    tot_p[k] = ("%.1f" % ((s_num / s_den) * 100)) if s_den > 0 else "0.0"
+                else:
+                    vals = []
+                    for rw in prows:
+                        if k in rw and rw.get("_t") not in ("cible", "total"):
+                            try:
+                                fv = float(rw[k])
+                                if pd.notna(fv):
+                                    vals.append(fv)
+                            except Exception:
+                                pass
+                    tot_p[k] = ("%.1f" % (sum(vals) / len(vals))) if vals else "nan"
             else:
                 cc = tc = 0
                 for rw in prows:
@@ -523,7 +528,7 @@ def main() -> None:
         with tabs[2]:
             render_qualite_tab(qrows, qcols, ano_q_rows, ano_q_cols, qa)
         with tabs[3]:
-            render_backlog_page(dfp, vp)
+            render_backlog_page(dfp, vp, df_toutes_dates=df_full)
         with tabs[4]:
             n_dates = 0
             if not hist_df.empty and "Date" in hist_df.columns:
@@ -628,6 +633,7 @@ def main() -> None:
                     ckdf, pscores, qscores, ano_map, dfp, avf, now_ts,
                     date_str=fichier_date, postes=list(vp),
                     dry_run=_launch_dry, progress_callback=_on_progress,
+                    dfp_toutes_dates=df_full,
                 )
                 _progress.progress(1.0, text="Terminé.")
 
