@@ -68,10 +68,6 @@ def _calc_signature():
 CALC_VERSION, _CALC_SIG_OK = _calc_signature()
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# MODIFICATION 1/3 : ajout du parametre df_toutes_dates, transmis tel quel a
-# calc_kpis(). Le reste de la fonction est inchange.
-# ═══════════════════════════════════════════════════════════════════════════
 @st.cache_data(show_spinner="Calcul des KPIs en cours...")
 def calc_kpis_cached(df_period, avdf_period, now_ts, apm_tuple, fichier_date, sdt, edt, df_toutes_dates, calc_version=CALC_VERSION):
     return calc_kpis(df_period, avdf_period, now_ts, list(apm_tuple), df_toutes_dates=df_toutes_dates)
@@ -105,10 +101,6 @@ def main() -> None:
     [data-testid="stDecoration"] { display: none !important; }
     #MainMenu { visibility: hidden !important; }
     header { visibility: hidden !important; }
-    /* CORRIGÉ : le bouton "◀ ▶" qui affiche/masque le sidebar vit dans le
-       même conteneur que le header masqué ci-dessus. Sans cette règle, si
-       le sidebar se replie (fréquent sur petit écran / mobile), il devient
-       impossible de le rouvrir — le bouton étant lui aussi invisible. */
     [data-testid="collapsedControl"] {
         visibility: visible !important;
         display: block !important;
@@ -200,13 +192,6 @@ def main() -> None:
         if "Créé le" in avdf_period.columns:
             avdf_period = avdf_period[avdf_period["Créé le"].between(sdt, edt)]
 
-        # ═══════════════════════════════════════════════════════════════
-        # MODIFICATION 2/3 : df_full (complet, avant tout filtre de date -
-        # voir plus haut, sdt/edt ne sont appliques qu'a df_period ci-dessus)
-        # est transmis comme df_toutes_dates. Les Backlogs preparation et
-        # planification l'utiliseront exclusivement ; tous les autres KPI
-        # continuent de recevoir df_period, filtre par periode comme avant.
-        # ═══════════════════════════════════════════════════════════════
         res = calc_kpis_cached(df_period, avdf_period, now_ts, tuple(apm), fichier_date, sdt, edt, df_full)
 
         ckdf_full = res['ckdf']
@@ -227,12 +212,6 @@ def main() -> None:
         pa = {k: round(ckdf[k].mean(skipna=True), 2) for k in QK}
         qa = {k: round(ckdf[k].mean(skipna=True), 2) for k in PK}
 
-        # ── Score Performance / Qualite PAR POSTE ───────────────────────────
-        # Règle UNIFORME appliquée partout dans ce fichier : pour chaque
-        # cellule KPI, gscore() renvoie 0 (rouge / non conforme) ou 1
-        # (conforme / non rouge). Les valeurs NaN (KPI indisponible pour ce
-        # poste) sont exclues du calcul. Score = somme des 0/1 / nombre de
-        # KPI valides × 100.
         pscores = {}
         qscores = {}
         for poste in ckdf.index:
@@ -245,7 +224,6 @@ def main() -> None:
         sf1_posts = [p for p in vp if str(p).startswith("SF1")]
         sf2_posts = [p for p in vp if str(p).startswith("SF2")]
 
-        # ── Score cellule par cellule — conservé pour le Total general ────
         def calc_score_cellules(postes, liste_kpi):
             total = 0
             nombre_kpi = 0
@@ -278,23 +256,8 @@ def main() -> None:
                 2
             ) if nombre_kpi else 0
 
-        # ═══════════════════════════════════════════════════════════════
-        # MODIFICATION 3/3 : dfp_toutes_dates=df_full transmis a build_ano_map
-        # (et plus bas a build_anomaly_dfs), pour que les listes d'anomalies
-        # des deux Backlogs restent cohérentes avec leurs nouvelles
-        # populations (calculées sur toutes les dates dans calc_kpis).
-        # ═══════════════════════════════════════════════════════════════
         ano_map = build_ano_map(dfp, avf, now_ts, dfp_toutes_dates=df_full)
 
-        # ── Score des CARTES SF1/SF2 — IDENTIQUE À TOTAL GÉNÉRAL (demande
-        # explicite) : réutilise EXACTEMENT calc_score_cellules(), la même
-        # fonction qui calcule tot_p["Score Performance"] / tot_q["Score
-        # Qualite"] plus bas (calc_score_cellules(vp, QK) / (vp, PK)).
-        # Seul le périmètre de postes change (sf1_posts/sf2_posts au lieu
-        # de vp) — la formule est rigoureusement la même, garantissant
-        # qu'une carte affiche la même valeur que Total général lorsque le
-        # filtre du tableau de bord ne retient que les postes de cette
-        # division.
         sf1_p = int(calc_score_cellules(sf1_posts, QK))
         sf1_q = int(calc_score_cellules(sf1_posts, PK))
         sf2_p = int(calc_score_cellules(sf2_posts, QK))
@@ -361,9 +324,11 @@ def main() -> None:
             "OT planification <1 mois", "OT planification 1mois< <3mois", "OT planification >3 mois",
             "OT exécution <1 mois", "OT exécution 1mois< <3mois", "OT exécution >3 mois",
         }
+        
         tot_p = {"Poste de travail": "Total general", "_t": "total"}
         for k in QK:
             if k in _AGE_KPIS:
+                # ── Respect du calcul de l'âge comme précédent ──
                 vals = []
                 for rw in prows:
                     if k in rw and rw.get("_t") not in ("cible", "total"):
@@ -374,35 +339,30 @@ def main() -> None:
                         except Exception:
                             pass
                 tot_p[k] = ("%.1f" % (sum(vals) / len(vals))) if vals else "nan"
+            
+            elif k == "OT_COR_EGAL":
+                # ── Cas spécial OT_COR_EGAL : non sur (oui + non) ──
+                total_anos_cor = sum(ano_map.get(k, pd.Series()).get(p, 0) for p in vp)
+                _scope_cor_all = df[(df["Statut OT"].isin(["CLOT", "TCLO"])) & (df["Type d'ordre"] == "ZCOR")]
+                total_scope_cor = len(_scope_cor_all)
+                if total_scope_cor > 0:
+                    ratio_cor = (total_anos_cor / total_scope_cor) * 100
+                    tot_p[k] = "%.1f" % ratio_cor
+                else:
+                    tot_p[k] = "0.0"
+            
             else:
-                cc = tc = 0
-                for rw in prows:
-                    if k in rw and rw.get("_t") not in ("cible", "total"):
-                        try:
-                            fv = float(rw[k])
-                            if pd.notna(fv):
-                                cc += gscore(k, fv, CIBLE.get(k, 100))
-                                tc += 1
-                        except Exception:
-                            pass
-                tot_p[k] = ("%.1f" % ((cc / tc) * 100)) if tc > 0 else "nan"
+                # ── Total global des anomalies sur total général de SF1 et SF2 ──
+                total_anos = sum(ano_map.get(k, pd.Series()).get(p, 0) for p in vp)
+                tot_p[k] = "%.1f" % float(total_anos)
 
         tot_p["Score Performance"] = "%.2f" % calc_score_cellules(vp, QK)
         prows.append(tot_p)
 
         tot_q = {"Poste de travail": "Total general", "_t": "total"}
         for k in PK:
-            cc = tc = 0
-            for rw in qrows:
-                if k in rw and rw.get("_t") not in ("cible", "total"):
-                    try:
-                        fv = float(rw[k])
-                        if pd.notna(fv):
-                            cc += gscore(k, fv, CIBLE.get(k, 100))
-                            tc += 1
-                    except Exception:
-                        pass
-            tot_q[k] = ("%.1f" % ((cc / tc) * 100)) if tc > 0 else "nan"
+            total_anos_q = sum(ano_map.get(k, pd.Series()).get(p, 0) for p in vp)
+            tot_q[k] = "%.1f" % float(total_anos_q)
 
         tot_q["Score Qualite"] = "%.2f" % calc_score_cellules(vp, PK)
         qrows.append(tot_q)
