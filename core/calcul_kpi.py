@@ -283,14 +283,11 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     # sur données réelles). Voir prepare_data.py pour la définition d'avf.
     avf = av.copy()
     res['avf'] = avf
-    tca = pd.pivot_table(
-        avf, index="Poste travail princ.", columns="Statut utilisateur",
-        values="Avis", aggfunc="count", fill_value=0
-    ).reindex(posts, fill_value=0)
-    for c in ["APRQ", "APRV", "APRV AVAU", "REJT"]:
-        tca[c] = tca.get(c, 0)
-    tca["Total"] = tca[["APRQ", "APRV", "APRV AVAU", "REJT"]].sum(axis=1)
-    tca["Taux d'approbation des Avis"] = ckpi(tca["APRV"], tca["Total"])
+    # ── Taux d'approbation des Avis (synchronisé avec anomalies.py) ──
+    avf_tot = avf.groupby("Poste travail princ.")["Avis"].count().reindex(posts, fill_value=0)
+    _is_aprv = avf["Statut utilisateur"].isin(["APRV", "APRV AVAU"])
+    avf_aprv = avf[_is_aprv].groupby("Poste travail princ.")["Avis"].count().reindex(posts, fill_value=0)
+    taux_approbation = ckpi(avf_aprv, avf_tot)
 
     # ── Performance Graissage (inchangé) ──
     g_num = df[(df["Statut OT"].isin(["CLOT", "TCLO"])) & (df["_tw_num"] == 350)].groupby(
@@ -350,7 +347,7 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
         "Performance Graissage": g_df["Performance Graissage"],
         "Performance Inspection": ins_df["Performance Inspection"],
         "Performance Systématiques": sys_df["Performance Systématiques"],
-        "Taux d'approbation des Avis": tca["Taux d'approbation des Avis"],
+        "Taux d'approbation des Avis": taux_approbation,
         "OT LANC ESTIME": la["OT LANC ESTIME"],
         "Backlog préparation caractérisé": pc["Backlog préparation caractérisé"],
         "Backlog planification caractérisé": plc["Backlog planification caractérisé"],
@@ -378,7 +375,7 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
         "Performance Graissage": (g_df["_n"], g_df["_d"]),
         "Performance Inspection": (ins_df["_n"], ins_df["_d"]),
         "Performance Systématiques": (sys_df["_n"], sys_df["_d"]),
-        "Taux d'approbation des Avis": (tca["APRV"], tca["Total"]),
+        "Taux d'approbation des Avis": (avf_aprv, avf_tot),
         "OT LANC ESTIME": (la["OUI"], la["Total"]),
         "Backlog préparation caractérisé": (pc["CARACTERISE"], pc["Total"]),
         "Backlog planification caractérisé": (plc["CARACTERISE"], plc["Total"]),
