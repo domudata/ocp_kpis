@@ -15,8 +15,8 @@ def get_previous_card_values(hist_df: pd.DataFrame) -> dict:
                    OU Score Qualite, _section ("perf"|"qual"), Date_parsed
     """
     prev = {
-        "Performance SF1": None, "Qualité SF1": None,
-        "Performance SF2": None, "Qualité SF2": None,
+        "Performance Maroc Chimie": None, "Qualité Maroc Chimie": None,
+        "Performance Feed": None, "Qualité Feed": None,
     }
     if hist_df is None or hist_df.empty or "Date_parsed" not in hist_df.columns:
         return prev
@@ -51,9 +51,9 @@ def get_previous_card_values(hist_df: pd.DataFrame) -> dict:
                 elif poste.startswith("SF2"):
                     sf2_vals.append(v)
             if sf1_vals:
-                prev[f"{prefix} SF1"] = sum(sf1_vals) / len(sf1_vals)
+                prev[f"{prefix} Maroc Chimie"] = sum(sf1_vals) / len(sf1_vals)
             if sf2_vals:
-                prev[f"{prefix} SF2"] = sum(sf2_vals) / len(sf2_vals)
+                prev[f"{prefix} Feed"] = sum(sf2_vals) / len(sf2_vals)
     except Exception:
         pass
 
@@ -61,7 +61,7 @@ def get_previous_card_values(hist_df: pd.DataFrame) -> dict:
 
 
 def format_card_variation(current, previous):
-    if previous is None:
+    if current is None or previous is None:
         return '<div class="cd">→ 0.0 %</div>'
     diff = current - previous
     if abs(diff) < 0.05:
@@ -75,21 +75,26 @@ def render_cards(total_ot, avg_p_score, avg_q_score,
                   total_ano, sf1_p, sf1_q, sf2_p, sf2_q,
                   prev_values: dict) -> None:
 
-    var_p1 = format_card_variation(sf1_p,     prev_values.get("Performance SF1"))
-    var_q1 = format_card_variation(sf1_q,     prev_values.get("Qualité SF1"))
-    var_p2 = format_card_variation(sf2_p,     prev_values.get("Performance SF2"))
-    var_q2 = format_card_variation(sf2_q,     prev_values.get("Qualité SF2"))
+    var_p1 = format_card_variation(sf1_p, prev_values.get("Performance Maroc Chimie"))
+    var_q1 = format_card_variation(sf1_q, prev_values.get("Qualité Maroc Chimie"))
+    var_p2 = format_card_variation(sf2_p, prev_values.get("Performance Feed"))
+    var_q2 = format_card_variation(sf2_q, prev_values.get("Qualité Feed"))
 
-    # 4 cartes sur une seule ligne (OT Analyses et Anomalies Totales supprimees)
+    sf1_p_str = f"{sf1_p:.1f}%" if sf1_p is not None else "---"
+    sf1_q_str = f"{sf1_q:.1f}%" if sf1_q is not None else "---"
+    sf2_p_str = f"{sf2_p:.1f}%" if sf2_p is not None else "---"
+    sf2_q_str = f"{sf2_q:.1f}%" if sf2_q is not None else "---"
+
+    # 4 cartes sur une seule ligne (Maroc Chimie & Feed)
     st.markdown(
         '<div class="cr">'
-        '<div class="cc c5"><div class="cv">%.1f%%</div>%s<div class="cl">Performance SF1</div></div>'
-        '<div class="cc c6"><div class="cv">%.1f%%</div>%s<div class="cl">Qualite SF1</div></div>'
-        '<div class="cc c7"><div class="cv">%.1f%%</div>%s<div class="cl">Performance SF2</div></div>'
-        '<div class="cc c8"><div class="cv">%.1f%%</div>%s<div class="cl">Qualite SF2</div></div>'
+        '<div class="cc c5"><div class="cv">%s</div>%s<div class="cl">Performance Maroc Chimie</div></div>'
+        '<div class="cc c6"><div class="cv">%s</div>%s<div class="cl">Qualite Maroc Chimie</div></div>'
+        '<div class="cc c7"><div class="cv">%s</div>%s<div class="cl">Performance Feed</div></div>'
+        '<div class="cc c8"><div class="cv">%s</div>%s<div class="cl">Qualite Feed</div></div>'
         '</div>' % (
-            sf1_p, var_p1, sf1_q, var_q1,
-            sf2_p, var_p2, sf2_q, var_q2
+            sf1_p_str, var_p1, sf1_q_str, var_q1,
+            sf2_p_str, var_p2, sf2_q_str, var_q2,
         ),
         unsafe_allow_html=True,
     )
