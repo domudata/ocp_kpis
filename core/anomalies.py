@@ -19,11 +19,12 @@ def match_exact_token(statut, codes: set) -> bool:
 
 def _backlogs_populations(dfp_all: pd.DataFrame):
     """Reconstruit les populations Backlog (préparation, planification, exécution) :
-      - zcor_cree : ZCOR ET Statut système == CRÉÉ (base totale préparation)
-      - non_prep  : non caractérisé préparation
-      - zcor_lanc : ZCOR ET Statut système == LANC ET Contient SOPL == 0 (base totale planification)
-      - non_plan  : non caractérisé planification
-      - zcor_exec : ZCOR ET Statut système == LANC (non clôturé) ET non caractérisé planif ou prépar (base totale exécution)
+      - zcor_cree     : ZCOR ET Statut système == CRÉÉ (base totale préparation)
+      - non_prep      : non caractérisé préparation
+      - zcor_lanc     : ZCOR ET Statut système == LANC ET Contient SOPL == 0 (base totale planification)
+      - non_plan      : non caractérisé planification
+      - zcor_plan_age : ZCOR ET Statut système == LANC ET Statut utilisateur ATPL (stock planification par âge)
+      - zcor_exec     : ZCOR ET Statut système == LANC (non clôturé) ET Statut utilisateur SOPL (stock exécution par âge)
     """
     zcor = dfp_all[dfp_all["Type d'ordre"] == "ZCOR"].copy()
 
@@ -38,20 +39,31 @@ def _backlogs_populations(dfp_all: pd.DataFrame):
     ].copy()
     non_plan = zcor_lanc[~zcor_lanc["Statut utilisateur"].apply(lambda x: match_exact_token(x, CODES_PLAN_EXACT))].copy()
 
+    # Planification par âge : LANC + ATPL (définition officielle OCP)
+    _contient_atpl = (
+        zcor_lanc["Statut utilisateur"].fillna("").astype(str).str.contains("ATPL", case=False, na=False)
+        | zcor_lanc["Statut utilisateur"].apply(lambda x: match_exact_token(x, CODES_PLAN_EXACT))
+    )
+    zcor_plan_age = zcor_lanc[_contient_atpl].copy()
+
+    # Exécution par âge : LANC + SOPL (définition officielle OCP)
     _statut_lanc_ex = (
         (zcor["Statut système"].fillna("").astype(str).str.strip().str.split().str[0] == "LANC")
         | (zcor["Statut système"].fillna("").astype(str).str.contains("LANC", na=False)
            & ~zcor["Statut système"].fillna("").astype(str).str.contains("CLOT|TCLO", na=False))
     )
     _non_clot_ex = ~zcor["Statut OT"].isin(["CLOT", "TCLO"]) if "Statut OT" in zcor.columns else True
-    _pas_carac_ex = ~zcor["Statut utilisateur"].apply(lambda x: match_exact_token(x, CODES_PLAN_EXACT))
-    zcor_exec = zcor[_statut_lanc_ex & _non_clot_ex & _pas_carac_ex].copy()
+    _contient_sopl_ex = (
+        (zcor["Contient SOPL"] == 1) if "Contient SOPL" in zcor.columns
+        else zcor["Statut utilisateur"].fillna("").astype(str).str.contains("SOPL", case=False, na=False)
+    )
+    zcor_exec = zcor[_statut_lanc_ex & _non_clot_ex & _contient_sopl_ex].copy()
 
-    return zcor_cree, non_prep, zcor_lanc, non_plan, zcor_exec
+    return zcor_cree, non_prep, zcor_lanc, non_plan, zcor_exec, zcor_plan_age
 
 
 def _backlogs_non_caracterises(dfp_all: pd.DataFrame):
-    _, non_prep, _, non_plan, _ = _backlogs_populations(dfp_all)
+    _, non_prep, _, non_plan, _, _ = _backlogs_populations(dfp_all)
     return non_prep, non_plan
 
 
@@ -69,7 +81,7 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
     dfp_all = dfp_toutes_dates.copy() if dfp_toutes_dates is not None else dfp
 
     # ── Populations Backlog préparation/planification (SYNCHRONISÉ avec calcul_kpi.py)
-    zcor_cree, non_prep, zcor_lanc, non_plan, zcor_exec = _backlogs_populations(dfp_all)
+    zcor_cree, non_prep, zcor_lanc, non_plan, zcor_exec, zcor_plan_age = _backlogs_populations(dfp_all)
 
     _statut_lanc_ano = dfp["Statut système"].fillna("").astype(str).str.contains("LANC", na=False) | (dfp["Statut OT"] == "LANC")
     plan_filt = (dfp["Statut OT"] == "LANC") & (dfp["Statut utilisateur"].str.contains("ATPL", case=False, na=False))
@@ -94,12 +106,12 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
     ano_map["OT préparation 1mois< <3mois"] = zcor_cree[zcor_cree["ap"] == "1 mois < <3 mois"].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["OT préparation >3 mois"] = zcor_cree[zcor_cree["ap"] == ">3 mois"].groupby("Poste travail princ.")["Ordre"].count()
 
-    # ── OT planification <1/1-3/>3 mois — SUR LE BACKLOG COMPLET PLANIFICATION (zcor_lanc) ──
+    # ── OT planification <1/1-3/>3 mois — SUR LE STOCK PLANIFICATION (zcor_plan_age : LANC + ATPL) ──
     ano_map["OT planification <1 mois"] = pd.Series(0, index=_all_posts)
-    ano_map["OT planification 1mois< <3mois"] = zcor_lanc[zcor_lanc["alp"] == "1 mois < <3 mois"].groupby("Poste travail princ.")["Ordre"].count()
-    ano_map["OT planification >3 mois"] = zcor_lanc[zcor_lanc["alp"] == ">3 mois"].groupby("Poste travail princ.")["Ordre"].count()
+    ano_map["OT planification 1mois< <3mois"] = zcor_plan_age[zcor_plan_age["alp"] == "1 mois < <3 mois"].groupby("Poste travail princ.")["Ordre"].count()
+    ano_map["OT planification >3 mois"] = zcor_plan_age[zcor_plan_age["alp"] == ">3 mois"].groupby("Poste travail princ.")["Ordre"].count()
 
-    # ── OT exécution <1/1-3/>3 mois (OT lancé, type ZCOR, non caractérisé planif ou prépar) ──
+    # ── OT exécution <1/1-3/>3 mois (zcor_exec : LANC + SOPL) ──
     ano_map["OT exécution <1 mois"] = pd.Series(0, index=_all_posts)
     ano_map["OT exécution 1mois< <3mois"] = zcor_exec[zcor_exec["aex"] == "1 mois < <3 mois"].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["OT exécution >3 mois"] = zcor_exec[zcor_exec["aex"] == ">3 mois"].groupby("Poste travail princ.")["Ordre"].count()
@@ -171,7 +183,7 @@ def build_anomaly_dfs(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
     """
     dfp_all = dfp_toutes_dates.copy() if dfp_toutes_dates is not None else dfp
 
-    zcor_cree, non_prep, zcor_lanc, non_plan, zcor_exec = _backlogs_populations(dfp_all)
+    zcor_cree, non_prep, zcor_lanc, non_plan, zcor_exec, zcor_plan_age = _backlogs_populations(dfp_all)
 
     _statut_lanc_ano = dfp["Statut système"].fillna("").astype(str).str.contains("LANC", na=False) | (dfp["Statut OT"] == "LANC")
     plan_filt = (dfp["Statut OT"] == "LANC") & (dfp["Statut utilisateur"].str.contains("ATPL", case=False, na=False))
@@ -183,9 +195,9 @@ def build_anomaly_dfs(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
         "OT préparation <1 mois": zcor_cree.iloc[0:0].copy(),
         "OT préparation 1mois< <3mois": zcor_cree[zcor_cree["ap"] == "1 mois < <3 mois"].copy(),
         "OT préparation >3 mois": zcor_cree[zcor_cree["ap"] == ">3 mois"].copy(),
-        "OT planification <1 mois": zcor_lanc.iloc[0:0].copy(),
-        "OT planification 1mois< <3mois": zcor_lanc[zcor_lanc["alp"] == "1 mois < <3 mois"].copy(),
-        "OT planification >3 mois": zcor_lanc[zcor_lanc["alp"] == ">3 mois"].copy(),
+        "OT planification <1 mois": zcor_plan_age.iloc[0:0].copy(),
+        "OT planification 1mois< <3mois": zcor_plan_age[zcor_plan_age["alp"] == "1 mois < <3 mois"].copy(),
+        "OT planification >3 mois": zcor_plan_age[zcor_plan_age["alp"] == ">3 mois"].copy(),
         "OT exécution <1 mois": zcor_exec.iloc[0:0].copy(),
         "OT exécution 1mois< <3mois": zcor_exec[zcor_exec["aex"] == "1 mois < <3 mois"].copy(),
         "OT exécution >3 mois": zcor_exec[zcor_exec["aex"] == ">3 mois"].copy(),
