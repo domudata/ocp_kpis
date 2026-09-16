@@ -278,7 +278,12 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str, calc_version: 
 
     _type_av = raw_av["Type d'avis"].fillna("").astype(str).str.strip().str.upper()
     _ordre_vide = raw_av["Ordre"].isna() | (raw_av["Ordre"].astype(str).str.strip() == "")
-    avf = raw_av[_ordre_vide & _type_av.isin(["ZU", "Z4", "ZR", "ZP"])].copy()
+    _is_aclo = pd.Series(False, index=raw_av.index)
+    if "Statut système" in raw_av.columns:
+        _is_aclo = _is_aclo | raw_av["Statut système"].fillna("").astype(str).str.contains("ACLO", case=False, na=False)
+    if "Statut utilisateur" in raw_av.columns:
+        _is_aclo = _is_aclo | raw_av["Statut utilisateur"].fillna("").astype(str).str.contains("ACLO", case=False, na=False)
+    avf = raw_av[_ordre_vide & _type_av.isin(["ZU", "Z4", "ZR", "ZP"]) & ~_is_aclo].copy()
 
     apm = sorted(
         df[
