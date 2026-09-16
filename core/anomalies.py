@@ -44,7 +44,7 @@ def _backlogs_populations(dfp_all: pd.DataFrame):
            & ~zcor["Statut système"].fillna("").astype(str).str.contains("CLOT|TCLO", na=False))
     )
     _non_clot_ex = ~zcor["Statut OT"].isin(["CLOT", "TCLO"]) if "Statut OT" in zcor.columns else True
-    _pas_carac_ex = ~zcor["Statut utilisateur"].apply(lambda x: match_exact_token(x, ALL_CARAC_EXACT))
+    _pas_carac_ex = ~zcor["Statut utilisateur"].apply(lambda x: match_exact_token(x, CODES_PLAN_EXACT))
     zcor_exec = zcor[_statut_lanc_ex & _non_clot_ex & _pas_carac_ex].copy()
 
     return zcor_cree, non_prep, zcor_lanc, non_plan, zcor_exec
@@ -108,9 +108,11 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
     ano_map["Performance Inspection"] = dfp[perf_filt & (dfp["_tw_num"].isin([290, 300, 310])) & (dfp["Date de début planifiée"] <= now_ts)].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["Performance Systématiques"] = dfp[perf_filt & (dfp["_tw_num"] == 360) & (dfp["Date de début planifiée"] <= now_ts)].groupby("Poste travail princ.")["Ordre"].count()
 
-    # Taux d'approbation des Avis : anomalie = Statut système contient AOUV (Avis Ouvert sans OT)
-    _is_aouv = avf["Statut système"].fillna("").astype(str).str.contains("AOUV", case=False, na=False)
-    ano_map["Taux d'approbation des Avis"] = avf[_is_aouv].groupby("Poste travail princ.")["Avis"].count()
+    # Taux d'approbation des Avis : anomalie = avis sans ordre non approuvés (sans statut APRV)
+    _stat_ut = avf["Statut utilisateur"].fillna("").astype(str) if "Statut utilisateur" in avf.columns else pd.Series("", index=avf.index)
+    _stat_sys = avf["Statut système"].fillna("").astype(str) if "Statut système" in avf.columns else pd.Series("", index=avf.index)
+    _is_aprv = _stat_ut.str.contains("APRV", case=False, na=False) | _stat_sys.str.contains("APRV", case=False, na=False)
+    ano_map["Taux d'approbation des Avis"] = avf[~_is_aprv].groupby("Poste travail princ.")["Avis"].count()
 
     # OT LANC ESTIME : contient LANC, type ZCOR, et Total coûts budgétés == 0 (anomalie)
     _lanc_estime_ano = _statut_lanc_ano & (dfp["Type d'ordre"] == "ZCOR") & (dfp["OT LANC ESTIME"] == "NON")
@@ -166,10 +168,13 @@ def build_anomaly_dfs(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
 
     zcor_cree, non_prep, zcor_lanc, non_plan, zcor_exec = _backlogs_populations(dfp_all)
 
-    _statut_lanc_ano = dfp["Statut système"].fillna("").astype(str).str.contains("LANC", na=False) | (dfp["Statut OT"] == "LANC")
+    _stat_lanc_ano = dfp["Statut système"].fillna("").astype(str).str.contains("LANC", na=False) | (dfp["Statut OT"] == "LANC")
     plan_filt = (dfp["Statut OT"] == "LANC") & (dfp["Statut utilisateur"].str.contains("ATPL", case=False, na=False))
     perf_filt = (dfp["Contient SOPL"] == 1) & (~dfp["Statut OT"].isin(["CLOT", "TCLO"]))
     _lanc_estime_ano = _statut_lanc_ano & (dfp["Type d'ordre"] == "ZCOR") & (dfp["OT LANC ESTIME"] == "NON")
+    _stat_ut = avf["Statut utilisateur"].fillna("").astype(str) if "Statut utilisateur" in avf.columns else pd.Series("", index=avf.index)
+    _stat_sys = avf["Statut système"].fillna("").astype(str) if "Statut système" in avf.columns else pd.Series("", index=avf.index)
+    _is_aprv = _stat_ut.str.contains("APRV", case=False, na=False) | _stat_sys.str.contains("APRV", case=False, na=False)
 
     return {
         "TAUX_REALISATION_CORRECTIF/PT": dfp[(dfp["Nº appel pl.entret."].fillna(0) == 0) & (dfp["Contient SOPL"] == 1) & (~dfp["Statut OT"].isin(["CLOT", "TCLO"]))].copy(),
@@ -186,7 +191,7 @@ def build_anomaly_dfs(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
         "Performance Graissage": dfp[perf_filt & (dfp["_tw_num"] == 350)].copy(),
         "Performance Inspection": dfp[perf_filt & (dfp["_tw_num"].isin([290, 300, 310])) & (dfp["Date de début planifiée"] <= now_ts)].copy(),
         "Performance Systématiques": dfp[perf_filt & (dfp["_tw_num"] == 360) & (dfp["Date de début planifiée"] <= now_ts)].copy(),
-        "Taux d'approbation des Avis": avf[avf["Statut système"].fillna("").astype(str).str.contains("AOUV", case=False, na=False)].copy(),
+        "Taux d'approbation des Avis": avf[~_is_aprv].copy(),
         "OT LANC ESTIME": dfp[_lanc_estime_ano].copy(),
         "Backlog préparation caractérisé": non_prep.copy(),
         "Backlog planification caractérisé": non_plan.copy(),
