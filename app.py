@@ -81,7 +81,7 @@ def calc_kpis_cached(_df_period, _avdf_period, now_ts, apm_tuple, fichier_date, 
 
 
 @st.cache_data(show_spinner="Chargement et préparation des données...")
-def get_prepared_data(fichier_date, ot_mtime, av_mtime):
+def get_prepared_data(fichier_date, ot_mtime, av_mtime, calc_version=CALC_VERSION):
     ot_bytes = av_bytes = None
     if os.path.exists("ot.xlsx") and os.path.exists("avis.xlsx"):
         with open("ot.xlsx", "rb") as f:
@@ -89,8 +89,8 @@ def get_prepared_data(fichier_date, ot_mtime, av_mtime):
         with open("avis.xlsx", "rb") as f:
             av_bytes = f.read()
     if ot_bytes and av_bytes:
-        return prepare_data(ot_bytes, av_bytes, fichier_date)
-    return pd.DataFrame(), pd.DataFrame(), [], pd.Timestamp.now(), pd.DataFrame()
+        return prepare_data(ot_bytes, av_bytes, fichier_date, calc_version=calc_version)
+    return pd.DataFrame(), pd.DataFrame(), [], pd.Timestamp.today().normalize(), pd.DataFrame()
 
 
 def main() -> None:
@@ -168,7 +168,7 @@ def main() -> None:
 
     ot_mtime = os.path.getmtime("ot.xlsx") if os.path.exists("ot.xlsx") else 0
     av_mtime = os.path.getmtime("avis.xlsx") if os.path.exists("avis.xlsx") else 0
-    df_full, av_full, apm, now_ts, avis_complet_full = get_prepared_data(fichier_date, ot_mtime, av_mtime)
+    df_full, av_full, apm, now_ts, avis_complet_full = get_prepared_data(fichier_date, ot_mtime, av_mtime, calc_version=CALC_VERSION)
 
     ctx = render_sidebar(fichier_date, apm, df_full, av_full, now_ts)
     vp      = ctx["vp"]
@@ -234,13 +234,12 @@ def main() -> None:
                 n_s, d_s = nd_full[kpi]
                 p_sub = [p for p in posts if p in n_s.index]
                 if p_sub:
-                    sn = n_s.loc[p_sub].sum()
-                    sd = d_s.loc[p_sub].sum()
-                    return (sn / sd * 100.0) if sd > 0 else 100.0
+                    default_val = 0.0 if is_lb(kpi) else 100.0
+                    return (sn / sd * 100.0) if sd > 0 else default_val
             p_sub = [p for p in posts if p in ckdf.index]
             if p_sub and kpi in ckdf.columns:
                 return float(ckdf.loc[p_sub, kpi].mean(skipna=True))
-            return 0.0
+            return 0.0 if is_lb(kpi) else 100.0
 
         # ── Score Performance / Qualite PAR POSTE (méthode 0 et 1) ──
         pscores = {}
