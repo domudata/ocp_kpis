@@ -6,7 +6,11 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-from core.constants import MP_KW, MPLAN_KW, CODES_PREP_EXACT, CODES_PLAN_EXACT
+from core.constants import MP_KW, MPLAN_KW
+
+CODES_PREP_EXACT = {"ATPD", "ATMR", "ATER", "ATRS", "ATMO"}
+CODES_PLAN_EXACT = {"ATEI", "ATAL", "ATAS", "AGAR", "ATHS"}
+
 
 
 # ──────────────────────────────────────────────
