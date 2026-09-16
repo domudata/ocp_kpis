@@ -135,11 +135,21 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
         an["TOTAL_OT"] == 0, 100.0, ckpi(an["OT_CLOTURES"], an["TOTAL_OT"])
     )
 
-    # ── Exécution (demande explicite : contient LANC, Contient SOPL == 1, tout type) ──
-    _statut_lanc = df["Statut système"].fillna("").astype(str).str.contains("LANC", na=False) | (df["Statut OT"] == "LANC")
+    # ── Exécution (demande explicite : OT lancé, type ZCOR, non caractérisé planif ou prépar) ──
+    # Âge (jours) = Date de l'extraction (now_ts) - Date de début planifiée (colonne 'aex')
+    _statut_lanc_ex = (
+        (df_all["Statut système"].fillna("").astype(str).str.strip().str.split().str[0] == "LANC")
+        | (df_all["Statut système"].fillna("").astype(str).str.contains("LANC", na=False)
+           & ~df_all["Statut système"].fillna("").astype(str).str.contains("CLOT|TCLO", na=False))
+    )
+    _non_clot_ex = ~df_all["Statut OT"].isin(["CLOT", "TCLO"]) if "Statut OT" in df_all.columns else True
+    _zcor_ex = (df_all["Type d'ordre"] == "ZCOR") & _statut_lanc_ex & _non_clot_ex
+    _pas_carac_ex = ~df_all["Statut utilisateur"].apply(lambda x: match_exact_token(x, ALL_CARAC_EXACT))
+    _zcor_exec_all = df_all[_zcor_ex & _pas_carac_ex].copy()
+
     ex = cpiv(
-        df,
-        _statut_lanc & (df["Contient SOPL"] == 1),
+        _zcor_exec_all,
+        pd.Series(True, index=_zcor_exec_all.index),
         "aex", posts
     )
     for c in ["<1 mois", ">3 mois", "1 mois < <3 mois", "Inconnu"]:
@@ -151,6 +161,7 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     ex["OT exécution >3 mois"] = ckpi(ex[">3 mois"], ex["Total"], 0)
 
     # ── OT LANC ESTIME — CONTIENT LANC ET TYPE ZCOR (demande explicite : statut contient LANC, type ZCOR, budget=0 anomalie) ──
+    _statut_lanc = df["Statut système"].fillna("").astype(str).str.contains("LANC", na=False) | (df["Statut OT"] == "LANC")
     _lanc_scope = df[_statut_lanc & (df["Type d'ordre"] == "ZCOR")]
     la = pd.pivot_table(
         _lanc_scope,
@@ -272,17 +283,18 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     # sur données réelles). Voir prepare_data.py pour la définition d'avf.
     avf = av.copy()
     res['avf'] = avf
-    # Avis approuvés : statut utilisateur contient APRV
-    _is_aprv = avf["Statut utilisateur"].fillna("").astype(str).str.contains("APRV", case=False, na=False)
-    # Avis en attente d'approbation : statut utilisateur contient APRQ (anomalies)
-    _is_aprq = avf["Statut utilisateur"].fillna("").astype(str).str.contains("APRQ", case=False, na=False) & ~_is_aprv
-    avf_aprv = avf[_is_aprv].groupby("Poste travail princ.")["Avis"].count().reindex(posts, fill_value=0)
-    avf_aprq = avf[_is_aprq].groupby("Poste travail princ.")["Avis"].count().reindex(posts, fill_value=0)
-    avf_tot = avf_aprv + avf_aprq
+    # Total avis sans ordre et hors ZU/Z4/ZR/ZP par poste (population avf)
+    avf_tot = avf.groupby("Poste travail princ.")["Avis"].count().reindex(posts, fill_value=0)
+    # Anomalie : Statut système contient AOUV (Avis Ouvert sans OT)
+    _is_aouv = avf["Statut système"].fillna("").astype(str).str.contains("AOUV", case=False, na=False)
+    avf_aouv = avf[_is_aouv].groupby("Poste travail princ.")["Avis"].count().reindex(posts, fill_value=0)
+    # Conformes : avis traités/approuvés (ne contenant pas AOUV)
+    avf_conf = avf_tot - avf_aouv
     tca = pd.DataFrame({
-        "APRV": avf_aprv,
+        "CONFORME": avf_conf,
+        "AOUV": avf_aouv,
         "Total": avf_tot,
-        "Taux d'approbation des Avis": np.where(avf_tot == 0, 100.0, (avf_aprv / avf_tot) * 100.0)
+        "Taux d'approbation des Avis": np.where(avf_tot == 0, 100.0, (avf_conf / avf_tot) * 100.0)
     }, index=posts)
 
     # ── Performance Graissage (inchangé) ──
@@ -371,7 +383,7 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
         "Performance Graissage": (g_df["_n"], g_df["_d"]),
         "Performance Inspection": (ins_df["_n"], ins_df["_d"]),
         "Performance Systématiques": (sys_df["_n"], sys_df["_d"]),
-        "Taux d'approbation des Avis": (tca["APRV"], tca["Total"]),
+        "Taux d'approbation des Avis": (tca["CONFORME"], tca["Total"]),
         "OT LANC ESTIME": (la["OUI"], la["Total"]),
         "Backlog préparation caractérisé": (pc["CARACTERISE"], pc["Total"]),
         "Backlog planification caractérisé": (plc["CARACTERISE"], plc["Total"]),
