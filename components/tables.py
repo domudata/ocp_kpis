@@ -105,7 +105,7 @@ def html_table(rows: list, cols: list, tc: str, sc_col=None) -> str:
             elif is_total:
                 style = "font-weight:800;font-size:12px;text-align:center;"
                 if c != "Poste de travail":
-                    s = cs(v)
+                    s = cs(v) if sc_col and c in sc_col else ks(v, c)
                     if s:
                         clean = s.replace("font-weight:600", "").replace("font-weight:700", "")
                         style += clean
