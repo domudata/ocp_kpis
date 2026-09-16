@@ -144,7 +144,7 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     )
     _non_clot_ex = ~df_all["Statut OT"].isin(["CLOT", "TCLO"]) if "Statut OT" in df_all.columns else True
     _zcor_ex = (df_all["Type d'ordre"] == "ZCOR") & _statut_lanc_ex & _non_clot_ex
-    _pas_carac_ex = ~df_all["Statut utilisateur"].apply(lambda x: match_exact_token(x, ALL_CARAC_EXACT))
+    _pas_carac_ex = ~df_all["Statut utilisateur"].apply(lambda x: match_exact_token(x, CODES_PLAN_EXACT))
     _zcor_exec_all = df_all[_zcor_ex & _pas_carac_ex].copy()
 
     ex = cpiv(
@@ -285,16 +285,15 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     res['avf'] = avf
     # Total avis sans ordre et hors ZU/Z4/ZR/ZP par poste (population avf)
     avf_tot = avf.groupby("Poste travail princ.")["Avis"].count().reindex(posts, fill_value=0)
-    # Anomalie : Statut système contient AOUV (Avis Ouvert sans OT)
-    _is_aouv = avf["Statut système"].fillna("").astype(str).str.contains("AOUV", case=False, na=False)
-    avf_aouv = avf[_is_aouv].groupby("Poste travail princ.")["Avis"].count().reindex(posts, fill_value=0)
-    # Conformes : avis traités/approuvés (ne contenant pas AOUV)
-    avf_conf = avf_tot - avf_aouv
+    # Avis approuvés : statut contient APRV (statut utilisateur ou système)
+    _stat_ut = avf["Statut utilisateur"].fillna("").astype(str) if "Statut utilisateur" in avf.columns else pd.Series("", index=avf.index)
+    _stat_sys = avf["Statut système"].fillna("").astype(str) if "Statut système" in avf.columns else pd.Series("", index=avf.index)
+    _is_aprv = _stat_ut.str.contains("APRV", case=False, na=False) | _stat_sys.str.contains("APRV", case=False, na=False)
+    avf_aprv = avf[_is_aprv].groupby("Poste travail princ.")["Avis"].count().reindex(posts, fill_value=0)
     tca = pd.DataFrame({
-        "CONFORME": avf_conf,
-        "AOUV": avf_aouv,
+        "APRV": avf_aprv,
         "Total": avf_tot,
-        "Taux d'approbation des Avis": np.where(avf_tot == 0, 100.0, (avf_conf / avf_tot) * 100.0)
+        "Taux d'approbation des Avis": np.where(avf_tot == 0, 100.0, (avf_aprv / avf_tot) * 100.0)
     }, index=posts)
 
     # ── Performance Graissage (inchangé) ──
@@ -383,7 +382,7 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
         "Performance Graissage": (g_df["_n"], g_df["_d"]),
         "Performance Inspection": (ins_df["_n"], ins_df["_d"]),
         "Performance Systématiques": (sys_df["_n"], sys_df["_d"]),
-        "Taux d'approbation des Avis": (tca["CONFORME"], tca["Total"]),
+        "Taux d'approbation des Avis": (tca["APRV"], tca["Total"]),
         "OT LANC ESTIME": (la["OUI"], la["Total"]),
         "Backlog préparation caractérisé": (pc["CARACTERISE"], pc["Total"]),
         "Backlog planification caractérisé": (plc["CARACTERISE"], plc["Total"]),
