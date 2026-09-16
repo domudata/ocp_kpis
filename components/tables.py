@@ -103,11 +103,12 @@ def html_table(rows: list, cols: list, tc: str, sc_col=None) -> str:
             if is_cible:
                 h += '<td style="background:#1e3a5f;color:#FFFFFF;font-weight:bold;text-align:center;">%s</td>' % v
             elif is_total:
-                s = cs(v) if sc_col and c in sc_col else ks(v, c)
                 style = "font-weight:800;font-size:12px;text-align:center;"
-                if s:
-                    clean = s.replace("font-weight:600", "").replace("font-weight:700", "")
-                    style += clean
+                if c != "Poste de travail":
+                    s = cs(v)
+                    if s:
+                        clean = s.replace("font-weight:600", "").replace("font-weight:700", "")
+                        style += clean
                 h += '<td style="%s">%s</td>' % (style, v)
             else:
                 s = cs(v) if sc_col and c in sc_col else ks(v, c)
