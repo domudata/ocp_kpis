@@ -1,8 +1,10 @@
 # -*- coding: utf-8 -*-
+import re
 import numpy as np
 import pandas as pd
 
 from core.constants import MP_KW, MPLAN_KW, QK, PK, CIBLE, LOWER_BETTER
+
 
 # ──────────────────────────────────────────────
 # Utilitaires de calcul
@@ -83,24 +85,23 @@ def is_lb(k: str) -> bool:
 
 
 # ──────────────────────────────────────────────
-# Correspondance EXACTE pour Backlog préparation/planification
-# (AJOUTÉ — logique convenue explicitement) :
-#   CARACTERISE = Statut utilisateur ÉGAL STRICTEMENT (après suppression
-#   des espaces superflus) à l'un des codes ci-dessous — aucune addition
-#   avant ou après n'est tolérée (ex. "CRPR ATPD" NE compte PAS, seul
-#   "ATPD" seul compte). Périmètre : OT de type ZCOR uniquement.
+# Caractérisation Backlog préparation/planification
+# Périmètre : OT de type ZCOR uniquement.
+# Logique : "pas contient exacte mais il existe le mot"
 # ──────────────────────────────────────────────
 
 CODES_PREP_EXACT = {"ATPD", "ATMR", "ATER", "ATRS", "ATMO"}
 CODES_PLAN_EXACT = {"ATEI", "ATAL", "ATAS", "AGAR", "ATHS"}
+ALL_CARAC_EXACT = CODES_PREP_EXACT | CODES_PLAN_EXACT
 
 
 def match_exact_token(statut, codes: set) -> bool:
-    """True si statut, une fois débarrassé des espaces superflus, est
-    ÉGAL STRICTEMENT à l'un des codes — aucune tolérance de préfixe/suffixe."""
+    """True si au moins un des codes existe comme mot dans le statut utilisateur SAP
+    ('pas contient exacte mais il existe le mot', gère 'CRPR ATPD', 'ATPL ATAL', 'CRPR/ATPD', 'ATPD', etc.)."""
     if statut is None or (isinstance(statut, float) and pd.isna(statut)):
         return False
-    return str(statut).strip().upper() in codes
+    words = set(re.findall(r'[A-Za-z0-9]+', str(statut).upper()))
+    return bool(words & codes)
 
 
 # ──────────────────────────────────────────────
@@ -135,10 +136,10 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
         an["TOTAL_OT"] == 0, 100.0, ckpi(an["OT_CLOTURES"], an["TOTAL_OT"])
     )
 
-    # ── Exécution (inchangé) ──
+    # ── Exécution (demande explicite : restriction ZCOR) ──
     ex = cpiv(
         df,
-        (df["Statut OT"] == "LANC") & (df["Contient SOPL"] == 1),
+        (df["Statut OT"] == "LANC") & (df["Contient SOPL"] == 1) & (df["Type d'ordre"] == "ZCOR"),
         "aex", posts
     )
     for c in ["<1 mois", ">3 mois", "1 mois < <3 mois", "Inconnu"]:
@@ -148,10 +149,9 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     ex["OT exécution >3 mois"] = ckpi(ex[">3 mois"], ex["Total"], 0)
     ex["OT exécution 1mois< <3mois"] = ckpi(ex["1 mois < <3 mois"], ex["Total"], 0)
 
-    # ── OT lancé estimé (inchangé) ──
-    # ── OT LANC ESTIME — AJOUT SOPL + ZCOR (demande explicite) ──
+    # ── OT LANC ESTIME — TOUT OT ZCOR LANCÉ SANS FILTRE DE DATE (demande explicite) ──
     la = pd.pivot_table(
-        df[(df["Statut OT"] == "LANC") & (df["Contient SOPL"] == 1) & (df["Type d'ordre"] == "ZCOR")],
+        df_all[(df_all["Statut OT"] == "LANC") & (df_all["Type d'ordre"] == "ZCOR")],
         index="Poste travail princ.",
         columns="OT LANC ESTIME", values="Ordre", aggfunc="count", fill_value=0
     ).reindex(posts, fill_value=0)
@@ -187,10 +187,9 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     pc["Total"] = pc["CARACTERISE"] + pc["NON CARACTERISE"]
     pc["Backlog préparation caractérisé"] = ckpi(pc["CARACTERISE"], pc["Total"])
 
-    # ── Backlog planification caractérisé — NOUVELLE LOGIQUE (convenue) ──
-    # Périmètre : ZCOR ET Statut système == LANC, sur df_all.
-    # Caractérisé = Statut utilisateur égal STRICTEMENT à ATEI/ATAL/ATAS/AGAR/ATHS.
-    # Périmètre planification : ZCOR ET Statut système == LANC ET Contient SOPL == 0
+    # ── Backlog planification caractérisé — SYNCHRONISÉ ──
+    # Périmètre : ZCOR ET Statut système == LANC ET Contient SOPL == 0, sur df_all.
+    # Caractérisé = Statut utilisateur contient ATPL ou un motif ATEI/ATAL/ATAS/AGAR/ATHS.
     _zcor_lanc_all = _zcor_all[
         (_zcor_all["Statut système"].fillna("").astype(str).str.strip().str.split().str[0] == "LANC")
         & (_zcor_all["Contient SOPL"] == 0)
@@ -208,16 +207,12 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     plc["Total"] = plc["CARACTERISE"] + plc["NON CARACTERISE"]
     plc["Backlog planification caractérisé"] = ckpi(plc["CARACTERISE"], plc["Total"])
 
-    # ── OT préparation <1/1-3/>3 mois — NOUVELLE LOGIQUE (convenue) ──
-    # Base = OT NON CARACTERISE du Backlog préparation ci-dessus (ZCOR +
-    # Statut=CRÉÉ), répartis selon leur âge ("ap" = depuis "Créé le").
-    # ── OT préparation <1/1-3/>3 mois — CONFIRMÉ (clarification explicite) ──
-    # Base = uniquement la part NON CARACTERISE du Backlog préparation
-    # (ZCOR + CRÉÉ + non caractérisé), répartie selon l'âge ("ap" = depuis
-    # "Créé le"). La somme des 3 tranches d'âge est donc égale au nombre
-    # de NON CARACTERISE — PAS au Total (caractérisé + non caractérisé).
-    _non_prep_age = _zcor_cree_all[_zcor_cree_all["_prep_carac"] == "NON CARACTERISE"]
-    pr = cpiv(_non_prep_age, pd.Series(True, index=_non_prep_age.index), "ap", posts)
+    # ── OT préparation <1/1-3/>3 mois — DÉPEUPLEMENT SUR OT NON CARACTÉRISÉS (consigne explicite) ──
+    # Base = ensemble des OT NON CARACTÉRISÉS du Backlog préparation (ZCOR + Statut système=CRÉÉ + non caractérisé),
+    # répartis selon leur âge ("ap" = jours écoulés depuis "Créé le").
+    # La somme des tranches d'âge est exactement égale au NOMBRE D'OT NON CARACTÉRISÉS (pc["NON CARACTERISE"]).
+    _zcor_cree_non_carac = _zcor_cree_all[_zcor_cree_all["_prep_carac"] == "NON CARACTERISE"].copy()
+    pr = cpiv(_zcor_cree_non_carac, pd.Series(True, index=_zcor_cree_non_carac.index), "ap", posts)
     for c in ["<1 mois", ">3 mois", "1 mois < <3 mois", "Inconnu"]:
         pr[c] = pr.get(c, 0)
     pr["Total"] = pr[["<1 mois", "1 mois < <3 mois", ">3 mois", "Inconnu"]].sum(axis=1)
@@ -225,10 +220,12 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     pr["OT préparation >3 mois"] = ckpi(pr[">3 mois"], pr["Total"], 0)
     pr["OT préparation 1mois< <3mois"] = ckpi(pr["1 mois < <3 mois"], pr["Total"], 0)
 
-    # ── OT planification <1/1-3/>3 mois — même logique, sur "alp" ──
-    # ── OT planification <1/1-3/>3 mois — même principe, sur "alp" ──
-    _non_plan_age = _zcor_lanc_all[_zcor_lanc_all["_plan_carac"] == "NON CARACTERISE"]
-    pl = cpiv(_non_plan_age, pd.Series(True, index=_non_plan_age.index), "alp", posts)
+    # ── OT planification <1/1-3/>3 mois — DÉPEUPLEMENT SUR OT NON CARACTÉRISÉS (consigne explicite) ──
+    # Base = ensemble des OT NON CARACTÉRISÉS du Backlog planification (ZCOR + Statut système=LANC + SOPL=0 + non caractérisé),
+    # répartis selon leur âge ("alp" = jours écoulés depuis "Date de début planifiée").
+    # La somme des tranches d'âge est exactement égale au NOMBRE D'OT NON CARACTÉRISÉS (plc["NON CARACTERISE"]).
+    _zcor_lanc_non_carac = _zcor_lanc_all[_zcor_lanc_all["_plan_carac"] == "NON CARACTERISE"].copy()
+    pl = cpiv(_zcor_lanc_non_carac, pd.Series(True, index=_zcor_lanc_non_carac.index), "alp", posts)
     for c in ["<1 mois", ">3 mois", "1 mois < <3 mois", "Inconnu"]:
         pl[c] = pl.get(c, 0)
     pl["Total"] = pl[["<1 mois", "1 mois < <3 mois", ">3 mois", "Inconnu"]].sum(axis=1)
