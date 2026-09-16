@@ -106,7 +106,7 @@ ACT_MAP = {
     "Performance Graissage": "Assurer la réalisation complète des tournées de graissage hebdomadaires prévues.",
     "Performance Inspection": "Réaliser l'ensemble des inspections planifiées et consigner les anomalies détectées.",
     "Performance Systématiques": "Respecter l'échéancier des interventions systématiques préventives.",
-    "Taux d'approbation des Avis": "Traiter et approuver les avis de maintenance ouverts (statut système AOUV) dans SAP.",
+    "Taux d'approbation des Avis": "Examiner et approuver les avis de maintenance en attente dans SAP (statut APRV).",
     "OT LANC ESTIME": "Renseigner systématiquement l'estimation des coûts (PDR et main d'œuvre) avant lancement de l'OT.",
     "Backlog préparation caractérisé": "Caractériser les OT non caractérisés (ATPD, ATMR, ATER, ATRS, ATMO) et réduire les OT de préparation dépassant les délais.",
     "Backlog planification caractérisé": "Qualifier le motif d'arrêt requis (ATEI, ATAL, ATAS, AGAR, ATHS) et réduire le backlog de planification ancien.",
