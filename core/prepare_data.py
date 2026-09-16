@@ -144,7 +144,7 @@ def read_excel_safe(bytes_data: bytes) -> pd.DataFrame:
 # ──────────────────────────────────────────────
 
 @st.cache_data(show_spinner=False)
-def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
+def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str, calc_version: str = None):
     raw_ot = read_excel_safe(ot_bytes)
     raw_av = read_excel_safe(av_bytes)
     raw_ot.columns = [str(c).strip() for c in raw_ot.columns]
@@ -188,13 +188,19 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
             s = raw_ot[c]
             if isinstance(s, pd.DataFrame):
                 s = s.iloc[:, 0]
-            raw_ot[c] = pd.to_datetime(s, errors="coerce", dayfirst=True)
+            parsed = pd.to_datetime(s, errors="coerce", dayfirst=True)
+            if parsed.isna().all() and len(s) > 0 and pd.to_numeric(s, errors="coerce").notna().any():
+                parsed = pd.to_datetime(pd.to_numeric(s, errors="coerce"), unit='D', origin='1899-12-30', errors="coerce")
+            raw_ot[c] = parsed
     for c in ["Créé le", "Début souhaité", "Date de la clôture"]:
         if c in raw_av.columns:
             s = raw_av[c]
             if isinstance(s, pd.DataFrame):
                 s = s.iloc[:, 0]
-            raw_av[c] = pd.to_datetime(s, errors="coerce", dayfirst=True)
+            parsed = pd.to_datetime(s, errors="coerce", dayfirst=True)
+            if parsed.isna().all() and len(s) > 0 and pd.to_numeric(s, errors="coerce").notna().any():
+                parsed = pd.to_datetime(pd.to_numeric(s, errors="coerce"), unit='D', origin='1899-12-30', errors="coerce")
+            raw_av[c] = parsed
 
     ref_date = pd.to_datetime(date_str, format="%d/%m/%Y", errors="coerce")
     now_ts = ref_date.normalize() if pd.notna(ref_date) else pd.Timestamp.today().normalize()
