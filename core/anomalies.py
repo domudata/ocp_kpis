@@ -18,11 +18,12 @@ def match_exact_token(statut, codes: set) -> bool:
 
 
 def _backlogs_populations(dfp_all: pd.DataFrame):
-    """Reconstruit les populations Backlog (préparation et planification) :
+    """Reconstruit les populations Backlog (préparation, planification, exécution) :
       - zcor_cree : ZCOR ET Statut système == CRÉÉ (base totale préparation)
       - non_prep  : non caractérisé préparation
       - zcor_lanc : ZCOR ET Statut système == LANC ET Contient SOPL == 0 (base totale planification)
       - non_plan  : non caractérisé planification
+      - zcor_exec : ZCOR ET Statut système == LANC (non clôturé) ET non caractérisé planif ou prépar (base totale exécution)
     """
     zcor = dfp_all[dfp_all["Type d'ordre"] == "ZCOR"].copy()
 
@@ -36,11 +37,21 @@ def _backlogs_populations(dfp_all: pd.DataFrame):
         & (zcor["Contient SOPL"] == 0)
     ].copy()
     non_plan = zcor_lanc[~zcor_lanc["Statut utilisateur"].apply(lambda x: match_exact_token(x, CODES_PLAN_EXACT))].copy()
-    return zcor_cree, non_prep, zcor_lanc, non_plan
+
+    _statut_lanc_ex = (
+        (zcor["Statut système"].fillna("").astype(str).str.strip().str.split().str[0] == "LANC")
+        | (zcor["Statut système"].fillna("").astype(str).str.contains("LANC", na=False)
+           & ~zcor["Statut système"].fillna("").astype(str).str.contains("CLOT|TCLO", na=False))
+    )
+    _non_clot_ex = ~zcor["Statut OT"].isin(["CLOT", "TCLO"]) if "Statut OT" in zcor.columns else True
+    _pas_carac_ex = ~zcor["Statut utilisateur"].apply(lambda x: match_exact_token(x, ALL_CARAC_EXACT))
+    zcor_exec = zcor[_statut_lanc_ex & _non_clot_ex & _pas_carac_ex].copy()
+
+    return zcor_cree, non_prep, zcor_lanc, non_plan, zcor_exec
 
 
 def _backlogs_non_caracterises(dfp_all: pd.DataFrame):
-    _, non_prep, _, non_plan = _backlogs_populations(dfp_all)
+    _, non_prep, _, non_plan, _ = _backlogs_populations(dfp_all)
     return non_prep, non_plan
 
 
@@ -58,11 +69,10 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
     dfp_all = dfp_toutes_dates.copy() if dfp_toutes_dates is not None else dfp
 
     # ── Populations Backlog préparation/planification (SYNCHRONISÉ avec calcul_kpi.py)
-    zcor_cree, non_prep, zcor_lanc, non_plan = _backlogs_populations(dfp_all)
+    zcor_cree, non_prep, zcor_lanc, non_plan, zcor_exec = _backlogs_populations(dfp_all)
 
     _statut_lanc_ano = dfp["Statut système"].fillna("").astype(str).str.contains("LANC", na=False) | (dfp["Statut OT"] == "LANC")
     plan_filt = (dfp["Statut OT"] == "LANC") & (dfp["Statut utilisateur"].str.contains("ATPL", case=False, na=False))
-    exec_filt = _statut_lanc_ano & (dfp["Contient SOPL"] == 1)
     perf_filt = (dfp["Contient SOPL"] == 1) & (~dfp["Statut OT"].isin(["CLOT", "TCLO"]))
 
     ano_map = {}
@@ -89,19 +99,18 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
     ano_map["OT planification 1mois< <3mois"] = zcor_lanc[zcor_lanc["alp"] == "1 mois < <3 mois"].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["OT planification >3 mois"] = zcor_lanc[zcor_lanc["alp"] == ">3 mois"].groupby("Poste travail princ.")["Ordre"].count()
 
-    # ── OT exécution <1/1-3/>3 mois (statut contient LANC, Contient SOPL == 1, tout type) ──
+    # ── OT exécution <1/1-3/>3 mois (OT lancé, type ZCOR, non caractérisé planif ou prépar) ──
     ano_map["OT exécution <1 mois"] = pd.Series(0, index=_all_posts)
-    ano_map["OT exécution 1mois< <3mois"] = dfp[exec_filt & (dfp["aex"] == "1 mois < <3 mois")].groupby("Poste travail princ.")["Ordre"].count()
-    ano_map["OT exécution >3 mois"] = dfp[exec_filt & (dfp["aex"] == ">3 mois")].groupby("Poste travail princ.")["Ordre"].count()
+    ano_map["OT exécution 1mois< <3mois"] = zcor_exec[zcor_exec["aex"] == "1 mois < <3 mois"].groupby("Poste travail princ.")["Ordre"].count()
+    ano_map["OT exécution >3 mois"] = zcor_exec[zcor_exec["aex"] == ">3 mois"].groupby("Poste travail princ.")["Ordre"].count()
 
     ano_map["Performance Graissage"] = dfp[perf_filt & (dfp["_tw_num"] == 350)].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["Performance Inspection"] = dfp[perf_filt & (dfp["_tw_num"].isin([290, 300, 310])) & (dfp["Date de début planifiée"] <= now_ts)].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["Performance Systématiques"] = dfp[perf_filt & (dfp["_tw_num"] == 360) & (dfp["Date de début planifiée"] <= now_ts)].groupby("Poste travail princ.")["Ordre"].count()
 
-    # Taux d'approbation des Avis : anomalies = UNIQUEMENT les avis en attente d'approbation (statut APRQ)
-    _is_aprv = avf["Statut utilisateur"].fillna("").astype(str).str.contains("APRV", case=False, na=False)
-    _is_aprq = avf["Statut utilisateur"].fillna("").astype(str).str.contains("APRQ", case=False, na=False) & ~_is_aprv
-    ano_map["Taux d'approbation des Avis"] = avf[_is_aprq].groupby("Poste travail princ.")["Avis"].count()
+    # Taux d'approbation des Avis : anomalie = Statut système contient AOUV (Avis Ouvert sans OT)
+    _is_aouv = avf["Statut système"].fillna("").astype(str).str.contains("AOUV", case=False, na=False)
+    ano_map["Taux d'approbation des Avis"] = avf[_is_aouv].groupby("Poste travail princ.")["Avis"].count()
 
     # OT LANC ESTIME : contient LANC, type ZCOR, et Total coûts budgétés == 0 (anomalie)
     _lanc_estime_ano = _statut_lanc_ano & (dfp["Type d'ordre"] == "ZCOR") & (dfp["OT LANC ESTIME"] == "NON")
@@ -155,11 +164,10 @@ def build_anomaly_dfs(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
     """
     dfp_all = dfp_toutes_dates.copy() if dfp_toutes_dates is not None else dfp
 
-    zcor_cree, non_prep, zcor_lanc, non_plan = _backlogs_populations(dfp_all)
+    zcor_cree, non_prep, zcor_lanc, non_plan, zcor_exec = _backlogs_populations(dfp_all)
 
     _statut_lanc_ano = dfp["Statut système"].fillna("").astype(str).str.contains("LANC", na=False) | (dfp["Statut OT"] == "LANC")
     plan_filt = (dfp["Statut OT"] == "LANC") & (dfp["Statut utilisateur"].str.contains("ATPL", case=False, na=False))
-    exec_filt = _statut_lanc_ano & (dfp["Contient SOPL"] == 1)
     perf_filt = (dfp["Contient SOPL"] == 1) & (~dfp["Statut OT"].isin(["CLOT", "TCLO"]))
     _lanc_estime_ano = _statut_lanc_ano & (dfp["Type d'ordre"] == "ZCOR") & (dfp["OT LANC ESTIME"] == "NON")
 
@@ -172,16 +180,13 @@ def build_anomaly_dfs(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
         "OT planification <1 mois": zcor_lanc.iloc[0:0].copy(),
         "OT planification 1mois< <3mois": zcor_lanc[zcor_lanc["alp"] == "1 mois < <3 mois"].copy(),
         "OT planification >3 mois": zcor_lanc[zcor_lanc["alp"] == ">3 mois"].copy(),
-        "OT exécution <1 mois": dfp.iloc[0:0].copy(),
-        "OT exécution 1mois< <3mois": dfp[exec_filt & (dfp["aex"] == "1 mois < <3 mois")].copy(),
-        "OT exécution >3 mois": dfp[exec_filt & (dfp["aex"] == ">3 mois")].copy(),
+        "OT exécution <1 mois": zcor_exec.iloc[0:0].copy(),
+        "OT exécution 1mois< <3mois": zcor_exec[zcor_exec["aex"] == "1 mois < <3 mois"].copy(),
+        "OT exécution >3 mois": zcor_exec[zcor_exec["aex"] == ">3 mois"].copy(),
         "Performance Graissage": dfp[perf_filt & (dfp["_tw_num"] == 350)].copy(),
         "Performance Inspection": dfp[perf_filt & (dfp["_tw_num"].isin([290, 300, 310])) & (dfp["Date de début planifiée"] <= now_ts)].copy(),
         "Performance Systématiques": dfp[perf_filt & (dfp["_tw_num"] == 360) & (dfp["Date de début planifiée"] <= now_ts)].copy(),
-        "Taux d'approbation des Avis": avf[
-            avf["Statut utilisateur"].fillna("").astype(str).str.contains("APRQ", case=False, na=False)
-            & ~avf["Statut utilisateur"].fillna("").astype(str).str.contains("APRV", case=False, na=False)
-        ].copy(),
+        "Taux d'approbation des Avis": avf[avf["Statut système"].fillna("").astype(str).str.contains("AOUV", case=False, na=False)].copy(),
         "OT LANC ESTIME": dfp[_lanc_estime_ano].copy(),
         "Backlog préparation caractérisé": non_prep.copy(),
         "Backlog planification caractérisé": non_plan.copy(),
