@@ -54,30 +54,24 @@ def build_statut_pivot(df_sub: pd.DataFrame, posts: list) -> pd.DataFrame:
 
 
 def is_cell_red(k: str, a) -> bool:
+    """Détermine si une cellule est rouge (non-conforme au-delà de la tolérance de 5 points).
+    Règle universelle : tolérance de 5 points pour TOUS les indicateurs par rapport à leur cible.
+    - Si plus grand est meilleur : rouge si valeur < cible - 5 (la zone [cible-5, cible[ est en tolérance orange/jaune).
+    - Si plus petit est meilleur (LOWER_BETTER) : rouge si valeur > cible + 5 (la zone ]cible, cible+5] est en tolérance orange/jaune).
+    - 'OT Fiabilité' et 'Total Avis de Panne' restent non-rouges.
+    """
     try:
         val = float(a)
     except Exception:
         return True
     if pd.isna(val):
         return True
-    if k in ["OT préparation <1 mois", "OT planification <1 mois", "OT exécution <1 mois"]:
-        return val < 75
-    if k in ["OT préparation 1mois< <3mois", "OT planification 1mois< <3mois", "OT exécution 1mois< <3mois"]:
-        return val > 15
-    if k in ["OT préparation >3 mois", "OT planification >3 mois", "OT exécution >3 mois"]:
-        return val > 5
-    if k == "TAUX_REALISATION_CORRECTIF/PT":
-        return val < 80
-    if k == "Taux d'approbation des Avis":
-        return val < 90
-    if k in ["OT LANC ESTIME", "Backlog préparation caractérisé",
-             "Backlog planification caractérisé", "OT CONFIME", "OT_COR_EGAL"]:
-        return val < 95
-    if k in ["Performance Graissage", "Performance Inspection", "Performance Systématiques"]:
-        return val <= 90
     if k in ["OT Fiabilité", "Total Avis de Panne"]:
         return False
-    return val < 80
+    tgt = CIBLE.get(k, 100)
+    if k in LOWER_BETTER:
+        return val > (tgt + 5)
+    return val < (tgt - 5)
 
 
 def gscore(k: str, a, t=None) -> int:
@@ -141,10 +135,11 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
         an["TOTAL_OT"] == 0, 100.0, ckpi(an["OT_CLOTURES"], an["TOTAL_OT"])
     )
 
-    # ── Exécution (demande explicite : restriction ZCOR) ──
+    # ── Exécution (demande explicite : contient LANC et seulement ZCOR) ──
+    _statut_lanc = df["Statut système"].fillna("").astype(str).str.contains("LANC", na=False) | (df["Statut OT"] == "LANC")
     ex = cpiv(
         df,
-        (df["Statut OT"] == "LANC") & (df["Contient SOPL"] == 1) & (df["Type d'ordre"] == "ZCOR"),
+        _statut_lanc & (df["Contient SOPL"] == 1) & (df["Type d'ordre"] == "ZCOR"),
         "aex", posts
     )
     for c in ["<1 mois", ">3 mois", "1 mois < <3 mois", "Inconnu"]:
@@ -154,9 +149,10 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     ex["OT exécution >3 mois"] = ckpi(ex[">3 mois"], ex["Total"], 0)
     ex["OT exécution 1mois< <3mois"] = ckpi(ex["1 mois < <3 mois"], ex["Total"], 0)
 
-    # ── OT LANC ESTIME — STATUT LANC SUR LA PÉRIODE COURANTE (demande explicite : suppression ZCOR, reste comme les autres) ──
+    # ── OT LANC ESTIME — CONTIENT LANC ET TYPE ZCOR (demande explicite : statut contient LANC, type ZCOR, budget=0 anomalie) ──
+    _lanc_scope = df[_statut_lanc & (df["Type d'ordre"] == "ZCOR")]
     la = pd.pivot_table(
-        df[df["Statut OT"] == "LANC"],
+        _lanc_scope,
         index="Poste travail princ.",
         columns="OT LANC ESTIME", values="Ordre", aggfunc="count", fill_value=0
     ).reindex(posts, fill_value=0)
