@@ -4,6 +4,7 @@ import streamlit as st
 def inject_custom_css() -> None:
     st.markdown("""<style>
     section[data-testid="stSidebar"]{width:250px!important}
+    [data-testid="stSidebarNav"], [data-testid="stSidebarNavItems"], section[data-testid="stSidebar"] nav {display:none!important}
     .main .block-container{max-width:100%!important;width:100%!important;padding-left:0.5rem!important;padding-right:0.5rem!important}
     @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700;800&display=swap');
 
