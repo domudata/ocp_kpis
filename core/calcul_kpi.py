@@ -90,7 +90,7 @@ def is_lb(k: str) -> bool:
 # ──────────────────────────────────────────────
 
 CODES_PREP_EXACT = {"ATPD", "ATMR", "ATER", "ATRS", "ATMO"}
-CODES_PLAN_EXACT = {"ATEI", "ATAL", "ATAS", "AGAR", "ATHS"}
+CODES_PLAN_EXACT = {"ATPL", "ATEI", "ATAL", "ATAS", "AGAR", "ATHS"}
 ALL_CARAC_EXACT = CODES_PREP_EXACT | CODES_PLAN_EXACT
 
 
@@ -266,12 +266,12 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     pv_conf["OT CONFIME"] = ckpi(pv_conf["OUI"], pv_conf["Total"])
     res["ot_confime"] = pv_conf
 
-    # ── OT_COR_EGAL — (Périmètre ZCOR + CLOT/TCLO, conforme si budget != réel ET réel != 0) ──
+    # ── OT_COR_EGAL — (Périmètre ZCOR + CLOT/TCLO, conforme si budget != réel ET réel > 0) ──
     _statut_clot_tclo = df["Statut OT"].isin(["CLOT", "TCLO"]) | df["Statut système"].str.contains("CLOT|TCLO", na=False)
     _scope_cor = df[_statut_clot_tclo & (df["Type d'ordre"] == "ZCOR")].copy()
     _budget = pd.to_numeric(_scope_cor["Total coûts budgétés"], errors="coerce").fillna(0)
     _reel = pd.to_numeric(_scope_cor["Total coûts réels"], errors="coerce").fillna(0)
-    _scope_cor["_is_conforme"] = np.where((_budget != _reel) & (_reel != 0), "OUI", "NON")
+    _scope_cor["_is_conforme"] = np.where((_budget != _reel) & (_reel > 0), "OUI", "NON")
 
     pv_cor = pd.pivot_table(
         _scope_cor,
