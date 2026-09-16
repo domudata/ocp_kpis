@@ -58,11 +58,11 @@ def html_age_dispatch_table(rows):
                     try:
                         num = float(str(val).replace("%", "").strip())
                         if key in ["AGE PREP <1M", "AGE PLANIF <1M"]:
-                            cell_style += "background:#c6efce;color:#006100;font-weight:700" if num >= 80 else "background:#ffc7ce;color:#9c0006;font-weight:700"
+                            cell_style += "background:#c6efce;color:#006100;font-weight:700" if num >= 80 else ("background:#ffeb9c;color:#9c6500;font-weight:700" if num >= 75 else "background:#ffc7ce;color:#9c0006;font-weight:700")
                         elif key in ["AGE PREP 1-3M", "AGE PLANIF 1-3M"]:
-                            cell_style += "background:#c6efce;color:#006100;font-weight:700" if num <= 15 else "background:#ffc7ce;color:#9c0006;font-weight:700"
+                            cell_style += "background:#c6efce;color:#006100;font-weight:700" if num <= 15 else ("background:#ffeb9c;color:#9c6500;font-weight:700" if num <= 20 else "background:#ffc7ce;color:#9c0006;font-weight:700")
                         elif key in ["AGE PREP >3M", "AGE PLANIF >3M"]:
-                            cell_style += "background:#c6efce;color:#006100;font-weight:700" if num <= 5 else "background:#ffc7ce;color:#9c0006;font-weight:700"
+                            cell_style += "background:#c6efce;color:#006100;font-weight:700" if num <= 5 else ("background:#ffeb9c;color:#9c6500;font-weight:700" if num <= 10 else "background:#ffc7ce;color:#9c0006;font-weight:700")
                     except Exception:
                         pass
                 elif "BASE" in key and val not in ("", 0, "0"):
@@ -409,27 +409,24 @@ def render_backlog_tab(dfp: pd.DataFrame, vp: list, df_toutes_dates: pd.DataFram
         '<div class="stl c">⏱️ Répartition de l\'Âge des Backlogs (Préparation & Planification)</div>',
         unsafe_allow_html=True
     )
-    df_prep_non_carac = df_prep[df_prep['Carac Prep'] == 'NON CARACTERISE'].copy()
-    df_plan_non_carac = df_plan[df_plan['Carac Plan'] == 'NON CARACTERISE'].copy()
-
-    st.caption("Base : répartition des OT Non Caractérisés du Backlog Préparation et Planification (la somme des bases <1 mois, 1-3 mois et >3 mois est égale au nombre d'OT non caractérisés).")
+    st.caption("Base : répartition par âge du Backlog Préparation et Planification (conforme aux indicateurs consolidés).")
 
     sf1_p = [p for p in vp if str(p).startswith("SF1")]
     sf2_p = [p for p in vp if str(p).startswith("SF2")]
 
     tab_tous, tab_sf1, tab_sf2 = st.tabs(["🌐 Tous les postes sélectionnés", "🏭 Division SF1", "🏭 Division SF2"])
     with tab_tous:
-        rows_all = build_age_table_rows(vp, df_prep_non_carac, df_plan_non_carac, label_total="TOTAL GÉNÉRAL")
+        rows_all = build_age_table_rows(vp, df_prep, df_plan, label_total="TOTAL GÉNÉRAL")
         st.markdown(html_age_dispatch_table(rows_all), unsafe_allow_html=True)
     with tab_sf1:
         if sf1_p:
-            rows_sf1 = build_age_table_rows(sf1_p, df_prep_non_carac, df_plan_non_carac, label_total="TOTAL SF1")
+            rows_sf1 = build_age_table_rows(sf1_p, df_prep, df_plan, label_total="TOTAL SF1")
             st.markdown(html_age_dispatch_table(rows_sf1), unsafe_allow_html=True)
         else:
             st.info("Aucun poste SF1 dans la sélection courante.")
     with tab_sf2:
         if sf2_p:
-            rows_sf2 = build_age_table_rows(sf2_p, df_prep_non_carac, df_plan_non_carac, label_total="TOTAL SF2")
+            rows_sf2 = build_age_table_rows(sf2_p, df_prep, df_plan, label_total="TOTAL SF2")
             st.markdown(html_age_dispatch_table(rows_sf2), unsafe_allow_html=True)
         else:
             st.info("Aucun poste SF2 dans la sélection courante.")
