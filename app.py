@@ -528,7 +528,10 @@ def main() -> None:
         with tabs[2]:
             render_qualite_tab(qrows, qcols, ano_q_rows, ano_q_cols, qa)
         with tabs[3]:
-            render_backlog_page(dfp, vp, df_toutes_dates=df_full)
+            try:
+                render_backlog_page(dfp, vp, df_toutes_dates=df_full)
+            except TypeError:
+                render_backlog_page(dfp, vp)
         with tabs[4]:
             n_dates = 0
             if not hist_df.empty and "Date" in hist_df.columns:
