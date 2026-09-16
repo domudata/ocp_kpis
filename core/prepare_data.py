@@ -147,6 +147,16 @@ def read_excel_safe(bytes_data: bytes) -> pd.DataFrame:
 def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
     raw_ot = read_excel_safe(ot_bytes)
     raw_av = read_excel_safe(av_bytes)
+    raw_ot.columns = [str(c).strip() for c in raw_ot.columns]
+    raw_av.columns = [str(c).strip() for c in raw_av.columns]
+
+    for col in raw_ot.columns:
+        if str(col).lower() in ["cree le", "créé le"]:
+            raw_ot.rename(columns={col: "Créé le"}, inplace=True)
+    for col in raw_av.columns:
+        if str(col).lower() in ["cree le", "créé le"]:
+            raw_av.rename(columns={col: "Créé le"}, inplace=True)
+
     raw_ot = excr(raw_ot)
     raw_av = excr(raw_av)
 
@@ -204,10 +214,9 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
         df["Statut utilisateur"].str.contains("SOPL", na=False).map({True: 1, False: 0})
     )
     df["OT LANC ESTIME"] = np.where(df["Total coûts budgétés"].fillna(0) == 0, "NON", "OUI")
-    df["OT_COR_EGAL"] = np.where(
-        (df["Total coûts budgétés"].fillna(0) - df["Total coûts réels"].fillna(0)) == 0,
-        "OUI", "NON"
-    )
+    _b_prep = pd.to_numeric(df["Total coûts budgétés"], errors="coerce").fillna(0)
+    _r_prep = pd.to_numeric(df["Total coûts réels"], errors="coerce").fillna(0)
+    df["OT_COR_EGAL"] = np.where((_b_prep != _r_prep) & (_r_prep != 0), "OUI", "NON")
     df["_tw_num"] = pd.to_numeric(
         df.get("Type de travail", pd.Series(dtype=float)), errors="coerce"
     )
@@ -216,6 +225,7 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
         df["Statut OT"] = (
             df["Statut système"].fillna("").astype(str).str.strip().str.split().str[0]
         )
+        df["Statut OT"] = df["Statut OT"].replace({"CREE": "CRÉÉ"})
 
     avf = raw_av[
         (raw_av["Ordre"].isna() | (raw_av["Ordre"].astype(str).str.strip() == ""))
