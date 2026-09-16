@@ -54,7 +54,7 @@ def _calc_signature():
         h = _hashlib.md5()
         base_dir = _os.path.dirname(_os.path.abspath(__file__)) if "__file__" in globals() else _os.getcwd()
         found_any = False
-        for _f in ("core/calcul_kpi.py", "core/anomalies.py", "core/prepare_data.py"):
+        for _f in ("core/calcul_kpi.py", "core/anomalies.py", "core/prepare_data.py", "core/controle_kpi.py"):
             _path = _os.path.join(base_dir, _f)
             try:
                 with open(_path, "rb") as _fh:
@@ -187,22 +187,22 @@ def main() -> None:
     try:
         sdt, edt = ctx["sdt"], ctx["edt"]
 
-        df_period = df_full[
-            df_full["Date de début planifiée"].between(sdt, edt)
-        ].copy()
+        # Date de filtrage : Date de début planifiée en priorité, avec repli sur Créé le (notamment pour les OT en création)
+        if "Date de début planifiée" in df_full.columns and "Créé le" in df_full.columns:
+            _date_filtre_ot = df_full["Date de début planifiée"].fillna(df_full["Créé le"])
+        elif "Date de début planifiée" in df_full.columns:
+            _date_filtre_ot = df_full["Date de début planifiée"]
+        else:
+            _date_filtre_ot = pd.Series(pd.NaT, index=df_full.index)
+
+        df_period = df_full[_date_filtre_ot.between(sdt, edt)].copy()
 
         avdf_period = av_full.copy()
         if "Créé le" in avdf_period.columns:
             avdf_period = avdf_period[avdf_period["Créé le"].between(sdt, edt)]
 
-        # ═══════════════════════════════════════════════════════════════
-        # MODIFICATION 2/3 : df_full (complet, avant tout filtre de date -
-        # voir plus haut, sdt/edt ne sont appliques qu'a df_period ci-dessus)
-        # est transmis comme df_toutes_dates. Les Backlogs preparation et
-        # planification l'utiliseront exclusivement ; tous les autres KPI
-        # continuent de recevoir df_period, filtre par periode comme avant.
-        # ═══════════════════════════════════════════════════════════════
-        res = calc_kpis_cached(df_period, avdf_period, now_ts, tuple(apm), fichier_date, sdt, edt, df_full)
+        # Application du filtre de période de la sidebar à l'ensemble des indicateurs (Backlogs & Âges inclus selon demande explicite)
+        res = calc_kpis_cached(df_period, avdf_period, now_ts, tuple(apm), fichier_date, sdt, edt, df_period)
 
         ckdf_full = res['ckdf']
         nd_full = res.get('nd', {})
@@ -266,7 +266,7 @@ def main() -> None:
         sf2_p = round(score_from_totals_01(sf2_p_vals, QK), 1) if sf2_posts else None
         sf2_q = round(score_from_totals_01(sf2_q_vals, PK), 1) if sf2_posts else None
 
-        ano_map = build_ano_map(dfp, avf, now_ts, dfp_toutes_dates=df_full)
+        ano_map = build_ano_map(dfp, avf, now_ts, dfp_toutes_dates=df_period)
 
         ano_p_rows = build_ano_rows(
             vp, ano_map, QK,
@@ -275,15 +275,39 @@ def main() -> None:
         ano_q_rows = build_ano_rows(vp, ano_map, PK, fixed_zero=["OT Fiabilité","Total Avis de Panne"])
         ano_p_cols = ["Poste de travail"] + QK + ["Total Anomalies"]
         ano_q_cols = ["Poste de travail"] + PK + ["Total Anomalies"]
-        anomaly_dfs = build_anomaly_dfs(dfp, avf, now_ts, dfp_toutes_dates=df_full)
+        anomaly_dfs = build_anomaly_dfs(dfp, avf, now_ts, dfp_toutes_dates=df_period)
 
         with st.sidebar:
-            with st.expander("📥 Export anomalies (OT + Avis)", expanded=False):
+            with st.expander("📥 Export anomalies & Audit OUI/NON", expanded=False):
+                # 1. Export 3 feuilles unifié conforme à la demande OCP
+                try:
+                    from core.controle_kpi import build_table_controle_complete, build_anomalies_excel_unified
+                    _tbl_ctrl = build_table_controle_complete(df_period, avdf_period, now_ts, df_full=df_period)
+                    _tbl_ctrl_filtered = _tbl_ctrl[_tbl_ctrl["Poste travail princ."].isin(vp)] if vp else _tbl_ctrl
+                    _unified_xlsx = build_anomalies_excel_unified(_tbl_ctrl_filtered)
+                    st.download_button(
+                        "⬇️ Audit OUI/NON & Synthèse (3 Feuilles .xlsx)",
+                        data=_unified_xlsx,
+                        file_name=f"audit_anomalies_3_feuilles_{fichier_date.replace('/','-')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True,
+                        type="primary",
+                    )
+                    st.caption(
+                        "Source unique : 1. NON_DETAIL (anomalies + motifs), "
+                        "2. ANOMALIES_KPI_POSTE, 3. SYNTHESE_KPI."
+                    )
+                except Exception as _e_u:
+                    st.caption(f"Export 3 feuilles indisponible : {_e_u}")
+
+                st.markdown("---")
+
+                # 2. Export opérationnel avec Responsables et Actions recommandées
                 try:
                     from core.export_anomalies import build_anomalies_workbook
                     _xlsx_bytes = build_anomalies_workbook(anomaly_dfs, KPI_RESP_MAP, ACT_MAP)
                     st.download_button(
-                        "⬇️ Télécharger le fichier anomalies (.xlsx)",
+                        "⬇️ Plan d'action anomalies (.xlsx)",
                         data=_xlsx_bytes,
                         file_name=f"anomalies_OT_Avis_{fichier_date.replace('/','-')}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -291,8 +315,7 @@ def main() -> None:
                     )
                     st.caption(
                         "Contient 2 feuilles : Anomalies OT et Anomalies Avis, "
-                        "avec Responsable et Action recommandée, filtrées selon "
-                        "la période / poste / atelier / division sélectionnés."
+                        "avec Responsable et Action recommandée."
                     )
                 except Exception as _e:
                     st.caption(f"Export indisponible : {_e}")
@@ -452,6 +475,7 @@ def main() -> None:
             "📂 Backlog",
             "📋 Suivi & Evolution",
             "🎯 Plan d'action",
+            "🔎 Audit des calculs KPI",
             "🤖 Assistant IA",
             "🔄 Fréquence Maintenance",
             "🦺 Suivi HSE",
@@ -673,6 +697,13 @@ def main() -> None:
 
         with tabs[6]:
             try:
+                from pages.audit_kpi import render_audit_kpi_tab
+                render_audit_kpi_tab(df_period, avdf_period, now_ts, df_full=df_period, vp=list(vp), fichier_date=fichier_date)
+            except Exception as _e_aud:
+                st.error(f"Audit des calculs KPI indisponible : {_e_aud}")
+
+        with tabs[7]:
+            try:
                 from ai_assistant import render_ai_assistant
                 _entity = "Maroc Chimie" if all(str(p).startswith("SF1") for p in vp) else \
                           ("FEEDS" if all(str(p).startswith("SF2") for p in vp) else "OCP — Maroc Chimie & FEEDS")
@@ -683,13 +714,13 @@ def main() -> None:
             except Exception as _e:
                 st.error(f"Assistant IA indisponible : {_e}")
 
-        with tabs[7]:
+        with tabs[8]:
             try:
                 render_frequence_maintenance_tab(df_full)
             except Exception as _e:
                 st.error(f"Fréquence de maintenance indisponible : {_e}")
 
-        with tabs[8]:
+        with tabs[9]:
             try:
                 render_suivi_hse_tab(dfp, avis_complet, vp, fichier_date)
             except Exception as _e:
