@@ -151,10 +151,27 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
     raw_av.columns = [str(c).strip() for c in raw_av.columns]
 
     for col in raw_ot.columns:
-        if str(col).lower() in ["cree le", "créé le"]:
+        c_norm = str(col).lower().strip().replace("ã©", "é").replace("ã¨", "è").replace("ãª", "ê")
+        if c_norm in [
+            "cree le", "créé le", "créé", "cree",
+            "date d'entrée", "date entree", "date d'entree", "date entree",
+            "date de création", "date création", "date de creation", "date creation",
+            "entré le", "entre le", "date de saisie", "date de référence", "date reference"
+        ]:
             raw_ot.rename(columns={col: "Créé le"}, inplace=True)
+        elif c_norm in [
+            "date debut planifiee", "date début planifiée", "date de début planifiée",
+            "date de debut planifiee", "début planifié", "debut planifie"
+        ]:
+            raw_ot.rename(columns={col: "Date de début planifiée"}, inplace=True)
+
     for col in raw_av.columns:
-        if str(col).lower() in ["cree le", "créé le"]:
+        c_norm = str(col).lower().strip().replace("ã©", "é").replace("ã¨", "è").replace("ãª", "ê")
+        if c_norm in [
+            "cree le", "créé le", "créé", "cree",
+            "date de l'avis", "date avis", "date d'avis",
+            "date de création", "date création", "date de creation", "date creation"
+        ]:
             raw_av.rename(columns={col: "Créé le"}, inplace=True)
 
     raw_ot = excr(raw_ot)
@@ -162,10 +179,10 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
 
     for c in ["Créé le", "Date de début planifiée", "Date de clôture", "Début réel", "Fin réelle"]:
         if c in raw_ot.columns:
-            raw_ot[c] = pd.to_datetime(raw_ot[c], errors="coerce")
+            raw_ot[c] = pd.to_datetime(raw_ot[c], errors="coerce", dayfirst=True)
     for c in ["Créé le", "Début souhaité", "Date de la clôture"]:
         if c in raw_av.columns:
-            raw_av[c] = pd.to_datetime(raw_av[c], errors="coerce")
+            raw_av[c] = pd.to_datetime(raw_av[c], errors="coerce", dayfirst=True)
 
     ref_date = pd.to_datetime(date_str, format="%d/%m/%Y", errors="coerce")
     now_ts = ref_date.normalize() if pd.notna(ref_date) else pd.Timestamp.today().normalize()
@@ -192,8 +209,22 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
         lambda x: next((kw for kw in ["ATEI", "ATAL", "ATAS", "AGAR", "ATHS"] if kw in set(re.findall(r'[A-Za-z0-9]+', str(x).upper()))), "NON CARACTERISE")
     )
 
+    # ── Âge Préparation ('ap') : date de création avec repli sur date planifiée ──
+    if "Créé le" in df.columns:
+        if "Date de début planifiée" in df.columns:
+            dt_prep = df["Créé le"].fillna(df["Date de début planifiée"])
+        else:
+            dt_prep = df["Créé le"]
+    elif "Date de début planifiée" in df.columns:
+        dt_prep = df["Date de début planifiée"]
+    else:
+        dt_prep = pd.Series(pd.NaT, index=df.index)
+
+    df["amp"] = (now_ts - dt_prep.dt.normalize()).dt.days
+    df["ap"] = df["amp"].apply(cat_age)
+
+    # ── Âge Planification ('alp') et Exécution ('aex') : Date de début planifiée ──
     for dc, am, ac in [
-        ('Créé le', "amp", "ap"),
         ('Date de début planifiée', "amlp", "alp"),
         ('Date de début planifiée', "amex", "aex"),
     ]:
@@ -213,8 +244,8 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
     df["Contient SOPL"] = (
         df["Statut utilisateur"].str.contains("SOPL", na=False).map({True: 1, False: 0})
     )
-    df["OT LANC ESTIME"] = np.where(df["Total coûts budgétés"].fillna(0) == 0, "NON", "OUI")
     _b_prep = pd.to_numeric(df["Total coûts budgétés"], errors="coerce").fillna(0)
+    df["OT LANC ESTIME"] = np.where(_b_prep == 0, "NON", "OUI")
     _r_prep = pd.to_numeric(df["Total coûts réels"], errors="coerce").fillna(0)
     df["OT_COR_EGAL"] = np.where((_b_prep != _r_prep) & (_r_prep != 0), "OUI", "NON")
     df["_tw_num"] = pd.to_numeric(
