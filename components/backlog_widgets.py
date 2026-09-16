@@ -94,12 +94,12 @@ def build_age_table_rows(postes, df_prep, df_plan, label_total="TOTAL"):
         lp = df_plan[df_plan["Poste travail princ."] == p]
 
         nb_p = len(cp)
-        p_inf = int((cp["ap"] == "<1 mois").sum()) if "ap" in cp.columns else 0
+        p_inf = int((cp["ap"].isin(["<1 mois", "Inconnu"])).sum()) if "ap" in cp.columns else 0
         p_1_3 = int((cp["ap"] == "1 mois < <3 mois").sum()) if "ap" in cp.columns else 0
         p_sup = int((cp["ap"] == ">3 mois").sum()) if "ap" in cp.columns else 0
 
         nb_l = len(lp)
-        l_inf = int((lp["alp"] == "<1 mois").sum()) if "alp" in lp.columns else 0
+        l_inf = int((lp["alp"].isin(["<1 mois", "Inconnu"])).sum()) if "alp" in lp.columns else 0
         l_1_3 = int((lp["alp"] == "1 mois < <3 mois").sum()) if "alp" in lp.columns else 0
         l_sup = int((lp["alp"] == ">3 mois").sum()) if "alp" in lp.columns else 0
 
@@ -151,7 +151,7 @@ def render_backlog_tab(dfp: pd.DataFrame, vp: list, df_toutes_dates: pd.DataFram
     # ── Backlog Preparation ──────────────────────────────────────────────
     # Filtre : ZCOR ET Statut système == CRÉÉ
     df_prep = _zcor[
-        _zcor["Statut système"].fillna("").astype(str).str.strip().str.split().str[0] == "CRÉÉ"
+        _zcor["Statut système"].fillna("").astype(str).str.strip().str.split().str[0].isin(["CRÉÉ", "CREE"])
     ].copy()
     df_prep['Carac Prep'] = np.where(
         df_prep['Statut utilisateur'].apply(lambda x: match_exact_token(x, CODES_PREP_EXACT)),
