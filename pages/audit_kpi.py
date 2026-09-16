@@ -107,7 +107,7 @@ def render_audit_kpi_tab(df_period: pd.DataFrame, avdf_period: pd.DataFrame,
             "📐 **Formule vérifiée :**  \n"
             "$$\\text{Taux de caractérisation planification} = \\frac{\\text{Nombre total d'OT en cours de planification caractérisés conformément}}{\\text{OT total en planification (Statut système LANC)}} \\times 100$$\n"
             "- **Dénominateur :** Type d'ordre `ZCOR` et Statut système commence par `LANC` (hors exécution SOPL).  \n"
-            "- **Condition OUI :** Statut utilisateur contient au moins un code parmi `ATEI`, `ATAL`, `ATAS`, `AGAR`, `ATHS`.  \n"
+            "- **Condition OUI :** Statut utilisateur contient au moins un code parmi `ATPL`, `ATEI`, `ATAL`, `ATAS`, `AGAR`, `ATHS`.  \n"
             "- **Condition NON (Anomalie) :** Non caractérisé (aucun de ces codes)."
         )
     elif "préparation" in sel_kpi.lower() and ("mois" in sel_kpi or "1mois" in sel_kpi):
@@ -131,14 +131,34 @@ def render_audit_kpi_tab(df_period: pd.DataFrame, avdf_period: pd.DataFrame,
             "- **Date de calcul d'âge :** `Date de début planifiée`.  \n"
             "- **Objectif :** Mesurer la réactivité des équipes dans l'exécution des OT après planification."
         )
+    elif sel_kpi == "OT_COR_EGAL":
+        st.info(
+            "📐 **Formule vérifiée pour OT_COR_EGAL :**  \n"
+            "$$\\text{Cohérence Coûts Réels / Budgétés} = \\frac{\\text{Nombre d'OT (ZCOR clôturés avec Coûts réels } > 0 \\text{ et } \\ne \\text{ Budget)}}{\\text{Total OT correctifs clôturés (ZCOR + CLOT/TCLO)}} \\times 100$$\n"
+            "- **Dénominateur (Périmètre SAP) :** Ordres correctifs (`Type d'ordre == 'ZCOR'`) clôturés (`Statut système` ou `Statut OT` contient `CLOT` ou `TCLO`).  \n"
+            "- **Condition OUI (Conforme) :** Coûts réels strictement positifs (`Total coûts réels > 0`) **ET** différents du budget (`Total coûts réels != Total coûts budgétés`).  \n"
+            "- **Condition NON (Anomalie) :** Coûts réels non saisis ou nuls (`Total coûts réels <= 0`) **OU** identiques au budget sans ajustement (`Total coûts réels == Total coûts budgétés`).  \n"
+            "- **Règle de traçabilité :** Total = OUI + NON | Anomalies = COUNT(NON)."
+        )
 
     # ── Calculs et Métriques de synthèse SF1 / SF2 / Total ──
-    summary_all = get_kpi_summary(table_ctrl, sel_kpi)
+    summary_all = get_kpi_summary(table_ctrl_filtree, sel_kpi)
     d_df = summary_all["divisions"]
     tot_info = summary_all["total"]
 
     sf1_info = d_df[d_df["Division"] == "SF1"].iloc[0] if (not d_df.empty and "SF1" in d_df["Division"].values) else {"Total": 0, "OUI": 0, "NON": 0, "KPI %": 0.0}
     sf2_info = d_df[d_df["Division"] == "SF2"].iloc[0] if (not d_df.empty and "SF2" in d_df["Division"].values) else {"Total": 0, "OUI": 0, "NON": 0, "KPI %": 0.0}
+
+    # Cible active selon le filtre de division
+    if sel_div == "SF1 (Maroc Chimie)":
+        active_scope_info = sf1_info
+        active_label = "SF1 (Maroc Chimie)"
+    elif sel_div == "SF2 (FEEDS)":
+        active_scope_info = sf2_info
+        active_label = "SF2 (FEEDS)"
+    else:
+        active_scope_info = tot_info
+        active_label = "Total Général (SF1 + SF2)"
 
     st.markdown("#### 📊 Résultats de Contrôle — Division & Global")
     c1, c2, c3 = st.columns(3)
@@ -170,20 +190,20 @@ def render_audit_kpi_tab(df_period: pd.DataFrame, avdf_period: pd.DataFrame,
     with c3:
         st.markdown(
             f"""<div style="background:#f8fafc;padding:14px;border-radius:8px;border-left:4px solid #64748b;">
-            <div style="font-weight:800;font-size:14px;color:#1e293b;">🏢 Total Général (SF1 + SF2)</div>
-            <div style="margin-top:6px;font-size:13px;"><b>Total OT :</b> {int(tot_info.get('Total', 0))}</div>
-            <div style="color:#059669;font-size:13px;"><b>Nombre OUI (Conformes) :</b> {int(tot_info.get('OUI', 0))}</div>
-            <div style="color:#dc2626;font-size:13px;"><b>Nombre NON (Anomalies) :</b> {int(tot_info.get('NON', 0))}</div>
-            <div style="margin-top:6px;font-size:16px;font-weight:800;color:#1e3a5f;">Taux Global : {tot_info.get('KPI %', 0):.1f}%</div>
+            <div style="font-weight:800;font-size:14px;color:#1e293b;">🏢 {active_label}</div>
+            <div style="margin-top:6px;font-size:13px;"><b>Total OT :</b> {int(active_scope_info.get('Total', 0))}</div>
+            <div style="color:#059669;font-size:13px;"><b>Nombre OUI (Conformes) :</b> {int(active_scope_info.get('OUI', 0))}</div>
+            <div style="color:#dc2626;font-size:13px;"><b>Nombre NON (Anomalies) :</b> {int(active_scope_info.get('NON', 0))}</div>
+            <div style="margin-top:6px;font-size:16px;font-weight:800;color:#1e3a5f;">Taux : {active_scope_info.get('KPI %', 0):.1f}%</div>
             </div>""",
             unsafe_allow_html=True,
         )
 
     # ── Contrôles de Cohérence Automatiques ──
     st.markdown("---")
-    ctrl_tot = int(tot_info.get('Total', 0))
-    ctrl_oui = int(tot_info.get('OUI', 0))
-    ctrl_non = int(tot_info.get('NON', 0))
+    ctrl_tot = int(active_scope_info.get('Total', 0))
+    ctrl_oui = int(active_scope_info.get('OUI', 0))
+    ctrl_non = int(active_scope_info.get('NON', 0))
     check1_ok = (ctrl_tot == ctrl_oui + ctrl_non)
 
     c_chk1, c_chk2, c_chk3 = st.columns(3)
