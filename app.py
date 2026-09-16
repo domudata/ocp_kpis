@@ -234,6 +234,8 @@ def main() -> None:
                 n_s, d_s = nd_full[kpi]
                 p_sub = [p for p in posts if p in n_s.index]
                 if p_sub:
+                    sn = n_s.loc[p_sub].sum()
+                    sd = d_s.loc[p_sub].sum()
                     default_val = 0.0 if is_lb(kpi) else 100.0
                     return (sn / sd * 100.0) if sd > 0 else default_val
             p_sub = [p for p in posts if p in ckdf.index]
