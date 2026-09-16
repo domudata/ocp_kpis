@@ -42,7 +42,7 @@ SHORT_LABELS = {
     "Backlog préparation caractérisé": "Backlog prépa",
     "Backlog planification caractérisé": "Backlog planif",
     "OT CONFIME": "OT confirmés",
-    "OT_COR_EGAL": "Coûts égaux",
+    "OT_COR_EGAL": "Cohérence coûts",
     "OT Fiabilité": "Fiabilité",
     "Total Avis de Panne": "Avis panne",
 }
@@ -62,6 +62,7 @@ def generate_and_publish_poste_report(
     poste: str, ckdf_row: pd.Series, pscore: float, qscore: float,
     ano_map: dict, dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
     date_str: str, dry_run: bool = False,
+    dfp_toutes_dates: pd.DataFrame = None,
 ):
     """
     Génère et publie (si dry_run=False) les fichiers pour UN poste.
@@ -117,7 +118,8 @@ def generate_and_publish_poste_report(
     try:
         dfp_poste = dfp[dfp["Poste travail princ."] == poste].copy()
         avf_poste = avf[avf["Poste travail princ."] == poste].copy() if "Poste travail princ." in avf.columns else avf.iloc[0:0]
-        anomaly_dfs = build_anomaly_dfs(dfp_poste, avf_poste, now_ts)
+        dfp_all_poste = dfp_toutes_dates[dfp_toutes_dates["Poste travail princ."] == poste].copy() if dfp_toutes_dates is not None else None
+        anomaly_dfs = build_anomaly_dfs(dfp_poste, avf_poste, now_ts, dfp_toutes_dates=dfp_all_poste)
         xlsx_bytes = build_anomalies_workbook(anomaly_dfs, KPI_RESP_MAP, ACT_MAP)
         status["xlsx"] = True
     except Exception as e:
@@ -278,6 +280,7 @@ def generate_and_publish_all_postes(
     ckdf: pd.DataFrame, pscores: dict, qscores: dict, ano_map: dict,
     dfp: pd.DataFrame, avf: pd.DataFrame, now_ts, date_str: str,
     postes: list = None, dry_run: bool = False, progress_callback=None,
+    dfp_toutes_dates: pd.DataFrame = None,
 ):
     """
     Boucle sur tous les postes (ou la liste fournie) et publie leur
@@ -301,6 +304,7 @@ def generate_and_publish_all_postes(
             pscore=pscores.get(poste, 0), qscore=qscores.get(poste, 0),
             ano_map=ano_map, dfp=dfp, avf=avf, now_ts=now_ts,
             date_str=date_str, dry_run=dry_run,
+            dfp_toutes_dates=dfp_toutes_dates,
         )
         results.append(res)
 
