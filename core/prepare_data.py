@@ -1,11 +1,13 @@
 # -*- coding: utf-8 -*-
 import io
 import os
+import re
 import numpy as np
 import pandas as pd
 import streamlit as st
 
-from core.constants import MP_KW, MPLAN_KW
+from core.constants import MP_KW, MPLAN_KW, CODES_PREP_EXACT, CODES_PLAN_EXACT
+
 
 # ──────────────────────────────────────────────
 # Utilitaires basiques
@@ -61,9 +63,17 @@ def get_date_from_file() -> str:
     return pd.Timestamp.today().strftime("%d/%m/%Y")
 
 
+def match_exact_token(statut, codes: set) -> bool:
+    if statut is None or (isinstance(statut, float) and pd.isna(statut)):
+        return False
+    words = set(re.findall(r'[A-Za-z0-9]+', str(statut).upper()))
+    return bool(words & codes)
+
+
 def contient_mot(t, lm) -> bool:
     t = str(t)
     return any(m in t for l in lm for m in l.split())
+
 
 
 def cat_age(a) -> str:
@@ -154,18 +164,18 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
     df = raw_ot.copy()
 
     df["Backlog preparation"] = np.where(
-        df["Statut utilisateur"].apply(lambda x: contient_mot(x, MP_KW)),
+        df["Statut utilisateur"].apply(lambda x: match_exact_token(x, CODES_PREP_EXACT)),
         "CARACTERISE", "NON CARACTERISE"
     )
     df["Backlog planification"] = np.where(
-        df["Statut utilisateur"].apply(lambda x: contient_mot(x, MPLAN_KW)),
+        df["Statut utilisateur"].apply(lambda x: match_exact_token(x, CODES_PLAN_EXACT)),
         "CARACTERISE", "NON CARACTERISE"
     )
     df["Type Carac Prep"] = df["Statut utilisateur"].apply(
-        lambda x: next((kw.split()[0] for kw in MP_KW if kw in str(x)), "NON CARACTERISE")
+        lambda x: next((kw for kw in ["ATPD", "ATMR", "ATER", "ATRS", "ATMO"] if kw in set(re.findall(r'[A-Za-z0-9]+', str(x).upper()))), "NON CARACTERISE")
     )
     df["Type Carac Plan"] = df["Statut utilisateur"].apply(
-        lambda x: next((kw.split()[0] for kw in MPLAN_KW if kw in str(x)), "NON CARACTERISE")
+        lambda x: next((kw for kw in ["ATEI", "ATAL", "ATAS", "AGAR", "ATHS"] if kw in set(re.findall(r'[A-Za-z0-9]+', str(x).upper()))), "NON CARACTERISE")
     )
 
     for dc, am, ac in [
