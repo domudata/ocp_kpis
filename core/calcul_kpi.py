@@ -283,18 +283,14 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     # sur données réelles). Voir prepare_data.py pour la définition d'avf.
     avf = av.copy()
     res['avf'] = avf
-    # Total avis sans ordre et hors ZU/Z4/ZR/ZP par poste (population avf)
-    avf_tot = avf.groupby("Poste travail princ.")["Avis"].count().reindex(posts, fill_value=0)
-    # Avis approuvés : statut contient APRV (statut utilisateur ou système)
-    _stat_ut = avf["Statut utilisateur"].fillna("").astype(str) if "Statut utilisateur" in avf.columns else pd.Series("", index=avf.index)
-    _stat_sys = avf["Statut système"].fillna("").astype(str) if "Statut système" in avf.columns else pd.Series("", index=avf.index)
-    _is_aprv = _stat_ut.str.contains("APRV", case=False, na=False) | _stat_sys.str.contains("APRV", case=False, na=False)
-    avf_aprv = avf[_is_aprv].groupby("Poste travail princ.")["Avis"].count().reindex(posts, fill_value=0)
-    tca = pd.DataFrame({
-        "APRV": avf_aprv,
-        "Total": avf_tot,
-        "Taux d'approbation des Avis": np.where(avf_tot == 0, 100.0, (avf_aprv / avf_tot) * 100.0)
-    }, index=posts)
+    tca = pd.pivot_table(
+        avf, index="Poste travail princ.", columns="Statut utilisateur",
+        values="Avis", aggfunc="count", fill_value=0
+    ).reindex(posts, fill_value=0)
+    for c in ["APRQ", "APRV", "APRV AVAU", "REJT"]:
+        tca[c] = tca.get(c, 0)
+    tca["Total"] = tca[["APRQ", "APRV", "APRV AVAU", "REJT"]].sum(axis=1)
+    tca["Taux d'approbation des Avis"] = ckpi(tca["APRV"], tca["Total"])
 
     # ── Performance Graissage (inchangé) ──
     g_num = df[(df["Statut OT"].isin(["CLOT", "TCLO"])) & (df["_tw_num"] == 350)].groupby(
