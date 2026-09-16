@@ -5,7 +5,7 @@ import pandas as pd
 from core.constants import QK, PK
 
 CODES_PREP_EXACT = {"ATPD", "ATMR", "ATER", "ATRS", "ATMO"}
-CODES_PLAN_EXACT = {"ATEI", "ATAL", "ATAS", "AGAR", "ATHS"}
+CODES_PLAN_EXACT = {"ATPL", "ATEI", "ATAL", "ATAS", "AGAR", "ATHS"}
 ALL_CARAC_EXACT = CODES_PREP_EXACT | CODES_PLAN_EXACT
 
 
@@ -144,7 +144,7 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
     _scope_cor_ano = dfp[_statut_clot_tclo & (dfp["Type d'ordre"] == "ZCOR")].copy()
     _budget_ano = pd.to_numeric(_scope_cor_ano["Total coûts budgétés"], errors="coerce").fillna(0)
     _reel_ano = pd.to_numeric(_scope_cor_ano["Total coûts réels"], errors="coerce").fillna(0)
-    _is_ano_cor = (_budget_ano == _reel_ano) | (_reel_ano == 0)
+    _is_ano_cor = (_budget_ano == _reel_ano) | (_reel_ano <= 0)
     ano_map["OT_COR_EGAL"] = _scope_cor_ano[_is_ano_cor].groupby("Poste travail princ.")["Ordre"].count()
 
     return ano_map
@@ -217,5 +217,5 @@ def build_anomaly_dfs(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
         "Backlog préparation caractérisé": non_prep.copy(),
         "Backlog planification caractérisé": non_plan.copy(),
         "OT CONFIME": dfp[(dfp["Statut OT"].isin(["CLOT", "TCLO"])) & (dfp["OT CONFIME"] == "NON")].copy(),
-        "OT_COR_EGAL": (lambda _s: _s[(pd.to_numeric(_s["Total coûts budgétés"], errors="coerce").fillna(0) == pd.to_numeric(_s["Total coûts réels"], errors="coerce").fillna(0)) | (pd.to_numeric(_s["Total coûts réels"], errors="coerce").fillna(0) == 0)])(dfp[(dfp["Statut OT"].isin(["CLOT", "TCLO"]) | dfp["Statut système"].str.contains("CLOT|TCLO", na=False)) & (dfp["Type d'ordre"] == "ZCOR")]).copy(),
+        "OT_COR_EGAL": (lambda _s: _s[(pd.to_numeric(_s["Total coûts budgétés"], errors="coerce").fillna(0) == pd.to_numeric(_s["Total coûts réels"], errors="coerce").fillna(0)) | (pd.to_numeric(_s["Total coûts réels"], errors="coerce").fillna(0) <= 0)])(dfp[(dfp["Statut OT"].isin(["CLOT", "TCLO"]) | dfp["Statut système"].str.contains("CLOT|TCLO", na=False)) & (dfp["Type d'ordre"] == "ZCOR")]).copy(),
     }
