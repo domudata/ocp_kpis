@@ -8,7 +8,7 @@ from components.charts import show_pie_pair, show_simple_pie
 from components.tables import html_generic_pivot, html_statut_pivot
 from core.calcul_kpi import build_statut_pivot, get_text_col
 CODES_PREP_EXACT = {'ATPD', 'ATMR', 'ATER', 'ATRS', 'ATMO'}
-CODES_PLAN_EXACT = {'ATEI', 'ATAL', 'ATAS', 'AGAR', 'ATHS'}
+CODES_PLAN_EXACT = {'ATPL', 'ATEI', 'ATAL', 'ATAS', 'AGAR', 'ATHS'}
 ALL_CARAC_EXACT = CODES_PREP_EXACT | CODES_PLAN_EXACT
 
 
@@ -20,7 +20,7 @@ def match_exact_token(statut, codes: set) -> bool:
 
 # Mots cles caracterisation d apres PDF OCP
 CRPR_KW = ['ATPD', 'ATMR', 'ATRS', 'ATMO', 'ATER']
-ATPL_KW = ['ATEI', 'ATAL', 'ATAS', 'AGAR', 'ATHS']
+ATPL_KW = ['ATPL', 'ATEI', 'ATAL', 'ATAS', 'AGAR', 'ATHS']
 TW_PREV = [350, 290, 300, 310, 360]
 
 
@@ -389,6 +389,7 @@ def render_backlog_tab(dfp: pd.DataFrame, vp: list, df_toutes_dates: pd.DataFram
         type_counts = df_carac_plan['Type Carac Plan'].value_counts()
         h = '<table class="tw omt"><thead><tr><th>Type</th><th>Description</th><th>Nb OT</th><th>%</th></tr></thead><tbody>'
         desc_map = {
+            'ATPL': 'Attente planification',
             'ATEI': 'Attente arrêt équipement ou Installation',
             'ATAL': 'Attente arrêt ligne',
             'ATAS': 'Attente arrêt site',
