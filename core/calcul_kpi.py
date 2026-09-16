@@ -135,16 +135,17 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
         an["TOTAL_OT"] == 0, 100.0, ckpi(an["OT_CLOTURES"], an["TOTAL_OT"])
     )
 
-    # ── Exécution (demande explicite : contient LANC et seulement ZCOR) ──
+    # ── Exécution (demande explicite : contient LANC, Contient SOPL == 1, tout type) ──
     _statut_lanc = df["Statut système"].fillna("").astype(str).str.contains("LANC", na=False) | (df["Statut OT"] == "LANC")
     ex = cpiv(
         df,
-        _statut_lanc & (df["Contient SOPL"] == 1) & (df["Type d'ordre"] == "ZCOR"),
+        _statut_lanc & (df["Contient SOPL"] == 1),
         "aex", posts
     )
     for c in ["<1 mois", ">3 mois", "1 mois < <3 mois", "Inconnu"]:
         ex[c] = ex.get(c, 0)
-    ex["Total"] = ex[["<1 mois", "1 mois < <3 mois", ">3 mois", "Inconnu"]].sum(axis=1)
+    ex["<1 mois"] = ex["<1 mois"] + ex["Inconnu"]
+    ex["Total"] = ex[["<1 mois", "1 mois < <3 mois", ">3 mois"]].sum(axis=1)
     ex["OT exécution <1 mois"] = ckpi(ex["<1 mois"], ex["Total"])
     ex["OT exécution >3 mois"] = ckpi(ex[">3 mois"], ex["Total"], 0)
     ex["OT exécution 1mois< <3mois"] = ckpi(ex["1 mois < <3 mois"], ex["Total"], 0)
@@ -208,12 +209,8 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     plc["Total"] = plc["CARACTERISE"] + plc["NON CARACTERISE"]
     plc["Backlog planification caractérisé"] = ckpi(plc["CARACTERISE"], plc["Total"])
 
-    # ── OT préparation <1/1-3/>3 mois — DÉPEUPLEMENT SUR OT NON CARACTÉRISÉS (consigne explicite) ──
-    # Base = ensemble des OT NON CARACTÉRISÉS du Backlog préparation (ZCOR + Statut système=CRÉÉ + non caractérisé),
-    # répartis selon leur âge ("ap" = jours écoulés depuis "Créé le").
-    # La somme des tranches d'âge est exactement égale au NOMBRE D'OT NON CARACTÉRISÉS (pc["NON CARACTERISE"]).
-    _zcor_cree_non_carac = _zcor_cree_all[_zcor_cree_all["_prep_carac"] == "NON CARACTERISE"].copy()
-    pr = cpiv(_zcor_cree_non_carac, pd.Series(True, index=_zcor_cree_non_carac.index), "ap", posts)
+    # ── OT préparation <1/1-3/>3 mois — SUR LE BACKLOG COMPLET PRÉPARATION (_zcor_cree_all) ──
+    pr = cpiv(_zcor_cree_all, pd.Series(True, index=_zcor_cree_all.index), "ap", posts)
     for c in ["<1 mois", ">3 mois", "1 mois < <3 mois", "Inconnu"]:
         pr[c] = pr.get(c, 0)
     pr["<1 mois"] = pr["<1 mois"] + pr["Inconnu"]
@@ -222,12 +219,8 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     pr["OT préparation >3 mois"] = ckpi(pr[">3 mois"], pr["Total"], 0)
     pr["OT préparation 1mois< <3mois"] = ckpi(pr["1 mois < <3 mois"], pr["Total"], 0)
 
-    # ── OT planification <1/1-3/>3 mois — DÉPEUPLEMENT SUR OT NON CARACTÉRISÉS (consigne explicite) ──
-    # Base = ensemble des OT NON CARACTÉRISÉS du Backlog planification (ZCOR + Statut système=LANC + SOPL=0 + non caractérisé),
-    # répartis selon leur âge ("alp" = jours écoulés depuis "Date de début planifiée").
-    # La somme des tranches d'âge est exactement égale au NOMBRE D'OT NON CARACTÉRISÉS (plc["NON CARACTERISE"]).
-    _zcor_lanc_non_carac = _zcor_lanc_all[_zcor_lanc_all["_plan_carac"] == "NON CARACTERISE"].copy()
-    pl = cpiv(_zcor_lanc_non_carac, pd.Series(True, index=_zcor_lanc_non_carac.index), "alp", posts)
+    # ── OT planification <1/1-3/>3 mois — SUR LE BACKLOG COMPLET PLANIFICATION (_zcor_lanc_all) ──
+    pl = cpiv(_zcor_lanc_all, pd.Series(True, index=_zcor_lanc_all.index), "alp", posts)
     for c in ["<1 mois", ">3 mois", "1 mois < <3 mois", "Inconnu"]:
         pl[c] = pl.get(c, 0)
     pl["<1 mois"] = pl["<1 mois"] + pl["Inconnu"]
@@ -279,14 +272,16 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     # sur données réelles). Voir prepare_data.py pour la définition d'avf.
     avf = av.copy()
     res['avf'] = avf
-    tca = pd.pivot_table(
-        avf, index="Poste travail princ.", columns="Statut utilisateur",
-        values="Avis", aggfunc="count", fill_value=0
-    ).reindex(posts, fill_value=0)
-    for c in ["APRQ", "APRV", "APRV AVAU", "REJT"]:
-        tca[c] = tca.get(c, 0)
-    tca["Total"] = tca[["APRQ", "APRV", "APRV AVAU", "REJT"]].sum(axis=1)
-    tca["Taux d'approbation des Avis"] = ckpi(tca["APRV"], tca["Total"])
+    # Total avis sans ordre par poste
+    avf_tot = avf.groupby("Poste travail princ.")["Avis"].count().reindex(posts, fill_value=0)
+    # Avis approuvés : statut utilisateur contient APRV
+    _is_aprv = avf["Statut utilisateur"].fillna("").astype(str).str.contains("APRV", case=False, na=False)
+    avf_aprv = avf[_is_aprv].groupby("Poste travail princ.")["Avis"].count().reindex(posts, fill_value=0)
+    tca = pd.DataFrame({
+        "APRV": avf_aprv,
+        "Total": avf_tot,
+        "Taux d'approbation des Avis": np.where(avf_tot == 0, 100.0, (avf_aprv / avf_tot) * 100.0)
+    }, index=posts)
 
     # ── Performance Graissage (inchangé) ──
     g_num = df[(df["Statut OT"].isin(["CLOT", "TCLO"])) & (df["_tw_num"] == 350)].groupby(
