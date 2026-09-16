@@ -135,7 +135,7 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
         an["TOTAL_OT"] == 0, 100.0, ckpi(an["OT_CLOTURES"], an["TOTAL_OT"])
     )
 
-    # ── Exécution (demande explicite : OT lancé, type ZCOR, non caractérisé planif ou prépar) ──
+    # ── Exécution (définition officielle OCP : OT lancé, type ZCOR, statut utilisateur SOPL) ──
     # Âge (jours) = Date de l'extraction (now_ts) - Date de début planifiée (colonne 'aex')
     _statut_lanc_ex = (
         (df_all["Statut système"].fillna("").astype(str).str.strip().str.split().str[0] == "LANC")
@@ -143,9 +143,12 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
            & ~df_all["Statut système"].fillna("").astype(str).str.contains("CLOT|TCLO", na=False))
     )
     _non_clot_ex = ~df_all["Statut OT"].isin(["CLOT", "TCLO"]) if "Statut OT" in df_all.columns else True
-    _zcor_ex = (df_all["Type d'ordre"] == "ZCOR") & _statut_lanc_ex & _non_clot_ex
-    _pas_carac_ex = ~df_all["Statut utilisateur"].apply(lambda x: match_exact_token(x, CODES_PLAN_EXACT))
-    _zcor_exec_all = df_all[_zcor_ex & _pas_carac_ex].copy()
+    _contient_sopl_ex = (
+        (df_all["Contient SOPL"] == 1) if "Contient SOPL" in df_all.columns
+        else df_all["Statut utilisateur"].fillna("").astype(str).str.contains("SOPL", case=False, na=False)
+    )
+    _zcor_ex = (df_all["Type d'ordre"] == "ZCOR") & _statut_lanc_ex & _non_clot_ex & _contient_sopl_ex
+    _zcor_exec_all = df_all[_zcor_ex].copy()
 
     ex = cpiv(
         _zcor_exec_all,
@@ -230,8 +233,13 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     pr["OT préparation 1mois< <3mois"] = ckpi(pr["1 mois < <3 mois"], pr["Total"], 0)
     pr["OT préparation >3 mois"] = ckpi(pr[">3 mois"], pr["Total"], 0)
 
-    # ── OT planification <1/1-3/>3 mois — SUR LE BACKLOG COMPLET PLANIFICATION (_zcor_lanc_all) ──
-    pl = cpiv(_zcor_lanc_all, pd.Series(True, index=_zcor_lanc_all.index), "alp", posts)
+    # ── OT planification <1/1-3/>3 mois — SUR LE STOCK PLANIFICATION (LANC + ATPL) ──
+    _contient_atpl = (
+        _zcor_lanc_all["Statut utilisateur"].fillna("").astype(str).str.contains("ATPL", case=False, na=False)
+        | _zcor_lanc_all["Statut utilisateur"].apply(lambda x: match_exact_token(x, CODES_PLAN_EXACT))
+    )
+    _zcor_plan_age = _zcor_lanc_all[_contient_atpl].copy()
+    pl = cpiv(_zcor_plan_age, pd.Series(True, index=_zcor_plan_age.index), "alp", posts)
     for c in ["<1 mois", ">3 mois", "1 mois < <3 mois", "Inconnu"]:
         pl[c] = pl.get(c, 0)
     pl["<1 mois"] = pl["<1 mois"] + pl["Inconnu"]
@@ -295,8 +303,8 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     avf_aprv = avf_active[_is_aprv].groupby("Poste travail princ.")["Avis"].count().reindex(posts, fill_value=0)
     taux_approbation = ckpi(avf_aprv, avf_tot)
 
-    # ── Performance Graissage (inchangé) ──
-    g_num = df[(df["Statut OT"].isin(["CLOT", "TCLO"])) & (df["_tw_num"] == 350)].groupby(
+    # ── Performance Graissage (conforme : CLOT/TCLO parmi ceux lancés avec SOPL) ──
+    g_num = df[(df["Statut OT"].isin(["CLOT", "TCLO"])) & (df["Contient SOPL"] == 1) & (df["_tw_num"] == 350)].groupby(
         "Poste travail princ.")["Ordre"].count()
     g_den = df[(df["Contient SOPL"] == 1) & (df["_tw_num"] == 350)].groupby(
         "Poste travail princ.")["Ordre"].count()
@@ -305,14 +313,14 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
         g_df["_d"] == 0, 100.0, (g_df["_n"] / g_df["_d"]) * 100
     )
 
-    # ── Performance Inspection (inchangé) ──
+    # ── Performance Inspection (conforme : CLOT/TCLO parmi ceux lancés avec SOPL) ──
     ins_types = [290, 300, 310]
     ins_base = (
         (df["_tw_num"].isin(ins_types))
         & (df["Date de début planifiée"].notna())
         & (df["Date de début planifiée"] <= now_ts)
     )
-    ins_num = df[(df["Statut OT"].isin(["CLOT", "TCLO"])) & ins_base].groupby(
+    ins_num = df[(df["Statut OT"].isin(["CLOT", "TCLO"])) & (df["Contient SOPL"] == 1) & ins_base].groupby(
         "Poste travail princ.")["Ordre"].count()
     ins_den = df[(df["Contient SOPL"] == 1) & ins_base].groupby(
         "Poste travail princ.")["Ordre"].count()
@@ -321,13 +329,13 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
         ins_df["_d"] == 0, 100.0, (ins_df["_n"] / ins_df["_d"]) * 100
     )
 
-    # ── Performance Systématiques (inchangé) ──
+    # ── Performance Systématiques (conforme : CLOT/TCLO parmi ceux lancés avec SOPL) ──
     sys_base = (
         (df["_tw_num"] == 360)
         & (df["Date de début planifiée"].notna())
         & (df["Date de début planifiée"] <= now_ts)
     )
-    sys_num = df[(df["Statut OT"].isin(["CLOT", "TCLO"])) & sys_base].groupby(
+    sys_num = df[(df["Statut OT"].isin(["CLOT", "TCLO"])) & (df["Contient SOPL"] == 1) & sys_base].groupby(
         "Poste travail princ.")["Ordre"].count()
     sys_den = df[(df["Contient SOPL"] == 1) & sys_base].groupby(
         "Poste travail princ.")["Ordre"].count()
