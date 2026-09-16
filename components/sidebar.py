@@ -159,9 +159,8 @@ def render_sidebar(fichier_date: str, apm: list, df_full, av_full, now_ts):
 
     # Rechargement si nouveaux fichiers
     if unf and ot_f is not None and av_f is not None:
-        df_full, av_full, apm, now_ts = prepare_data(
-            ot_f.getvalue(), av_f.getvalue(), fichier_date
-        )
+        _pr = prepare_data(ot_f.getvalue(), av_f.getvalue(), fichier_date)
+        df_full, av_full, apm, now_ts = _pr[0], _pr[1], _pr[2], _pr[3]
 
     return {
         "unf": unf, "ot_f": ot_f, "av_f": av_f,
