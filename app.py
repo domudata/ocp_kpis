@@ -489,7 +489,7 @@ def main() -> None:
             render_qualite_tab(qrows, qcols, ano_q_rows, ano_q_cols, qa)
         with tabs[3]:
             try:
-                render_backlog_page(dfp, vp, df_toutes_dates=df_full)
+                render_backlog_page(dfp, vp, df_toutes_dates=df_period)
             except TypeError:
                 render_backlog_page(dfp, vp)
         with tabs[4]:
