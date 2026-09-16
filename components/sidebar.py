@@ -158,9 +158,12 @@ def render_sidebar(fichier_date: str, apm: list, df_full, av_full, now_ts):
     vp = [p for p in apm if mf(p) and p in sp]
 
     # Rechargement si nouveaux fichiers
+    avis_complet_full = pd.DataFrame()
     if unf and ot_f is not None and av_f is not None:
         _pr = prepare_data(ot_f.getvalue(), av_f.getvalue(), fichier_date)
         df_full, av_full, apm, now_ts = _pr[0], _pr[1], _pr[2], _pr[3]
+        if len(_pr) > 4:
+            avis_complet_full = _pr[4]
 
     return {
         "unf": unf, "ot_f": ot_f, "av_f": av_f,
@@ -168,4 +171,5 @@ def render_sidebar(fichier_date: str, apm: list, df_full, av_full, now_ts):
         "sdt": sdt, "edt": edt, "vp": vp,
         "df_full": df_full, "av_full": av_full,
         "apm": apm, "now_ts": now_ts,
+        "avis_complet_full": avis_complet_full,
     }
