@@ -150,39 +150,51 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
     raw_ot.columns = [str(c).strip() for c in raw_ot.columns]
     raw_av.columns = [str(c).strip() for c in raw_av.columns]
 
+    # ── Normalisation des colonnes de date dans raw_ot ──
     for col in raw_ot.columns:
         c_norm = str(col).lower().strip().replace("ã©", "é").replace("ã¨", "è").replace("ãª", "ê")
-        if c_norm in [
-            "cree le", "créé le", "créé", "cree",
-            "date d'entrée", "date entree", "date d'entree", "date entree",
-            "date de création", "date création", "date de creation", "date creation",
-            "entré le", "entre le", "date de saisie", "date de référence", "date reference"
-        ]:
+        if c_norm in ["cree le", "créé le"]:
             raw_ot.rename(columns={col: "Créé le"}, inplace=True)
-        elif c_norm in [
-            "date debut planifiee", "date début planifiée", "date de début planifiée",
-            "date de debut planifiee", "début planifié", "debut planifie"
-        ]:
+        elif c_norm in ["date debut planifiee", "date début planifiée", "date de début planifiée", "date de debut planifiee"]:
             raw_ot.rename(columns={col: "Date de début planifiée"}, inplace=True)
 
+    # Si "Créé le" n'a pas été trouvé, chercher un alias alternatif (Date d'entrée, etc.)
+    if "Créé le" not in raw_ot.columns:
+        for col in raw_ot.columns:
+            c_norm = str(col).lower().strip().replace("ã©", "é").replace("ã¨", "è").replace("ãª", "ê")
+            if c_norm in [
+                "date d'entrée", "date entree", "date d'entree",
+                "date de création", "date création", "date de creation", "date creation",
+                "entré le", "entre le", "date de saisie"
+            ]:
+                raw_ot.rename(columns={col: "Créé le"}, inplace=True)
+                break
+
+    # ── Normalisation des colonnes de date dans raw_av ──
     for col in raw_av.columns:
         c_norm = str(col).lower().strip().replace("ã©", "é").replace("ã¨", "è").replace("ãª", "ê")
-        if c_norm in [
-            "cree le", "créé le", "créé", "cree",
-            "date de l'avis", "date avis", "date d'avis",
-            "date de création", "date création", "date de creation", "date creation"
-        ]:
+        if c_norm in ["cree le", "créé le"]:
             raw_av.rename(columns={col: "Créé le"}, inplace=True)
+
+    # Déduplication stricte des noms de colonnes
+    raw_ot = raw_ot.loc[:, ~raw_ot.columns.duplicated()].copy()
+    raw_av = raw_av.loc[:, ~raw_av.columns.duplicated()].copy()
 
     raw_ot = excr(raw_ot)
     raw_av = excr(raw_av)
 
     for c in ["Créé le", "Date de début planifiée", "Date de clôture", "Début réel", "Fin réelle"]:
         if c in raw_ot.columns:
-            raw_ot[c] = pd.to_datetime(raw_ot[c], errors="coerce", dayfirst=True)
+            s = raw_ot[c]
+            if isinstance(s, pd.DataFrame):
+                s = s.iloc[:, 0]
+            raw_ot[c] = pd.to_datetime(s, errors="coerce", dayfirst=True)
     for c in ["Créé le", "Début souhaité", "Date de la clôture"]:
         if c in raw_av.columns:
-            raw_av[c] = pd.to_datetime(raw_av[c], errors="coerce", dayfirst=True)
+            s = raw_av[c]
+            if isinstance(s, pd.DataFrame):
+                s = s.iloc[:, 0]
+            raw_av[c] = pd.to_datetime(s, errors="coerce", dayfirst=True)
 
     ref_date = pd.to_datetime(date_str, format="%d/%m/%Y", errors="coerce")
     now_ts = ref_date.normalize() if pd.notna(ref_date) else pd.Timestamp.today().normalize()
