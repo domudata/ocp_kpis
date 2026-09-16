@@ -276,10 +276,10 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str, calc_version: 
         )
         df["Statut OT"] = df["Statut OT"].replace({"CREE": "CRÉÉ"})
 
-    avf = raw_av[
-        (raw_av["Ordre"].isna() | (raw_av["Ordre"].astype(str).str.strip() == ""))
-        & raw_av["Type d'avis"].isin(["ZU", "Z4", "ZR", "ZP"])
-    ].copy()
+    _type_av = raw_av["Type d'avis"].fillna("").astype(str).str.strip().str.upper()
+    _type_excl = _type_av.isin(["ZU", "Z4", "ZR", "ZP"])
+    _ordre_vide = raw_av["Ordre"].isna() | (raw_av["Ordre"].astype(str).str.strip() == "")
+    avf = raw_av[_ordre_vide & ~_type_excl].copy()
 
     apm = sorted(
         df[
@@ -287,10 +287,8 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str, calc_version: 
         ]["Poste travail princ."].dropna().unique().tolist()
     )
 
-    # AJOUTÉ : avis complet (non restreint aux types ZU/Z4/ZR/ZP), destiné
-    # aux usages autres que le Taux d'approbation des Avis — notamment le
-    # suivi HSE, qui a besoin des types ZI (Inspection) et ZH (HSE),
-    # structurellement absents de "avf" ci-dessus.
+    # avis_complet : conserve TOUS les types d'avis sans exception (brut de raw_av),
+    # indispensable pour la page Suivi HSE (Avis Inspection ZI, Avis HSE ZH, etc.).
     avis_complet = raw_av.copy()
 
     return df, avf, apm, now_ts, avis_complet
