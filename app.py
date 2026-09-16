@@ -75,13 +75,22 @@ def _calc_signature():
 CALC_VERSION, _CALC_SIG_OK = _calc_signature()
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# MODIFICATION 1/3 : ajout du parametre df_toutes_dates, transmis tel quel a
-# calc_kpis(). Le reste de la fonction est inchange.
-# ═══════════════════════════════════════════════════════════════════════════
 @st.cache_data(show_spinner="Calcul des KPIs en cours...")
-def calc_kpis_cached(df_period, avdf_period, now_ts, apm_tuple, fichier_date, sdt, edt, df_toutes_dates, calc_version=CALC_VERSION):
-    return calc_kpis(df_period, avdf_period, now_ts, list(apm_tuple), df_toutes_dates=df_toutes_dates)
+def calc_kpis_cached(_df_period, _avdf_period, now_ts, apm_tuple, fichier_date, sdt, edt, _df_toutes_dates, calc_version=CALC_VERSION):
+    return calc_kpis(_df_period, _avdf_period, now_ts, list(apm_tuple), df_toutes_dates=_df_toutes_dates)
+
+
+@st.cache_data(show_spinner="Chargement et préparation des données...")
+def get_prepared_data(fichier_date, ot_mtime, av_mtime):
+    ot_bytes = av_bytes = None
+    if os.path.exists("ot.xlsx") and os.path.exists("avis.xlsx"):
+        with open("ot.xlsx", "rb") as f:
+            ot_bytes = f.read()
+        with open("avis.xlsx", "rb") as f:
+            av_bytes = f.read()
+    if ot_bytes and av_bytes:
+        return prepare_data(ot_bytes, av_bytes, fichier_date)
+    return pd.DataFrame(), pd.DataFrame(), [], pd.Timestamp.now(), pd.DataFrame()
 
 
 def main() -> None:
@@ -103,10 +112,7 @@ def main() -> None:
     <style>
     [data-testid="stSidebarNav"],
     [data-testid="stSidebarNavItems"],
-    [data-testid="stSidebarNavSeparator"],
-    section[data-testid="stSidebar"] nav,
-    section[data-testid="stSidebar"] ul:has(li a),
-    div:has(> [data-testid="stSidebarNav"]) {
+    [data-testid="stSidebarNavSeparator"] {
         display: none !important;
     }
     </style>
@@ -158,39 +164,11 @@ def main() -> None:
     fichier_date = get_date_from_file()
 
     if "hse_affiche" not in st.session_state:
-        st.session_state.hse_affiche = False
-
-    if not st.session_state.hse_affiche:
-        c = random.choice(CONSIGNES_HSE)
-        st.markdown("""
-        <div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:linear-gradient(135deg,#1a365d,#2d3748,#1a365d);padding:40px">
-        <div style="font-size:64px;margin-bottom:20px">&#128282;</div>
-        <h1 style="text-align:center;font-size:46px;color:#fff;font-weight:900;margin:0">HSE - CONSIGNE DE SECURITE</h1>
-        <p style="text-align:center;color:rgba(255,255,255,.6);font-size:22px;margin-top:8px;letter-spacing:3px;text-transform:uppercase">Securite - Sante - Environnement</p>
-        <div style="background:linear-gradient(135deg,#f6e05e,#ed8936);padding:36px 48px;border-radius:20px;font-size:32px;font-weight:700;text-align:center;margin:40px 0;color:#1a202c;max-width:800px;box-shadow:0 20px 60px rgba(0,0,0,.3)">%s</div>
-        <h2 style="text-align:center;color:#48bb78;font-size:36px;font-weight:900">Aucun travail n'est plus urgent que la securite</h2>
-        <div style="margin-top:40px;width:200px;height:4px;background:rgba(255,255,255,.1);border-radius:2px;overflow:hidden">
-        <div style="width:100%%;height:100%%;background:linear-gradient(90deg,#48bb78,#38a169);border-radius:2px;animation:ld 5.5s ease-in-out forwards"></div>
-        </div>
-        <style>@keyframes ld{from{width:0}to{width:100%%}}</style>
-        </div>""" % c, unsafe_allow_html=True)
-        time.sleep(6)
         st.session_state.hse_affiche = True
-        st.rerun()
-        st.stop()
 
-    ot_bytes = av_bytes = None
-    if os.path.exists("ot.xlsx") and os.path.exists("avis.xlsx"):
-        with open("ot.xlsx", "rb") as f:
-            ot_bytes = f.read()
-        with open("avis.xlsx", "rb") as f:
-            av_bytes = f.read()
-
-    if ot_bytes and av_bytes:
-        df_full, av_full, apm, now_ts, avis_complet_full = prepare_data(ot_bytes, av_bytes, fichier_date)
-    else:
-        df_full, av_full, apm, now_ts = pd.DataFrame(), pd.DataFrame(), [], pd.Timestamp.now()
-        avis_complet_full = pd.DataFrame()
+    ot_mtime = os.path.getmtime("ot.xlsx") if os.path.exists("ot.xlsx") else 0
+    av_mtime = os.path.getmtime("avis.xlsx") if os.path.exists("avis.xlsx") else 0
+    df_full, av_full, apm, now_ts, avis_complet_full = get_prepared_data(fichier_date, ot_mtime, av_mtime)
 
     ctx = render_sidebar(fichier_date, apm, df_full, av_full, now_ts)
     vp      = ctx["vp"]
@@ -198,6 +176,8 @@ def main() -> None:
     av_full = ctx["av_full"]
     apm     = ctx["apm"]
     now_ts  = ctx["now_ts"]
+    if not ctx.get("avis_complet_full", pd.DataFrame()).empty:
+        avis_complet_full = ctx["avis_complet_full"]
 
     if df_full.empty:
         st.markdown('<div class="es">Veuillez charger les fichiers OT et AVIS via le panneau de filtres.</div>', unsafe_allow_html=True)
@@ -242,78 +222,50 @@ def main() -> None:
         pa = {k: round(ckdf[k].mean(skipna=True), 2) for k in QK}
         qa = {k: round(ckdf[k].mean(skipna=True), 2) for k in PK}
 
-        # ── Score Performance / Qualite PAR POSTE ───────────────────────────
-        # Règle UNIFORME appliquée partout dans ce fichier : pour chaque
-        # cellule KPI, gscore() renvoie 0 (rouge / non conforme) ou 1
-        # (conforme / non rouge). Les valeurs NaN (KPI indisponible pour ce
-        # poste) sont exclues du calcul. Score = somme des 0/1 / nombre de
-        # KPI valides × 100.
+        def score_from_totals_01(kpi_dict, kpi_list):
+            valides = [k for k in kpi_list if k in kpi_dict and pd.notna(kpi_dict[k])]
+            if not valides:
+                return 0.0
+            total_1 = sum(gscore(k, kpi_dict[k], CIBLE.get(k, 100)) for k in valides)
+            return round((total_1 / len(valides)) * 100, 2)
+
+        def get_kpi_total(posts, kpi):
+            if kpi in nd_full and posts:
+                n_s, d_s = nd_full[kpi]
+                p_sub = [p for p in posts if p in n_s.index]
+                if p_sub:
+                    sn = n_s.loc[p_sub].sum()
+                    sd = d_s.loc[p_sub].sum()
+                    return (sn / sd * 100.0) if sd > 0 else 100.0
+            p_sub = [p for p in posts if p in ckdf.index]
+            if p_sub and kpi in ckdf.columns:
+                return float(ckdf.loc[p_sub, kpi].mean(skipna=True))
+            return 0.0
+
+        # ── Score Performance / Qualite PAR POSTE (méthode 0 et 1) ──
         pscores = {}
         qscores = {}
         for poste in ckdf.index:
             r = ckdf.loc[poste]
-            valid_q = [k for k in QK if k in r.index and pd.notna(r[k])]
-            valid_p = [k for k in PK if k in r.index and pd.notna(r[k])]
-            pscores[poste] = (sum(gscore(k, r[k], CIBLE[k]) for k in valid_q) / len(valid_q) * 100) if valid_q else 0
-            qscores[poste] = (sum(gscore(k, r[k], CIBLE[k]) for k in valid_p) / len(valid_p) * 100) if valid_p else 0
+            pscores[poste] = score_from_totals_01({k: r[k] for k in QK if k in r.index}, QK)
+            qscores[poste] = score_from_totals_01({k: r[k] for k in PK if k in r.index}, PK)
 
         sf1_posts = [p for p in vp if str(p).startswith("SF1")]
         sf2_posts = [p for p in vp if str(p).startswith("SF2")]
 
-        # ── Score cellule par cellule — conservé pour le Total general ────
-        def calc_score_cellules(postes, liste_kpi):
-            total = 0
-            nombre_kpi = 0
+        # ── Score des CARTES SF1/SF2 — CALCUL DIRECT SUR LE TOTAL GÉNÉRAL (méthode 0 et 1) ──
+        # Applique la règle 0/1 directement sur le Total général de chaque division
+        sf1_p_vals = {k: get_kpi_total(sf1_posts, k) for k in QK}
+        sf1_q_vals = {k: get_kpi_total(sf1_posts, k) for k in PK}
+        sf1_p = round(score_from_totals_01(sf1_p_vals, QK), 1) if sf1_posts else None
+        sf1_q = round(score_from_totals_01(sf1_q_vals, PK), 1) if sf1_posts else None
 
-            for poste in postes:
-                if poste not in ckdf.index:
-                    continue
+        sf2_p_vals = {k: get_kpi_total(sf2_posts, k) for k in QK}
+        sf2_q_vals = {k: get_kpi_total(sf2_posts, k) for k in PK}
+        sf2_p = round(score_from_totals_01(sf2_p_vals, QK), 1) if sf2_posts else None
+        sf2_q = round(score_from_totals_01(sf2_q_vals, PK), 1) if sf2_posts else None
 
-                r = ckdf.loc[poste]
-
-                for kpi in liste_kpi:
-                    if kpi not in r.index:
-                        continue
-
-                    val = r[kpi]
-
-                    if pd.isna(val):
-                        continue
-
-                    total += gscore(
-                        kpi,
-                        float(val),
-                        CIBLE[kpi]
-                    )
-
-                    nombre_kpi += 1
-
-            return round(
-                (total / nombre_kpi) * 100,
-                2
-            ) if nombre_kpi else 0
-
-        # ═══════════════════════════════════════════════════════════════
-        # MODIFICATION 3/3 : dfp_toutes_dates=df_full transmis a build_ano_map
-        # (et plus bas a build_anomaly_dfs), pour que les listes d'anomalies
-        # des deux Backlogs restent cohérentes avec leurs nouvelles
-        # populations (calculées sur toutes les dates dans calc_kpis).
-        # ═══════════════════════════════════════════════════════════════
         ano_map = build_ano_map(dfp, avf, now_ts, dfp_toutes_dates=df_full)
-
-        # ── Score des CARTES SF1/SF2 — IDENTIQUE À TOTAL GÉNÉRAL (demande
-        # explicite) : réutilise EXACTEMENT calc_score_cellules(), la même
-        # fonction qui calcule tot_p["Score Performance"] / tot_q["Score
-        # Qualite"] plus bas (calc_score_cellules(vp, QK) / (vp, PK)).
-        # Seul le périmètre de postes change (sf1_posts/sf2_posts au lieu
-        # de vp) — la formule est rigoureusement la même, garantissant
-        # qu'une carte affiche la même valeur que Total général lorsque le
-        # filtre du tableau de bord ne retient que les postes de cette
-        # division.
-        sf1_p = round(calc_score_cellules(sf1_posts, QK), 1)
-        sf1_q = round(calc_score_cellules(sf1_posts, PK), 1)
-        sf2_p = round(calc_score_cellules(sf2_posts, QK), 1)
-        sf2_q = round(calc_score_cellules(sf2_posts, PK), 1)
 
         ano_p_rows = build_ano_rows(vp, ano_map, QK)
         ano_q_rows = build_ano_rows(vp, ano_map, PK, fixed_zero=["OT Fiabilité","Total Avis de Panne"])
@@ -371,45 +323,32 @@ def main() -> None:
         cible_q["Score Qualite"] = "100"
         qrows.append(cible_q)
 
+        # ── Total general Performance (conforme à la version consolidée, somme des âges = 100%) ──
         tot_p = {"Poste de travail": "Total general", "_t": "total"}
         for k in QK:
-            cc = tc = 0
-            for rw in prows:
-                if k in rw and rw.get("_t") not in ("cible", "total"):
-                    try:
-                        fv = float(rw[k])
-                        if pd.notna(fv):
-                            cc += gscore(k, fv, CIBLE.get(k, 100))
-                            tc += 1
-                    except Exception:
-                        pass
-            tot_p[k] = ("%.1f" % ((cc / tc) * 100)) if tc > 0 else "0.0"
+            tot_p[k] = "%.1f" % get_kpi_total(vp_present, k)
 
-        tot_p["Score Performance"] = "%.2f" % calc_score_cellules(vp, QK)
+        tot_p_vals = {k: float(tot_p[k]) for k in QK if k in tot_p}
+        tot_p["Score Performance"] = "%.2f" % score_from_totals_01(tot_p_vals, QK)
         prows.append(tot_p)
 
+        # ── Total general Qualité (méthode 0 et 1) ──
         tot_q = {"Poste de travail": "Total general", "_t": "total"}
         for k in PK:
-            cc = tc = 0
-            for rw in qrows:
-                if k in rw and rw.get("_t") not in ("cible", "total"):
-                    try:
-                        fv = float(rw[k])
-                        if pd.notna(fv):
-                            cc += gscore(k, fv, CIBLE.get(k, 100))
-                            tc += 1
-                    except Exception:
-                        pass
-            tot_q[k] = ("%.1f" % ((cc / tc) * 100)) if tc > 0 else "0.0"
+            tot_q[k] = "%.1f" % get_kpi_total(vp_present, k)
 
-        tot_q["Score Qualite"] = "%.2f" % calc_score_cellules(vp, PK)
+        tot_q_vals = {k: float(tot_q[k]) for k in PK if k in tot_q}
+        tot_q["Score Qualite"] = "%.2f" % score_from_totals_01(tot_q_vals, PK)
         qrows.append(tot_q)
 
-        save_kpis_to_excel(
-            prows, pcols, qrows, qcols,
-            ano_p_rows, ano_p_cols, ano_q_rows, ano_q_cols,
-            fichier_date,
-        )
+        _saved_key = f"_saved_{fichier_date}"
+        if not st.session_state.get(_saved_key):
+            save_kpis_to_excel(
+                prows, pcols, qrows, qcols,
+                ano_p_rows, ano_p_cols, ano_q_rows, ano_q_cols,
+                fichier_date,
+            )
+            st.session_state[_saved_key] = True
 
         from core.export_excel import charger_historique_depuis_github
         hist_df, _hist_msg = charger_historique_depuis_github()
