@@ -147,8 +147,8 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     ex["<1 mois"] = ex["<1 mois"] + ex["Inconnu"]
     ex["Total"] = ex[["<1 mois", "1 mois < <3 mois", ">3 mois"]].sum(axis=1)
     ex["OT exécution <1 mois"] = ckpi(ex["<1 mois"], ex["Total"])
-    ex["OT exécution >3 mois"] = ckpi(ex[">3 mois"], ex["Total"], 0)
     ex["OT exécution 1mois< <3mois"] = ckpi(ex["1 mois < <3 mois"], ex["Total"], 0)
+    ex["OT exécution >3 mois"] = ckpi(ex[">3 mois"], ex["Total"], 0)
 
     # ── OT LANC ESTIME — CONTIENT LANC ET TYPE ZCOR (demande explicite : statut contient LANC, type ZCOR, budget=0 anomalie) ──
     _lanc_scope = df[_statut_lanc & (df["Type d'ordre"] == "ZCOR")]
@@ -216,8 +216,8 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     pr["<1 mois"] = pr["<1 mois"] + pr["Inconnu"]
     pr["Total"] = pr["<1 mois"] + pr["1 mois < <3 mois"] + pr[">3 mois"]
     pr["OT préparation <1 mois"] = ckpi(pr["<1 mois"], pr["Total"])
-    pr["OT préparation >3 mois"] = ckpi(pr[">3 mois"], pr["Total"], 0)
     pr["OT préparation 1mois< <3mois"] = ckpi(pr["1 mois < <3 mois"], pr["Total"], 0)
+    pr["OT préparation >3 mois"] = ckpi(pr[">3 mois"], pr["Total"], 0)
 
     # ── OT planification <1/1-3/>3 mois — SUR LE BACKLOG COMPLET PLANIFICATION (_zcor_lanc_all) ──
     pl = cpiv(_zcor_lanc_all, pd.Series(True, index=_zcor_lanc_all.index), "alp", posts)
@@ -226,8 +226,8 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     pl["<1 mois"] = pl["<1 mois"] + pl["Inconnu"]
     pl["Total"] = pl["<1 mois"] + pl["1 mois < <3 mois"] + pl[">3 mois"]
     pl["OT planification <1 mois"] = ckpi(pl["<1 mois"], pl["Total"])
-    pl["OT planification >3 mois"] = ckpi(pl[">3 mois"], pl["Total"], 0)
     pl["OT planification 1mois< <3mois"] = ckpi(pl["1 mois < <3 mois"], pl["Total"], 0)
+    pl["OT planification >3 mois"] = ckpi(pl[">3 mois"], pl["Total"], 0)
 
     # ── OT confirmé / coûts égaux (inchangé) ──
     # ── OT CONFIME — CORRIGÉ (bug de colonne) ──
@@ -330,14 +330,14 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     res['ckdf'] = pd.DataFrame({
         "TAUX_REALISATION_CORRECTIF/PT": an["TAUX_REALISATION_CORRECTIF/PT"],
         "OT préparation <1 mois": pr["OT préparation <1 mois"],
-        "OT préparation >3 mois": pr["OT préparation >3 mois"],
         "OT préparation 1mois< <3mois": pr["OT préparation 1mois< <3mois"],
+        "OT préparation >3 mois": pr["OT préparation >3 mois"],
         "OT planification <1 mois": pl["OT planification <1 mois"],
-        "OT planification >3 mois": pl["OT planification >3 mois"],
         "OT planification 1mois< <3mois": pl["OT planification 1mois< <3mois"],
+        "OT planification >3 mois": pl["OT planification >3 mois"],
         "OT exécution <1 mois": ex["OT exécution <1 mois"],
-        "OT exécution >3 mois": ex["OT exécution >3 mois"],
         "OT exécution 1mois< <3mois": ex["OT exécution 1mois< <3mois"],
+        "OT exécution >3 mois": ex["OT exécution >3 mois"],
         "Performance Graissage": g_df["Performance Graissage"],
         "Performance Inspection": ins_df["Performance Inspection"],
         "Performance Systématiques": sys_df["Performance Systématiques"],
