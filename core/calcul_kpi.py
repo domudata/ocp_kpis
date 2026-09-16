@@ -283,10 +283,16 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     # sur données réelles). Voir prepare_data.py pour la définition d'avf.
     avf = av.copy()
     res['avf'] = avf
-    # ── Taux d'approbation des Avis (synchronisé avec anomalies.py) ──
-    avf_tot = avf.groupby("Poste travail princ.")["Avis"].count().reindex(posts, fill_value=0)
-    _is_aprv = avf["Statut utilisateur"].isin(["APRV", "APRV AVAU"])
-    avf_aprv = avf[_is_aprv].groupby("Poste travail princ.")["Avis"].count().reindex(posts, fill_value=0)
+    # ── Taux d'approbation des Avis (synchronisé avec anomalies.py, exclusion ACLO) ──
+    _non_aclo = pd.Series(True, index=avf.index)
+    if "Statut système" in avf.columns:
+        _non_aclo = _non_aclo & ~avf["Statut système"].fillna("").astype(str).str.contains("ACLO", case=False, na=False)
+    if "Statut utilisateur" in avf.columns:
+        _non_aclo = _non_aclo & ~avf["Statut utilisateur"].fillna("").astype(str).str.contains("ACLO", case=False, na=False)
+    avf_active = avf[_non_aclo]
+    avf_tot = avf_active.groupby("Poste travail princ.")["Avis"].count().reindex(posts, fill_value=0)
+    _is_aprv = avf_active["Statut utilisateur"].isin(["APRV", "APRV AVAU"])
+    avf_aprv = avf_active[_is_aprv].groupby("Poste travail princ.")["Avis"].count().reindex(posts, fill_value=0)
     taux_approbation = ckpi(avf_aprv, avf_tot)
 
     # ── Performance Graissage (inchangé) ──
