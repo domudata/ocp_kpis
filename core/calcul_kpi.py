@@ -272,11 +272,13 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     # sur données réelles). Voir prepare_data.py pour la définition d'avf.
     avf = av.copy()
     res['avf'] = avf
-    # Total avis sans ordre par poste
-    avf_tot = avf.groupby("Poste travail princ.")["Avis"].count().reindex(posts, fill_value=0)
     # Avis approuvés : statut utilisateur contient APRV
     _is_aprv = avf["Statut utilisateur"].fillna("").astype(str).str.contains("APRV", case=False, na=False)
+    # Avis en attente d'approbation : statut utilisateur contient APRQ (anomalies)
+    _is_aprq = avf["Statut utilisateur"].fillna("").astype(str).str.contains("APRQ", case=False, na=False) & ~_is_aprv
     avf_aprv = avf[_is_aprv].groupby("Poste travail princ.")["Avis"].count().reindex(posts, fill_value=0)
+    avf_aprq = avf[_is_aprq].groupby("Poste travail princ.")["Avis"].count().reindex(posts, fill_value=0)
+    avf_tot = avf_aprv + avf_aprq
     tca = pd.DataFrame({
         "APRV": avf_aprv,
         "Total": avf_tot,
