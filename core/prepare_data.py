@@ -277,9 +277,8 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str, calc_version: 
         df["Statut OT"] = df["Statut OT"].replace({"CREE": "CRÉÉ"})
 
     _type_av = raw_av["Type d'avis"].fillna("").astype(str).str.strip().str.upper()
-    _type_excl = _type_av.isin(["ZU", "Z4", "ZR", "ZP"])
     _ordre_vide = raw_av["Ordre"].isna() | (raw_av["Ordre"].astype(str).str.strip() == "")
-    avf = raw_av[_ordre_vide & ~_type_excl].copy()
+    avf = raw_av[_ordre_vide & _type_av.isin(["ZU", "Z4", "ZR", "ZP"])].copy()
 
     apm = sorted(
         df[
