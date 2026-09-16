@@ -108,9 +108,15 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
     ano_map["Performance Inspection"] = dfp[perf_filt & (dfp["_tw_num"].isin([290, 300, 310])) & (dfp["Date de début planifiée"] <= now_ts)].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["Performance Systématiques"] = dfp[perf_filt & (dfp["_tw_num"] == 360) & (dfp["Date de début planifiée"] <= now_ts)].groupby("Poste travail princ.")["Ordre"].count()
 
-    # Taux d'approbation des Avis (version originale)
-    avf_tot = avf.groupby("Poste travail princ.")["Avis"].count()
-    avf_aprv = avf[avf["Statut utilisateur"].isin(["APRV", "APRV AVAU"])].groupby("Poste travail princ.")["Avis"].count()
+    # Taux d'approbation des Avis (exclusion ACLO)
+    _non_aclo = pd.Series(True, index=avf.index)
+    if "Statut système" in avf.columns:
+        _non_aclo = _non_aclo & ~avf["Statut système"].fillna("").astype(str).str.contains("ACLO", case=False, na=False)
+    if "Statut utilisateur" in avf.columns:
+        _non_aclo = _non_aclo & ~avf["Statut utilisateur"].fillna("").astype(str).str.contains("ACLO", case=False, na=False)
+    avf_active = avf[_non_aclo]
+    avf_tot = avf_active.groupby("Poste travail princ.")["Avis"].count()
+    avf_aprv = avf_active[avf_active["Statut utilisateur"].isin(["APRV", "APRV AVAU"])].groupby("Poste travail princ.")["Avis"].count()
     ano_map["Taux d'approbation des Avis"] = avf_tot.sub(avf_aprv, fill_value=0)
 
     # OT LANC ESTIME : contient LANC, type ZCOR, et Total coûts budgétés == 0 (anomalie)
@@ -186,7 +192,15 @@ def build_anomaly_dfs(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
         "Performance Graissage": dfp[perf_filt & (dfp["_tw_num"] == 350)].copy(),
         "Performance Inspection": dfp[perf_filt & (dfp["_tw_num"].isin([290, 300, 310])) & (dfp["Date de début planifiée"] <= now_ts)].copy(),
         "Performance Systématiques": dfp[perf_filt & (dfp["_tw_num"] == 360) & (dfp["Date de début planifiée"] <= now_ts)].copy(),
-        "Taux d'approbation des Avis": avf[~avf["Statut utilisateur"].isin(["APRV", "APRV AVAU"])].copy(),
+        "Taux d'approbation des Avis": (
+            lambda _a: _a[
+                ~_a["Statut utilisateur"].isin(["APRV", "APRV AVAU"])
+                & (~_a["Statut système"].fillna("").astype(str).str.contains("ACLO", case=False, na=False)
+                   if "Statut système" in _a.columns else True)
+                & (~_a["Statut utilisateur"].fillna("").astype(str).str.contains("ACLO", case=False, na=False)
+                   if "Statut utilisateur" in _a.columns else True)
+            ]
+        )(avf).copy(),
         "OT LANC ESTIME": dfp[_lanc_estime_ano].copy(),
         "Backlog préparation caractérisé": non_prep.copy(),
         "Backlog planification caractérisé": non_plan.copy(),
