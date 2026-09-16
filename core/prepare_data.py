@@ -9,7 +9,7 @@ import streamlit as st
 from core.constants import MP_KW, MPLAN_KW
 
 CODES_PREP_EXACT = {"ATPD", "ATMR", "ATER", "ATRS", "ATMO"}
-CODES_PLAN_EXACT = {"ATEI", "ATAL", "ATAS", "AGAR", "ATHS"}
+CODES_PLAN_EXACT = {"ATPL", "ATEI", "ATAL", "ATAS", "AGAR", "ATHS"}
 
 
 
@@ -224,7 +224,7 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str, calc_version: 
         lambda x: next((kw for kw in ["ATPD", "ATMR", "ATER", "ATRS", "ATMO"] if kw in set(re.findall(r'[A-Za-z0-9]+', str(x).upper()))), "NON CARACTERISE")
     )
     df["Type Carac Plan"] = df["Statut utilisateur"].apply(
-        lambda x: next((kw for kw in ["ATEI", "ATAL", "ATAS", "AGAR", "ATHS"] if kw in set(re.findall(r'[A-Za-z0-9]+', str(x).upper()))), "NON CARACTERISE")
+        lambda x: next((kw for kw in ["ATPL", "ATEI", "ATAL", "ATAS", "AGAR", "ATHS"] if kw in set(re.findall(r'[A-Za-z0-9]+', str(x).upper()))), "NON CARACTERISE")
     )
 
     # ── Âge Préparation ('ap') : date de création avec repli sur date planifiée ──
@@ -253,6 +253,12 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str, calc_version: 
             df[am] = np.nan
             df[ac] = "Inconnu"
 
+    if "Statut système" in df.columns:
+        df["Statut OT"] = (
+            df["Statut système"].fillna("").astype(str).str.strip().str.split().str[0]
+        )
+        df["Statut OT"] = df["Statut OT"].replace({"CREE": "CRÉÉ"})
+
     df["OT CONFIME"] = np.where(
         df["Statut système"].str.contains("CLOT|TCLO", na=False)
         & df["Statut système"].str.contains("CONF", na=False),
@@ -262,19 +268,21 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str, calc_version: 
     df["Contient SOPL"] = (
         df["Statut utilisateur"].str.contains("SOPL", na=False).map({True: 1, False: 0})
     )
+    _is_zcor_prep = df["Type d'ordre"].fillna("").astype(str).str.strip().str.upper() == "ZCOR"
+    _statut_lanc_prep = df["Statut système"].fillna("").astype(str).str.contains("LANC", na=False) | (df.get("Statut OT", pd.Series("", index=df.index)) == "LANC")
     _b_prep = pd.to_numeric(df["Total coûts budgétés"], errors="coerce").fillna(0)
-    df["OT LANC ESTIME"] = np.where(_b_prep == 0, "NON", "OUI")
+    df["OT LANC ESTIME"] = np.where(_is_zcor_prep & _statut_lanc_prep & (_b_prep > 0), "OUI", "NON")
+
+    _statut_clot_tclo_prep = df["Statut système"].fillna("").astype(str).str.contains("CLOT|TCLO", na=False) | (df.get("Statut OT", pd.Series("", index=df.index)).isin(["CLOT", "TCLO"]))
     _r_prep = pd.to_numeric(df["Total coûts réels"], errors="coerce").fillna(0)
-    df["OT_COR_EGAL"] = np.where((_b_prep != _r_prep) & (_r_prep != 0), "OUI", "NON")
+    # OT_COR_EGAL : ZCOR + CLOT/TCLO + Total coûts réels > 0 et budget != réel
+    df["OT_COR_EGAL"] = np.where(
+        _is_zcor_prep & _statut_clot_tclo_prep & (_r_prep > 0) & (_b_prep != _r_prep),
+        "OUI", "NON"
+    )
     df["_tw_num"] = pd.to_numeric(
         df.get("Type de travail", pd.Series(dtype=float)), errors="coerce"
     )
-
-    if "Statut système" in df.columns:
-        df["Statut OT"] = (
-            df["Statut système"].fillna("").astype(str).str.strip().str.split().str[0]
-        )
-        df["Statut OT"] = df["Statut OT"].replace({"CREE": "CRÉÉ"})
 
     _type_av = raw_av["Type d'avis"].fillna("").astype(str).str.strip().str.upper()
     _ordre_vide = raw_av["Ordre"].isna() | (raw_av["Ordre"].astype(str).str.strip() == "")
