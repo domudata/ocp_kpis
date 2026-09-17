@@ -15,6 +15,7 @@ aucune dépendance système. Le PPTX continue d'être généré et publié
 séparément, pour ceux qui préfèrent l'éditer.
 """
 import io
+import os
 import pandas as pd
 import streamlit as st
 
@@ -126,15 +127,34 @@ def generate_and_publish_poste_report(
         status["messages"].append(f"Échec génération Excel anomalies : {e}")
         xlsx_bytes = None
 
+    # ── 5) Sauvegarde locale sur disque dans presentation/<folder>/ ──
+    dossier_local = os.path.join("presentation", folder)
+    try:
+        os.makedirs(dossier_local, exist_ok=True)
+        if pdf_bytes:
+            pdf_path = os.path.join(dossier_local, "rapport.pdf")
+            with open(pdf_path, "wb") as f:
+                f.write(pdf_bytes)
+            status["pdf_saved"] = True
+            status["messages"].append(f"PDF enregistré localement ({pdf_path})")
+        if xlsx_bytes:
+            xlsx_path = os.path.join(dossier_local, "anomalies.xlsx")
+            with open(xlsx_path, "wb") as f:
+                f.write(xlsx_bytes)
+            status["xlsx_saved"] = True
+            status["messages"].append(f"Excel anomalies enregistré localement ({xlsx_path})")
+    except Exception as e:
+        status["messages"].append(f"Échec sauvegarde locale presentation/{folder} : {e}")
+
     if dry_run:
-        status["messages"].append("Mode test (dry_run) : fichiers générés mais NON publiés sur GitHub.")
+        status["messages"].append("Mode test (dry_run) : fichiers enregistrés localement mais NON publiés sur GitHub.")
         status["_pdf_bytes"] = pdf_bytes
         status["_xlsx_bytes"] = xlsx_bytes
         return status
 
-    # ── 5) Publication sur GitHub (PDF + Excel) ──
+    # ── 6) Publication sur GitHub (PDF + Excel) si configuré ──
     if not is_configured():
-        status["messages"].append("GITHUB_TOKEN / GITHUB_REPO non configurés — fichiers générés mais non publiés.")
+        status["messages"].append("GitHub non configuré — fichiers enregistrés localement dans presentation/.")
         return status
 
     if pdf_bytes:
@@ -260,13 +280,26 @@ def generate_and_publish_division_report(
         status["messages"].append(f"Échec génération PDF division : {e}")
         return status
 
+    # Sauvegarde locale sur disque dans presentation/<folder>/
+    dossier_local = os.path.join("presentation", folder)
+    try:
+        os.makedirs(dossier_local, exist_ok=True)
+        if pdf_bytes:
+            pdf_path = os.path.join(dossier_local, "rapport.pdf")
+            with open(pdf_path, "wb") as f:
+                f.write(pdf_bytes)
+            status["pdf_saved"] = True
+            status["messages"].append(f"PDF division enregistré localement ({pdf_path})")
+    except Exception as e:
+        status["messages"].append(f"Échec sauvegarde locale division {folder} : {e}")
+
     if dry_run:
-        status["messages"].append("Mode test (dry_run) : rapport généré mais NON publié.")
+        status["messages"].append("Mode test (dry_run) : rapport division enregistré localement mais NON publié.")
         status["_pdf_bytes"] = pdf_bytes
         return status
 
     if not is_configured():
-        status["messages"].append("GitHub non configuré — rapport généré mais non publié.")
+        status["messages"].append("GitHub non configuré — rapport division enregistré localement dans presentation/.")
         return status
 
     ok, msg = upload_file(f"presentation/{folder}/rapport.pdf", pdf_bytes,
