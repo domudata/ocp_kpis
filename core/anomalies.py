@@ -100,19 +100,18 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
     _all_posts = dfp["Poste travail princ."].dropna().unique() if "Poste travail princ." in dfp.columns else []
 
     # ── OT préparation <1/1-3/>3 mois — SUR LE BACKLOG COMPLET PRÉPARATION (zcor_cree) ──
-    # Les OT <1 mois sont conformes (cible >= 80%), ce ne sont PAS des anomalies (0 anomalie).
-    # Les anomalies sont les OT en retard : tranche 1-3 mois et tranche >3 mois.
-    ano_map["OT préparation <1 mois"] = pd.Series(0, index=_all_posts)
+    # Cible <1 mois >= 80%. Les anomalies indiquent l'inverse : OT dont l'âge dépasse 1 mois (>= 1 mois).
+    ano_map["OT préparation <1 mois"] = zcor_cree[zcor_cree["ap"].isin(["1 mois < <3 mois", ">3 mois"])].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["OT préparation 1mois< <3mois"] = zcor_cree[zcor_cree["ap"] == "1 mois < <3 mois"].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["OT préparation >3 mois"] = zcor_cree[zcor_cree["ap"] == ">3 mois"].groupby("Poste travail princ.")["Ordre"].count()
 
     # ── OT planification <1/1-3/>3 mois — SUR LE STOCK PLANIFICATION (zcor_plan_age : LANC + ATPL) ──
-    ano_map["OT planification <1 mois"] = pd.Series(0, index=_all_posts)
+    ano_map["OT planification <1 mois"] = zcor_plan_age[zcor_plan_age["alp"].isin(["1 mois < <3 mois", ">3 mois"])].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["OT planification 1mois< <3mois"] = zcor_plan_age[zcor_plan_age["alp"] == "1 mois < <3 mois"].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["OT planification >3 mois"] = zcor_plan_age[zcor_plan_age["alp"] == ">3 mois"].groupby("Poste travail princ.")["Ordre"].count()
 
     # ── OT exécution <1/1-3/>3 mois (zcor_exec : LANC + SOPL) ──
-    ano_map["OT exécution <1 mois"] = pd.Series(0, index=_all_posts)
+    ano_map["OT exécution <1 mois"] = zcor_exec[zcor_exec["aex"].isin(["1 mois < <3 mois", ">3 mois"])].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["OT exécution 1mois< <3mois"] = zcor_exec[zcor_exec["aex"] == "1 mois < <3 mois"].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["OT exécution >3 mois"] = zcor_exec[zcor_exec["aex"] == ">3 mois"].groupby("Poste travail princ.")["Ordre"].count()
 
@@ -191,14 +190,14 @@ def build_anomaly_dfs(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
     _lanc_estime_ano = _statut_lanc_ano & (dfp["Type d'ordre"] == "ZCOR") & (dfp["OT LANC ESTIME"] == "NON")
     return {
         "TAUX_REALISATION_CORRECTIF/PT": dfp[(dfp["Nº appel pl.entret."].fillna(0) == 0) & (dfp["Contient SOPL"] == 1) & (~dfp["Statut OT"].isin(["CLOT", "TCLO"]))].copy(),
-        # SYNCHRONISÉ avec calcul_kpi.py / build_ano_map : <1m conforme (0 anomalie), anomalies dans 1-3m et >3m
-        "OT préparation <1 mois": zcor_cree.iloc[0:0].copy(),
+        # Anomalies <1 mois = inverse du KPI = OT dont l'âge dépasse 1 mois (>= 1 mois)
+        "OT préparation <1 mois": zcor_cree[zcor_cree["ap"].isin(["1 mois < <3 mois", ">3 mois"])].copy(),
         "OT préparation 1mois< <3mois": zcor_cree[zcor_cree["ap"] == "1 mois < <3 mois"].copy(),
         "OT préparation >3 mois": zcor_cree[zcor_cree["ap"] == ">3 mois"].copy(),
-        "OT planification <1 mois": zcor_plan_age.iloc[0:0].copy(),
+        "OT planification <1 mois": zcor_plan_age[zcor_plan_age["alp"].isin(["1 mois < <3 mois", ">3 mois"])].copy(),
         "OT planification 1mois< <3mois": zcor_plan_age[zcor_plan_age["alp"] == "1 mois < <3 mois"].copy(),
         "OT planification >3 mois": zcor_plan_age[zcor_plan_age["alp"] == ">3 mois"].copy(),
-        "OT exécution <1 mois": zcor_exec.iloc[0:0].copy(),
+        "OT exécution <1 mois": zcor_exec[zcor_exec["aex"].isin(["1 mois < <3 mois", ">3 mois"])].copy(),
         "OT exécution 1mois< <3mois": zcor_exec[zcor_exec["aex"] == "1 mois < <3 mois"].copy(),
         "OT exécution >3 mois": zcor_exec[zcor_exec["aex"] == ">3 mois"].copy(),
         "Performance Graissage": dfp[perf_filt & (dfp["_tw_num"] == 350)].copy(),
