@@ -5,24 +5,19 @@ from openpyxl import load_workbook
 
 from core.constants import LOWER_BETTER
 
-def load_historical_kpis(filepath: str) -> pd.DataFrame:
+def load_historical_kpis(filepath: str = None) -> pd.DataFrame:
     """Charge TOUT l'historique enregistré (une feuille par date dans le
-    classeur). Aucune limite de nombre de dates ici — si l'app n'affiche
-    que 2 dates, c'est que le fichier kpis/indicateurs_kpis.xlsx local n'a
-    que 2 feuilles (probablement parce que le disque de l'app est éphémère
-    et que seules les versions committées sur GitHub survivent aux
-    redémarrages — voir l'onglet "Suivi & Evolution" > Historique).
-
-    CORRIGÉ : parse maintenant AUSSI les sections ANOMALIES PERFORMANCE /
-    ANOMALIES QUALITE (avant, elles étaient lues puis explicitement
-    ignorées : `section = None`). Elles sont taguées _section =
-    "ano_perf" / "ano_qual", en parallèle de "perf" / "qual" pour les
-    valeurs de KPI.
-    """
-    if not os.path.exists(filepath):
-        return pd.DataFrame()
+    classeur)."""
+    target = filepath
+    if not target or not os.path.exists(target):
+        if os.path.exists("kpis.xlsx"):
+            target = "kpis.xlsx"
+        elif os.path.exists(os.path.join("kpis", "indicateurs_kpis.xlsx")):
+            target = os.path.join("kpis", "indicateurs_kpis.xlsx")
+        else:
+            return pd.DataFrame()
     try:
-        wb = load_workbook(filepath, data_only=True)
+        wb = load_workbook(target, data_only=True)
     except Exception:
         return pd.DataFrame()
 
