@@ -50,12 +50,7 @@ def _lire_date_github():
 
 
 def get_date_from_file() -> str:
-    """Date de l'extraction courante. Tente d'abord GitHub (protégé par
-    _lire_date_github ci-dessus), puis le disque local, puis la date du
-    jour — comportement de secours identique à l'original."""
-    date_gh, _source = _lire_date_github()
-    if date_gh:
-        return date_gh
+    """Date de l'extraction courante. Lit en priorité date.txt local, puis tente GitHub."""
     if os.path.exists("date.txt"):
         try:
             with open("date.txt", "r", encoding="utf-8") as f:
@@ -64,6 +59,9 @@ def get_date_from_file() -> str:
                     return valeur
         except Exception:
             pass
+    date_gh, _source = _lire_date_github()
+    if date_gh:
+        return date_gh
     return pd.Timestamp.today().strftime("%d/%m/%Y")
 
 
@@ -111,7 +109,7 @@ def read_excel_safe(bytes_data: bytes) -> pd.DataFrame:
     header = bytes_data[:8]
 
     if header[:4] in (b'PK\x03\x04', b'PK\x05\x06'):
-        for engine in ['openpyxl', 'calamine']:
+        for engine in ['calamine', 'openpyxl']:
             try:
                 return pd.read_excel(bio, engine=engine)
             except Exception:
@@ -119,14 +117,14 @@ def read_excel_safe(bytes_data: bytes) -> pd.DataFrame:
                 continue
 
     if header == b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1':
-        for engine in ['xlrd', 'calamine']:
+        for engine in ['calamine', 'xlrd']:
             try:
                 return pd.read_excel(bio, engine=engine)
             except Exception:
                 bio.seek(0)
                 continue
 
-    for engine in ['openpyxl', 'xlrd', 'calamine']:
+    for engine in ['calamine', 'openpyxl', 'xlrd']:
         try:
             bio.seek(0)
             return pd.read_excel(bio, engine=engine)
