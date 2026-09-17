@@ -102,31 +102,34 @@ PALETTE_NATURES = {
     "FUITE NON DÉFINIE": "#94A3B8",
 }
 
-# Palette statuts avis
-PALETTE_STATUT_AVIS = {
-    "OUVERT (AOUV)": SKY,
-    "EN COURS (AENC)": BLUE,
-    "CLÔTURÉ (ACLO)": GREEN,
-    "AFFICHÉ (OAFF)": TEAL,
-    "IMPRIMÉ (AIMP)": CYAN,
-    "STATUT TECHNIQUE SUPPLÉMENTAIRE (TSUP)": INDIGO,
-    "TRAITEMENT COMPLÉMENTAIRE (TAMO)": "#8B5CF6",
-    "MARQUÉ POUR SUPPRESSION (MARC)": GREY,
-    "OUVERT": SKY,
-    "EN COURS": BLUE,
-    "CLÔTURÉ": GREEN,
-    "AFFICHÉ": TEAL,
-    "IMPRIMÉ": CYAN,
-    "STATUT TECHNIQUE SUPPLÉMENTAIRE": INDIGO,
-    "TRAITEMENT COMPLÉMENTAIRE": "#8B5CF6",
-    "MARQUÉ POUR SUPPRESSION": GREY,
-    "NON RENSEIGNÉ": "#CBD5E1",
+# Palette statuts unifiés avis (Clôturé, En cours, Rejeté)
+PALETTE_STATUT_UNIFIE = {
+    "Clôturé": "#10B981",   # Vert
+    "En cours": "#0EA5E9",  # Bleu ciel
+    "Rejeté": "#EF4444",    # Rouge
 }
 
 
 # ═══════════════════════════════════════════════════════════════════
 # Utilitaires
 # ═══════════════════════════════════════════════════════════════════
+
+def _classifier_statut(statut_sys, statut_util=None):
+    """
+    Règle unifiée demandée :
+      - 'En cours' si AOUV (ouvert) ou AENC (en cours)
+      - 'Clôturé' si ACLO (et non rejeté)
+      - 'Rejeté' pour tout le reste (et si statut utilisateur REJT)
+    """
+    s_u = str(statut_util).strip().upper().split()[0] if statut_util and str(statut_util).lower() not in ["nan", "none"] else ""
+    s_s = str(statut_sys).strip().upper().split()[0] if statut_sys and str(statut_sys).lower() not in ["nan", "none"] else ""
+    if s_u == "REJT":
+        return "Rejeté"
+    if s_s in ["AOUV", "AENC"]:
+        return "En cours"
+    if s_s == "ACLO":
+        return "Clôturé"
+    return "Rejeté"
 
 def _statut_court(serie):
     return serie.fillna("").astype(str).str.strip().str.split().str[0].replace("", "Inconnu")
@@ -141,6 +144,9 @@ def _regrouper_atelier(poste):
         return "AUTRE"
     p_upper = p.upper()
 
+    if "GCMC" in p_upper or "GCFD" in p_upper:
+        return "AUTRE"
+
     for code in ("TSP", "REX", "MCP", "DCP", "PP1", "PP2", "PS3", "PS4"):
         if code in p_upper:
             return code
@@ -154,6 +160,7 @@ def _regrouper_atelier(poste):
         return "CENTRAL"
 
     return p
+
 
 
 def _analyser_nature(txt):
@@ -306,9 +313,114 @@ def _bar(pivot, titre, palette=None, xlabel="Nombre", max_postes=12):
     return buf
 
 
+def _bar_statuts_avec_pct(pivot, titre, palette=None, xlabel="Nombre d'avis", max_postes=25):
+    """Barres empilées horizontales des statuts d'avis par atelier avec affichage du % En cours."""
+    if pivot is None or pivot.empty:
+        return None
+    totaux = pivot.sum(axis=1).sort_values()
+    n_total = len(totaux)
+    if n_total > max_postes:
+        totaux = totaux.tail(max_postes)
+        titre = f"{titre} (top {max_postes} sur {n_total})"
+    pivot = pivot.loc[totaux.index]
+
+    ordre_cols = [c for c in ["Clôturé", "En cours", "Rejeté"] if c in pivot.columns]
+    autres = [c for c in pivot.columns if c not in ordre_cols]
+    pivot = pivot[ordre_cols + autres]
+
+    hauteur = max(2.8, 0.42 * len(pivot) + 1.1)
+    fig, ax = plt.subplots(figsize=(9, hauteur), dpi=170)
+    gauche = np.zeros(len(pivot))
+    for col in pivot.columns:
+        vals = pivot[col].values.astype(float)
+        ax.barh(pivot.index.astype(str), vals, left=gauche, height=0.62,
+                color=(palette or {}).get(col, GREY), label=str(col),
+                edgecolor="white", linewidth=0.8)
+        gauche += vals
+    maxi = max(gauche) if len(gauche) else 1
+    for i, idx in enumerate(pivot.index):
+        tot = gauche[i]
+        if tot > 0:
+            enc = float(pivot.loc[idx, "En cours"]) if "En cours" in pivot.columns else 0.0
+            pct_enc = (enc / tot * 100) if tot > 0 else 0
+            ax.text(tot + maxi * 0.012, i, f"{int(tot)} ({pct_enc:.0f}% en cours)", va="center",
+                    fontsize=8.5, fontweight="bold", color=DARK)
+    nb_cols = len(pivot.columns)
+    ncol = max(1, min(nb_cols, 4))
+    pad = 24 if nb_cols <= 4 else (24 + 14 * ((nb_cols - 1) // 4))
+    ax.set_title(titre, fontsize=11.5, fontweight="bold", color=NAVY, loc="left", pad=pad)
+    ax.set_xlabel(xlabel, fontsize=9)
+    ax.legend(fontsize=8.5, frameon=False, ncol=ncol, loc="lower left", bbox_to_anchor=(0, 1.005))
+    ax.grid(axis="x", color="#F1F5F9", linewidth=1)
+    ax.set_axisbelow(True)
+    ax.spines[["top", "right"]].set_visible(False)
+    ax.tick_params(labelsize=9)
+    ax.set_xlim(0, maxi * 1.25 if maxi > 0 else 1)
+    plt.tight_layout()
+    buf = io.BytesIO()
+    plt.savefig(buf, format="png", dpi=170, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+    buf.seek(0)
+    return buf
+
+
+def _bar_fuites_par_type(pivot, titre="Ventilation des Fuites par Type (Clôturé / En cours / %)", palette=None, max_types=18):
+    """Barres empilées horizontales par type de fuite avec affichage du % clôturé et en cours."""
+    if pivot is None or pivot.empty:
+        return None
+    totaux = pivot.sum(axis=1).sort_values()
+    n_total = len(totaux)
+    if n_total > max_types:
+        totaux = totaux.tail(max_types)
+        titre = f"{titre} (top {max_types} sur {n_total})"
+    pivot = pivot.loc[totaux.index]
+
+    ordre_cols = [c for c in ["Clôturé", "En cours", "Rejeté"] if c in pivot.columns]
+    autres = [c for c in pivot.columns if c not in ordre_cols]
+    pivot = pivot[ordre_cols + autres]
+
+    hauteur = max(2.8, 0.42 * len(pivot) + 1.1)
+    fig, ax = plt.subplots(figsize=(9.5, hauteur), dpi=170)
+    gauche = np.zeros(len(pivot))
+    for col in pivot.columns:
+        vals = pivot[col].values.astype(float)
+        ax.barh(pivot.index.astype(str), vals, left=gauche, height=0.62,
+                color=(palette or {}).get(col, GREY), label=str(col),
+                edgecolor="white", linewidth=0.8)
+        gauche += vals
+    maxi = max(gauche) if len(gauche) else 1
+    for i, idx in enumerate(pivot.index):
+        tot = gauche[i]
+        if tot > 0:
+            clot = float(pivot.loc[idx, "Clôturé"]) if "Clôturé" in pivot.columns else 0.0
+            enc = float(pivot.loc[idx, "En cours"]) if "En cours" in pivot.columns else 0.0
+            pct_c = (clot / tot * 100) if tot > 0 else 0
+            pct_e = (enc / tot * 100) if tot > 0 else 0
+            ax.text(tot + maxi * 0.012, i, f"{int(tot)} ({pct_c:.0f}% clôt. | {pct_e:.0f}% enc.)", va="center",
+                    fontsize=8.5, fontweight="bold", color=DARK)
+    nb_cols = len(pivot.columns)
+    ncol = max(1, min(nb_cols, 4))
+    pad = 24 if nb_cols <= 4 else (24 + 14 * ((nb_cols - 1) // 4))
+    ax.set_title(titre, fontsize=11.5, fontweight="bold", color=NAVY, loc="left", pad=pad)
+    ax.set_xlabel("Nombre de fuites", fontsize=9)
+    ax.legend(fontsize=8.5, frameon=False, ncol=ncol, loc="lower left", bbox_to_anchor=(0, 1.005))
+    ax.grid(axis="x", color="#F1F5F9", linewidth=1)
+    ax.set_axisbelow(True)
+    ax.spines[["top", "right"]].set_visible(False)
+    ax.tick_params(labelsize=9)
+    ax.set_xlim(0, maxi * 1.30 if maxi > 0 else 1)
+    plt.tight_layout()
+    buf = io.BytesIO()
+    plt.savefig(buf, format="png", dpi=170, bbox_inches="tight", facecolor="white")
+    plt.close(fig)
+    buf.seek(0)
+    return buf
+
+
 # ═══════════════════════════════════════════════════════════════════
 # Sections
 # ═══════════════════════════════════════════════════════════════════
+
 
 @st.cache_data(show_spinner="Analyse HSE en cours...", max_entries=8)
 def _calculer_sections_hse(_dfp, _avf, vp_tuple, date_str, sel_annee, sel_mois, sel_sem, sel_atelier="Tous"):
@@ -320,17 +432,24 @@ def _calculer_sections_hse(_dfp, _avf, vp_tuple, date_str, sel_annee, sel_mois, 
     """
     ot = _ajouter_periode(_dfp.copy(), "Créé le")
     avis = _ajouter_periode(_avf.copy(), "Créé le") if _avf is not None and not _avf.empty else pd.DataFrame()
-    vp = list(vp_tuple)
-    if not avis.empty and "Poste travail princ." in avis.columns:
-        avis = avis[avis["Poste travail princ."].isin(vp)]
+    vp = [p for p in vp_tuple if not re.search("GCMC|GCFD", str(p), re.IGNORECASE)]
+
+    # Exclusion stricte des postes GCMC / GCFD
+    col_p_ot = next((c for c in ot.columns if "poste" in str(c).lower() and "trav" in str(c).lower()), "Poste travail princ.")
+    col_p_av = next((c for c in avis.columns if "poste" in str(c).lower() and "trav" in str(c).lower()), "Poste travail princ.") if not avis.empty else "Poste travail princ."
+
+    if not ot.empty and col_p_ot in ot.columns:
+        ot = ot[~ot[col_p_ot].astype(str).str.contains("GCMC|GCFD", case=False, na=False)].copy()
+    if not avis.empty and col_p_av in avis.columns:
+        avis = avis[~avis[col_p_av].astype(str).str.contains("GCMC|GCFD", case=False, na=False)].copy()
+
+    if not avis.empty and col_p_av in avis.columns:
+        avis = avis[avis[col_p_av].isin(vp)]
 
     ot = _filtrer_periode(ot, sel_annee, sel_mois, sel_sem)
     avis = _filtrer_periode(avis, sel_annee, sel_mois, sel_sem)
 
-    col_p_ot = next((c for c in ot.columns if "poste" in str(c).lower() and "trav" in str(c).lower()), "Poste travail princ.")
-    col_p_av = next((c for c in avis.columns if "poste" in str(c).lower() and "trav" in str(c).lower()), "Poste travail princ.") if not avis.empty else "Poste travail princ."
     col_d_av = next((c for c in avis.columns if str(c).lower() in ["description", "désignation", "designation"] or "descript" in str(c).lower() or "designat" in str(c).lower()), None) if not avis.empty else None
-    col_s_av = next((c for c in avis.columns if "statut" in str(c).lower() and "syst" in str(c).lower()), None) if not avis.empty else None
 
     # Regroupement et filtrage par atelier
     if not ot.empty and col_p_ot in ot.columns:
@@ -349,31 +468,29 @@ def _calculer_sections_hse(_dfp, _avf, vp_tuple, date_str, sel_annee, sel_mois, 
     if not avis.empty:
         avis["_Approbation"] = _approbation(avis)
 
-    # Analyse des fuites & statuts système pour tous les avis du périmètre
+    # Analyse des fuites & statuts unifiés pour tous les avis du périmètre
     df_avis_analyse = avis.copy()
     if not df_avis_analyse.empty:
         if col_d_av and col_d_av in df_avis_analyse.columns:
             desig_av = df_avis_analyse[col_d_av].fillna("").astype(str)
             masque_fuite = desig_av.str.contains(r"\bfuites?\b", case=False, na=False, regex=True)
             df_avis_analyse["_EstFuite"] = masque_fuite
-            df_avis_analyse["_NatureFuite"] = None
+            df_avis_analyse["_NatureFuite"] = "FUITE NON DÉFINIE"
             if masque_fuite.any():
                 df_avis_analyse.loc[masque_fuite, "_NatureFuite"] = desig_av[masque_fuite].apply(_analyser_nature)
         else:
             df_avis_analyse["_EstFuite"] = False
-            df_avis_analyse["_NatureFuite"] = None
+            df_avis_analyse["_NatureFuite"] = "FUITE NON DÉFINIE"
 
-        if col_s_av and col_s_av in df_avis_analyse.columns:
-            df_avis_analyse["_StatutCode"] = df_avis_analyse[col_s_av].apply(_extraire_premier_statut)
-            df_avis_analyse["_StatutLibelle"] = df_avis_analyse["_StatutCode"].apply(_libelle_statut_complet)
-        else:
-            df_avis_analyse["_StatutCode"] = "NON RENSEIGNÉ"
-            df_avis_analyse["_StatutLibelle"] = "NON RENSEIGNÉ"
+        # Classification unifiée demandée : Clôturé, En cours, Rejeté
+        df_avis_analyse["_StatutCat"] = df_avis_analyse.apply(
+            lambda r: _classifier_statut(r.get("Statut système"), r.get("Statut utilisateur")),
+            axis=1
+        )
     else:
         df_avis_analyse["_EstFuite"] = pd.Series(dtype=bool)
         df_avis_analyse["_NatureFuite"] = pd.Series(dtype=str)
-        df_avis_analyse["_StatutCode"] = pd.Series(dtype=str)
-        df_avis_analyse["_StatutLibelle"] = pd.Series(dtype=str)
+        df_avis_analyse["_StatutCat"] = pd.Series(dtype=str)
 
     df_fuites = df_avis_analyse[df_avis_analyse["_EstFuite"] == True].copy() if not df_avis_analyse.empty else pd.DataFrame()
 
@@ -411,36 +528,45 @@ def _calculer_sections_hse(_dfp, _avf, vp_tuple, date_str, sel_annee, sel_mois, 
 
     # ── Graphiques Fuites & Ateliers ──
     if not df_avis_analyse.empty and "_Atelier" in df_avis_analyse.columns:
-        # G1 : Nombre d'Avis par Atelier
+        # G1 : Nombre d'Avis par Atelier (Volume total d'avis)
         piv_avis = df_avis_analyse.groupby("_Atelier").size().to_frame(name="Avis")
         b1 = _bar(piv_avis, "Nombre d'Avis par Atelier", {"Avis": BLUE}, xlabel="Nombre d'avis", max_postes=25)
         if b1:
             buffers["bar_avis_atelier"] = b1
 
-        # G4 : Répartition des Avis par Statut
-        counts_statut = df_avis_analyse["_StatutLibelle"].value_counts().to_dict()
-        p4 = _pie(counts_statut, "Répartition des Avis par Statut", PALETTE_STATUT_AVIS)
+        # G4 : Répartition des Avis par Statut (Camembert unifié : Clôturé, En cours, Rejeté)
+        counts_statut = df_avis_analyse["_StatutCat"].value_counts().to_dict()
+        p4 = _pie(counts_statut, "Répartition des Avis par Statut", PALETTE_STATUT_UNIFIE)
         if p4:
             buffers["pie_statuts_avis"] = p4
 
-        # G5 : Statuts des Avis par Atelier
-        piv_statuts_at = pd.crosstab(df_avis_analyse["_Atelier"], df_avis_analyse["_StatutLibelle"])
-        b5 = _bar(piv_statuts_at, "Statuts des Avis par Atelier", PALETTE_STATUT_AVIS, xlabel="Nombre d'avis", max_postes=25)
+        # G5 : Statuts des Avis par Atelier (avec regroupement En cours & Ouvert et calcul du %)
+        piv_statuts_at = pd.crosstab(df_avis_analyse["_Atelier"], df_avis_analyse["_StatutCat"])
+        b5 = _bar_statuts_avec_pct(piv_statuts_at, "Statuts des Avis par Atelier (avec % en cours)", PALETTE_STATUT_UNIFIE, xlabel="Nombre d'avis", max_postes=25)
         if b5:
             buffers["bar_statuts_atelier"] = b5
 
-    if not df_fuites.empty and "_Atelier" in df_fuites.columns:
+    if not df_fuites.empty:
         # G2 : Nombre de fuites par Atelier
-        piv_fuites = df_fuites.groupby("_Atelier").size().to_frame(name="Fuites")
-        b2 = _bar(piv_fuites, "Nombre de fuites par Atelier", {"Fuites": "#D97706"}, xlabel="Nombre de fuites", max_postes=25)
-        if b2:
-            buffers["bar_fuites_atelier"] = b2
+        if "_Atelier" in df_fuites.columns:
+            piv_fuites = df_fuites.groupby("_Atelier").size().to_frame(name="Fuites")
+            b2 = _bar(piv_fuites, "Nombre de fuites par Atelier", {"Fuites": "#D97706"}, xlabel="Nombre de fuites", max_postes=25)
+            if b2:
+                buffers["bar_fuites_atelier"] = b2
 
-        # G3 : Nature des fuites par Atelier
-        piv_natures = pd.crosstab(df_fuites["_Atelier"], df_fuites["_NatureFuite"])
-        b3 = _bar(piv_natures, "Nature des fuites par Atelier", PALETTE_NATURES, xlabel="Nombre de fuites", max_postes=25)
-        if b3:
-            buffers["bar_natures_atelier"] = b3
+        # G3 : Ventilation des Fuites par Type (Clôturé / En cours / %)
+        if "_NatureFuite" in df_fuites.columns:
+            piv_fuites_type = pd.crosstab(df_fuites["_NatureFuite"], df_fuites["_StatutCat"])
+            b3 = _bar_fuites_par_type(piv_fuites_type, "Ventilation des Fuites par Type (Clôturé / En cours / %)", PALETTE_STATUT_UNIFIE)
+            if b3:
+                buffers["bar_fuites_type"] = b3
+
+        # G6 : Répartition des Fuites par Statut (Pie Chart)
+        counts_fuites_st = df_fuites["_StatutCat"].value_counts().to_dict()
+        p6 = _pie(counts_fuites_st, "Répartition des Fuites par Statut", PALETTE_STATUT_UNIFIE)
+        if p6:
+            buffers["pie_fuites_statut"] = p6
+
 
     for df, cle, titre in [
             (ot_securite, "secu", "OT Sécurité"),
@@ -583,37 +709,53 @@ def _section_ot(df, titre, icone, couleur_principale, buffers, cle):
                 st.image(buffers[k], use_container_width=True)
 
 
-def _tableau_synthese_fuites(df_fuites):
-    """Construit le tableau de synthèse Atelier | Nature fuite | Statut Avis | Nombre d'Avis."""
-    if df_fuites.empty:
-        return pd.DataFrame(columns=["Atelier", "Nature fuite", "Statut Avis", "Nombre d'Avis"])
+def _tableau_synthese_types_fuites(df_fuites):
+    """Construit le tableau synthétique par type de fuite avec totaux et pourcentages."""
+    if df_fuites is None or df_fuites.empty:
+        return pd.DataFrame(columns=["Type de fuite", "Total Fuites", "Clôturé", "En cours", "Rejeté", "% Clôturé", "% En cours"])
 
-    t = (
-        df_fuites.groupby(["_Atelier", "_NatureFuite", "_StatutLibelle"])
-        .size()
-        .reset_index(name="Nombre d'Avis")
-    )
-    t = t.rename(
-        columns={
-            "_Atelier": "Atelier",
-            "_NatureFuite": "Nature fuite",
-            "_StatutLibelle": "Statut Avis",
-        }
-    )
-    t = t.sort_values(by="Nombre d'Avis", ascending=False).reset_index(drop=True)
+    lignes = []
+    for nat, grp in df_fuites.groupby("_NatureFuite"):
+        tot = len(grp)
+        clot = int((grp["_StatutCat"] == "Clôturé").sum())
+        enc = int((grp["_StatutCat"] == "En cours").sum())
+        rej = int((grp["_StatutCat"] == "Rejeté").sum())
+        pct_c = (clot / tot * 100) if tot > 0 else 0
+        pct_e = (enc / tot * 100) if tot > 0 else 0
+        lignes.append({
+            "Type de fuite": nat,
+            "Total Fuites": tot,
+            "Clôturé": clot,
+            "En cours": enc,
+            "Rejeté": rej,
+            "% Clôturé": f"{pct_c:.1f}%",
+            "% En cours": f"{pct_e:.1f}%",
+            "_tot": tot,
+        })
 
-    # Ligne Total Général
-    total_val = int(t["Nombre d'Avis"].sum())
-    ligne_total = pd.DataFrame([
-        {
-            "Atelier": "TOTAL GÉNÉRAL",
-            "Nature fuite": "-",
-            "Statut Avis": "-",
-            "Nombre d'Avis": total_val,
-        }
-    ])
-    t = pd.concat([t, ligne_total], ignore_index=True)
-    return t
+    df_res = pd.DataFrame(lignes)
+    if not df_res.empty:
+        df_res = df_res.sort_values(by="_tot", ascending=False).drop(columns=["_tot"]).reset_index(drop=True)
+
+        # Ligne TOTAL GÉNÉRAL
+        tot_global = int(df_res["Total Fuites"].sum())
+        clot_global = int(df_res["Clôturé"].sum())
+        enc_global = int(df_res["En cours"].sum())
+        rej_global = int(df_res["Rejeté"].sum())
+        pct_c_glob = (clot_global / tot_global * 100) if tot_global > 0 else 0
+        pct_e_glob = (enc_global / tot_global * 100) if tot_global > 0 else 0
+
+        ligne_tot = pd.DataFrame([{
+            "Type de fuite": "TOTAL GÉNÉRAL",
+            "Total Fuites": tot_global,
+            "Clôturé": clot_global,
+            "En cours": enc_global,
+            "Rejeté": rej_global,
+            "% Clôturé": f"{pct_c_glob:.1f}%",
+            "% En cours": f"{pct_e_glob:.1f}%",
+        }])
+        df_res = pd.concat([df_res, ligne_tot], ignore_index=True)
+    return df_res
 
 
 def _section_analyse_avis_fuites(df_avis, df_fuites, buffers):
@@ -626,43 +768,58 @@ def _section_analyse_avis_fuites(df_avis, df_fuites, buffers):
     total_avis = len(df_avis)
     total_fuites = len(df_fuites) if not df_fuites.empty else 0
     pct_fuites = (total_fuites / total_avis * 100) if total_avis > 0 else 0
-    nb_ateliers_touches = df_fuites["_Atelier"].nunique() if not df_fuites.empty else 0
-    fuites_cloturees = int((df_fuites["_StatutCode"] == "ACLO").sum()) if not df_fuites.empty else 0
-    pct_clot = (fuites_cloturees / total_fuites * 100) if total_fuites > 0 else 0
 
-    c1, c2, c3, c4 = st.columns(4)
-    _carte(c1, "Total Avis", str(total_avis), NAVY, "sur le périmètre")
-    _carte(c2, "Total Fuites", str(total_fuites), "#D97706", f"{pct_fuites:.1f}% du total des avis")
-    _carte(c3, "Ateliers touchés", str(nb_ateliers_touches), BLUE, "ateliers avec fuites")
-    _carte(c4, "Fuites Clôturées", str(fuites_cloturees), GREEN, f"{pct_clot:.0f}% clôturées (ACLO)")
+    avis_encours = int((df_avis["_StatutCat"] == "En cours").sum())
+    pct_encours = (avis_encours / total_avis * 100) if total_avis > 0 else 0
 
-    st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
+    avis_rejetes = int((df_avis["_StatutCat"] == "Rejeté").sum())
+    pct_rejetes = (avis_rejetes / total_avis * 100) if total_avis > 0 else 0
 
-    # Graphique 1 & Graphique 2 côte à côte
+    fuites_clot = int((df_fuites["_StatutCat"] == "Clôturé").sum()) if not df_fuites.empty else 0
+    pct_fuites_clot = (fuites_clot / total_fuites * 100) if total_fuites > 0 else 0
+    fuites_encours = int((df_fuites["_StatutCat"] == "En cours").sum()) if not df_fuites.empty else 0
+
+    c1, c2, c3, c4, c5 = st.columns(5)
+    _carte(c1, "Total Avis", f"{total_avis:,}".replace(",", " "), NAVY, "sur le périmètre")
+    _carte(c2, "Avis En cours", f"{avis_encours:,}".replace(",", " "), SKY, f"{pct_encours:.1f}% du total (AENC/AOUV)")
+    _carte(c3, "Avis Rejetés", str(avis_rejetes), INDIGO, f"{pct_rejetes:.2f}% du total (REJT/autre)")
+    _carte(c4, "Total Fuites", f"{total_fuites:,}".replace(",", " "), "#D97706", f"{pct_fuites:.1f}% du total des avis")
+    _carte(c5, "Fuites Clôturées", f"{fuites_clot:,}".replace(",", " "), GREEN, f"{pct_fuites_clot:.1f}% clôturées ({fuites_encours} en cours)")
+
+    st.markdown("<div style='height: 14px;'></div>", unsafe_allow_html=True)
+
+    # Ligne 1 : Graphique 1 (Nombre d'Avis par Atelier) & Graphique 2 (Nombre de Fuites par Atelier)
     g1, g2 = st.columns(2)
     if buffers.get("bar_avis_atelier"):
         g1.image(buffers["bar_avis_atelier"], use_container_width=True)
     if buffers.get("bar_fuites_atelier"):
         g2.image(buffers["bar_fuites_atelier"], use_container_width=True)
 
-    # Graphique 3 : Nature des fuites par Atelier (pleine largeur)
-    if buffers.get("bar_natures_atelier"):
-        st.image(buffers["bar_natures_atelier"], use_container_width=True)
-
-    # Graphique 4 & Graphique 5
+    # Ligne 2 : Graphique 4 (Répartition des Avis par Statut) & Graphique 5 (Statuts des Avis par Atelier avec %)
     g4, g5 = st.columns([2, 3])
     if buffers.get("pie_statuts_avis"):
         g4.image(buffers["pie_statuts_avis"], use_container_width=True)
     if buffers.get("bar_statuts_atelier"):
         g5.image(buffers["bar_statuts_atelier"], use_container_width=True)
 
-    # Tableau de synthèse
-    st.markdown("#### 📋 Synthèse détaillée des fuites par atelier et statut")
-    tab_synth = _tableau_synthese_fuites(df_fuites)
-    if not tab_synth.empty:
-        st.dataframe(tab_synth, use_container_width=True, hide_index=True)
+    st.markdown("---")
+    st.markdown("#### 🔍 Analyse & Répartition par Type de Fuite")
+
+    # Ligne 3 : Nouveau Graphique 3 (Fuites par type avec Clôturé / En cours / %) & Nouveau Pie Chart (Répartition Fuites par Statut)
+    g3, g6 = st.columns([3, 2])
+    if buffers.get("bar_fuites_type"):
+        g3.image(buffers["bar_fuites_type"], use_container_width=True)
+    if buffers.get("pie_fuites_statut"):
+        g6.image(buffers["pie_fuites_statut"], use_container_width=True)
+
+    # Ligne 4 : Nouveau Tableau de Synthèse par Type de Fuite
+    st.markdown("##### 📊 Synthèse par Type de Fuite (Nombre, Clôture & En cours)")
+    tab_synth_types = _tableau_synthese_types_fuites(df_fuites)
+    if not tab_synth_types.empty:
+        st.dataframe(tab_synth_types, use_container_width=True, hide_index=True)
     else:
-        st.info("Aucune donnée de fuite à afficher dans le tableau de synthèse.")
+        st.info("Aucune donnée de fuite à afficher.")
+
 
 
 # ═══════════════════════════════════════════════════════════════════
@@ -797,10 +954,20 @@ def render_suivi_hse_tab(dfp, avf, vp, date_str=""):
         st.warning("⚠️ Aucune donnée disponible. Chargez d'abord ot.xlsx / avis.xlsx.")
         return
 
+    col_p_ot = next((c for c in dfp.columns if "poste" in str(c).lower() and "trav" in str(c).lower()), "Poste travail princ.")
+    col_p_av = next((c for c in avf.columns if "poste" in str(c).lower() and "trav" in str(c).lower()), "Poste travail princ.") if avf is not None and not avf.empty else None
+
+    # Exclusion systématique de SF1-GCMC et SF2-GCFD / SF2-GCMC
+    if col_p_ot in dfp.columns:
+        dfp = dfp[~dfp[col_p_ot].astype(str).str.contains("GCMC|GCFD", case=False, na=False)].copy()
+    if col_p_av and col_p_av in avf.columns:
+        avf = avf[~avf[col_p_av].astype(str).str.contains("GCMC|GCFD", case=False, na=False)].copy()
+    vp = [p for p in vp if not re.search("GCMC|GCFD", str(p), re.IGNORECASE)]
+
     ot = _ajouter_periode(dfp.copy(), "Créé le")
     avis = _ajouter_periode(avf.copy(), "Créé le") if avf is not None and not avf.empty else pd.DataFrame()
-    if not avis.empty and "Poste travail princ." in avis.columns:
-        avis = avis[avis["Poste travail princ."].isin(vp)]
+    if not avis.empty and col_p_av and col_p_av in avis.columns:
+        avis = avis[avis[col_p_av].isin(vp)]
 
     # ── Filtres période & atelier ──
     st.markdown("#### 🎛️ Filtres")
@@ -810,12 +977,13 @@ def render_suivi_hse_tab(dfp, avf, vp, date_str=""):
     sources_s = [s for s in (ot.get("_Semaine"), avis.get("_Semaine")) if s is not None]
     semaines = sorted({s for s in pd.concat(sources_s).dropna().unique()}) if sources_s else []
 
-    # Ateliers disponibles sur le périmètre
-    col_p_ot = next((c for c in dfp.columns if "poste" in str(c).lower() and "trav" in str(c).lower()), "Poste travail princ.")
-    col_p_av = next((c for c in avf.columns if "poste" in str(c).lower() and "trav" in str(c).lower()), "Poste travail princ.") if avf is not None and not avf.empty else None
+    # Ateliers disponibles sur le périmètre (sans GCMC/GCFD)
     postes_ot = dfp[col_p_ot].dropna().unique() if col_p_ot in dfp.columns else []
     postes_av = avf[col_p_av].dropna().unique() if (col_p_av and col_p_av in avf.columns) else []
-    tous_ateliers = sorted({_regrouper_atelier(p) for p in set(postes_ot) | set(postes_av) if str(p).strip() and str(p).lower() != "nan"})
+    tous_ateliers = sorted({
+        _regrouper_atelier(p) for p in set(postes_ot) | set(postes_av)
+        if str(p).strip() and str(p).lower() != "nan" and not re.search("GCMC|GCFD", str(p), re.IGNORECASE)
+    })
 
     f1, f2, f3, f4 = st.columns(4)
     sel_annee = f1.selectbox("Année", ["Toutes"] + [str(a) for a in annees], key="hse_annee")
