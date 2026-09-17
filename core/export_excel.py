@@ -24,6 +24,7 @@ nouvelle date crée une nouvelle feuille, une date déjà présente met à
 jour la feuille existante.
 """
 import io
+import os
 import re
 
 import pandas as pd
@@ -32,6 +33,8 @@ from openpyxl import load_workbook, Workbook
 from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
 CHEMIN_HISTORIQUE_GITHUB = "kpis/indicateurs_kpis.xlsx"
+CHEMIN_HISTORIQUE_LOCAL = "kpis.xlsx"
+CHEMIN_HISTORIQUE_KPIS_DIR = os.path.join("kpis", "indicateurs_kpis.xlsx")
 
 
 def _nom_feuille(date_str: str) -> str:
@@ -39,27 +42,53 @@ def _nom_feuille(date_str: str) -> str:
     return re.sub(r'[/\\*?:\[\]]', '-', str(date_str))[:31]
 
 
-def _telecharger_historique():
-    """Récupère le classeur historique depuis GitHub, en mémoire.
+def _charger_historique_classeur():
+    """Récupère le classeur historique en priorité depuis :
+      1. GitHub si configuré
+      2. Le fichier kpis.xlsx local (racine)
+      3. Le fichier kpis/indicateurs_kpis.xlsx local
     Retourne (workbook, message_diagnostic)."""
+    # 1. GitHub si configuré
     try:
         from core.github_publish import download_file, is_configured
-    except Exception as e:
-        return None, f"Module github_publish indisponible : {e}"
+        if is_configured():
+            contenu, err = download_file(CHEMIN_HISTORIQUE_GITHUB)
+            if contenu:
+                try:
+                    wb = load_workbook(io.BytesIO(contenu))
+                    sheets = [s for s in wb.sheetnames if s != "Sheet"]
+                    return wb, f"Historique GitHub chargé ({len(sheets)} date(s) : {sheets})"
+                except Exception:
+                    pass
+    except Exception:
+        pass
 
-    if not is_configured():
-        return None, "GitHub non configuré (GITHUB_TOKEN / GITHUB_REPO absents des secrets)"
-
-    contenu, err = download_file(CHEMIN_HISTORIQUE_GITHUB)
-    if contenu:
+    # 2. Local kpis.xlsx (racine)
+    if os.path.exists(CHEMIN_HISTORIQUE_LOCAL):
         try:
-            wb = load_workbook(io.BytesIO(contenu))
-            return wb, f"Historique GitHub chargé : {len(wb.sheetnames)} date(s) — {wb.sheetnames}"
-        except Exception as e:
-            return None, f"Fichier GitHub illisible (corrompu ?) : {e}"
-    if err:
-        return None, f"Téléchargement échoué : {err}"
-    return None, "Aucun historique sur GitHub (normal au premier enregistrement)"
+            wb = load_workbook(CHEMIN_HISTORIQUE_LOCAL)
+            sheets = [s for s in wb.sheetnames if s != "Sheet"]
+            if sheets:
+                return wb, f"Fichier kpis.xlsx local chargé ({len(sheets)} date(s) : {sheets})"
+        except Exception:
+            pass
+
+    # 3. Local kpis/indicateurs_kpis.xlsx
+    if os.path.exists(CHEMIN_HISTORIQUE_KPIS_DIR):
+        try:
+            wb = load_workbook(CHEMIN_HISTORIQUE_KPIS_DIR)
+            sheets = [s for s in wb.sheetnames if s != "Sheet"]
+            if sheets:
+                return wb, f"Fichier kpis/indicateurs_kpis.xlsx local chargé ({len(sheets)} date(s) : {sheets})"
+        except Exception:
+            pass
+
+    return None, "Aucun historique existant (nouveau classeur initialisé)"
+
+
+def _telecharger_historique():
+    """Alias rétro-compatible."""
+    return _charger_historique_classeur()
 
 
 def _ecrire_feuille(wb, nom, prows, pcols, qrows, qcols, ano_p_r, ano_p_c, ano_q_r, ano_q_c):
@@ -109,14 +138,15 @@ def save_kpis_to_excel(prows, pcols, qrows, qcols,
                         ano_p_r, ano_p_c, ano_q_r, ano_q_c,
                         sheet_name: str) -> None:
     """
-    Enregistre les KPI de la date courante dans l'historique GitHub.
-    Signature identique à l'ancienne version (compatible avec app.py).
+    Enregistre les KPI de la date courante dans l'historique :
+      - Sauvegarde en local dans kpis.xlsx (racine) ET kpis/indicateurs_kpis.xlsx
+      - Si GitHub est configuré, publie également sur GitHub
     """
     diag = []
     nom = _nom_feuille(sheet_name)
     diag.append(f"Date à enregistrer : '{nom}'")
 
-    wb, msg = _telecharger_historique()
+    wb, msg = _charger_historique_classeur()
     diag.append(msg)
     if wb is None:
         wb = Workbook()
@@ -131,37 +161,56 @@ def save_kpis_to_excel(prows, pcols, qrows, qcols,
     diag.append(f"{'Mise à jour' if deja_presente else 'Ajout'} de la date → "
                 f"{len(dates_apres)} date(s) au total : {dates_apres}")
 
-    # Sérialisation en mémoire
-    buf = io.BytesIO()
-    wb.save(buf)
-    contenu = buf.getvalue()
+    # 1) Sauvegarde locale systématique dans kpis.xlsx et kpis/indicateurs_kpis.xlsx
+    try:
+        wb.save(CHEMIN_HISTORIQUE_LOCAL)
+        diag.append(f"Sauvegarde locale {CHEMIN_HISTORIQUE_LOCAL} : OK")
+    except Exception as e:
+        diag.append(f"Erreur sauvegarde {CHEMIN_HISTORIQUE_LOCAL} : {e}")
 
-    # Publication immédiate sur GitHub (seule source de vérité)
+    try:
+        os.makedirs("kpis", exist_ok=True)
+        wb.save(CHEMIN_HISTORIQUE_KPIS_DIR)
+        diag.append(f"Sauvegarde locale {CHEMIN_HISTORIQUE_KPIS_DIR} : OK")
+    except Exception as e:
+        diag.append(f"Erreur sauvegarde {CHEMIN_HISTORIQUE_KPIS_DIR} : {e}")
+
+    # Mise à jour synchronisée de date.txt
+    try:
+        if os.path.exists("date.txt"):
+            with open("date.txt", "r", encoding="utf-8") as f:
+                d_cur = f.read().strip()
+        else:
+            d_cur = ""
+        if d_cur != sheet_name:
+            with open("date.txt", "w", encoding="utf-8") as f:
+                f.write(sheet_name)
+            diag.append(f"date.txt mis à jour : {sheet_name}")
+    except Exception as e:
+        diag.append(f"Erreur mise à jour date.txt : {e}")
+
+    # 2) Publication sur GitHub si configuré
+    publie_gh = False
     try:
         from core.github_publish import upload_file, is_configured
-        if not is_configured():
-            st.sidebar.error(
-                "❌ GitHub non configuré : l'historique ne peut pas être conservé. "
-                "Ajoutez GITHUB_TOKEN et GITHUB_REPO dans les secrets Streamlit."
-            )
-            _bouton_secours(contenu, nom)
-            return
-        ok, msg_up = upload_file(CHEMIN_HISTORIQUE_GITHUB, contenu,
-                                  f"Historique KPI — {sheet_name}")
-        if ok:
-            diag.append("Publication GitHub : OK")
-            st.sidebar.success(
-                f"✅ Historique enregistré sur GitHub : date '{nom}' "
-                f"({len(dates_apres)} date(s) au total)"
-            )
-        else:
-            diag.append(f"Publication GitHub : ÉCHEC — {msg_up}")
-            st.sidebar.error(f"❌ Publication de l'historique échouée : {msg_up}")
-            _bouton_secours(contenu, nom)
+        if is_configured():
+            buf = io.BytesIO()
+            wb.save(buf)
+            contenu = buf.getvalue()
+            ok, msg_up = upload_file(CHEMIN_HISTORIQUE_GITHUB, contenu,
+                                      f"Historique KPI — {sheet_name}")
+            publie_gh = ok
+            diag.append(f"Publication GitHub : {'OK' if ok else msg_up}")
     except Exception as e:
         diag.append(f"Publication GitHub : exception — {e}")
-        st.sidebar.error(f"❌ Erreur lors de la publication de l'historique : {e}")
-        _bouton_secours(contenu, nom)
+
+    msg_succes = (
+        f"✅ Historique enregistré dans `kpis.xlsx` : date '{nom}' "
+        f"({len(dates_apres)} date(s) au total : {', '.join(dates_apres)})"
+    )
+    if publie_gh:
+        msg_succes += " + synchronisé sur GitHub ☁️"
+    st.sidebar.success(msg_succes)
 
     with st.sidebar.expander("🔍 Diagnostic historique", expanded=False):
         for ligne in diag:
@@ -172,8 +221,8 @@ def _bouton_secours(contenu, nom):
     """Bouton de repli permettant de récupérer le classeur si la
     publication automatique échoue."""
     st.sidebar.download_button(
-        "⬇️ Télécharger l'historique (publication échouée)",
-        data=contenu, file_name="indicateurs_kpis.xlsx",
+        "⬇️ Télécharger l'historique",
+        data=contenu, file_name="kpis.xlsx",
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         key=f"secours_{nom}",
     )
@@ -182,11 +231,11 @@ def _bouton_secours(contenu, nom):
 @st.cache_data(show_spinner=False, ttl=60)
 def charger_historique_depuis_github():
     """
-    Lit l'historique complet directement depuis GitHub et le convertit en
+    Lit l'historique complet (depuis GitHub si configuré, ou depuis
+    kpis.xlsx / kpis/indicateurs_kpis.xlsx en local) et le convertit en
     DataFrame exploitable (une ligne par Date × Poste × KPI).
-    Remplace la lecture d'un fichier local, désormais inutile.
     """
-    wb, msg = _telecharger_historique()
+    wb, msg = _charger_historique_classeur()
     if wb is None:
         return pd.DataFrame(), msg
 
@@ -217,7 +266,7 @@ def charger_historique_depuis_github():
                 entetes = [str(v) if v is not None else "" for v in row]
                 continue
             poste = row[0]
-            if poste in (None, "", "CIBLE"):
+            if poste in (None, "", "CIBLE", "Cible", "Total general", "Total"):
                 continue
             for j, kpi in enumerate(entetes[1:], start=1):
                 if not kpi or kpi.startswith("Score") or j >= len(row):
@@ -234,7 +283,8 @@ def charger_historique_depuis_github():
     if not df.empty:
         df["Date_dt"] = pd.to_datetime(df["Date"], format="%d/%m/%Y", errors="coerce")
         df = df.sort_values("Date_dt")
-    return df, f"{len([s for s in wb.sheetnames if s != 'Sheet'])} date(s) chargée(s) depuis GitHub"
+    nb_dates = len([s for s in wb.sheetnames if s != "Sheet"])
+    return df, f"{nb_dates} date(s) chargée(s) ({msg})"
 
 
 def export_btn(df: pd.DataFrame, filename: str) -> None:
