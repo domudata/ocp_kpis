@@ -25,18 +25,24 @@ TW_PREV = [350, 290, 300, 310, 360]
 
 
 
-def html_age_dispatch_table(rows):
+def html_age_dispatch_table(rows, include_exec=False):
     cols = [
-        ("Poste de travail", "left"),
-        ("AGE PREP <1M", "center"), ("BASE <1M", "center"),
-        ("AGE PREP 1-3M", "center"), ("BASE 1-3M", "center"),
-        ("AGE PREP >3M", "center"), ("BASE >3M", "center"),
-        ("AGE PLANIF <1M", "center"), ("BASE <1M", "center"),
-        ("AGE PLANIF 1-3M", "center"), ("BASE 1-3M", "center"),
-        ("AGE PLANIF >3M", "center"), ("BASE >3M", "center"),
+        ("Poste de travail", "left", "Poste de travail"),
+        ("AGE PREP <1M", "center", "AGE PREP <1M"), ("NB <1M", "center", "BASE_P_INF"),
+        ("AGE PREP 1-3M", "center", "AGE PREP 1-3M"), ("NB 1-3M", "center", "BASE_P_1_3"),
+        ("AGE PREP >3M", "center", "AGE PREP >3M"), ("NB >3M", "center", "BASE_P_SUP"),
+        ("AGE PLANIF <1M", "center", "AGE PLANIF <1M"), ("NB <1M", "center", "BASE_L_INF"),
+        ("AGE PLANIF 1-3M", "center", "AGE PLANIF 1-3M"), ("NB 1-3M", "center", "BASE_L_1_3"),
+        ("AGE PLANIF >3M", "center", "AGE PLANIF >3M"), ("NB >3M", "center", "BASE_L_SUP"),
     ]
+    if include_exec:
+        cols.extend([
+            ("AGE EXEC <1M", "center", "AGE EXEC <1M"), ("NB <1M", "center", "BASE_E_INF"),
+            ("AGE EXEC 1-3M", "center", "AGE EXEC 1-3M"), ("NB 1-3M", "center", "BASE_E_1_3"),
+            ("AGE EXEC >3M", "center", "AGE EXEC >3M"), ("NB >3M", "center", "BASE_E_SUP"),
+        ])
     h = '<table class="tw omt"><thead><tr>'
-    for c, align in cols:
+    for c, align, _ in cols:
         h += f'<th style="text-align:{align};font-size:11px">{c}</th>'
     h += '</tr></thead><tbody>'
 
@@ -50,22 +56,22 @@ def html_age_dispatch_table(rows):
             row_style = "font-weight:800;background:#e2e8f0"
         h += f'<tr style="{row_style}">'
 
-        for key, align in cols:
+        for _, align, key in cols:
             val = r.get(key, "")
             cell_style = f"text-align:{align};font-size:12px;"
             if not is_cible and not is_total:
                 if "%" in str(val):
                     try:
                         num = float(str(val).replace("%", "").strip())
-                        if key in ["AGE PREP <1M", "AGE PLANIF <1M"]:
+                        if key in ["AGE PREP <1M", "AGE PLANIF <1M", "AGE EXEC <1M"]:
                             cell_style += "background:#c6efce;color:#006100;font-weight:700" if num >= 80 else ("background:#ffeb9c;color:#9c6500;font-weight:700" if num >= 75 else "background:#ffc7ce;color:#9c0006;font-weight:700")
-                        elif key in ["AGE PREP 1-3M", "AGE PLANIF 1-3M"]:
+                        elif key in ["AGE PREP 1-3M", "AGE PLANIF 1-3M", "AGE EXEC 1-3M"]:
                             cell_style += "background:#c6efce;color:#006100;font-weight:700" if num <= 15 else ("background:#ffeb9c;color:#9c6500;font-weight:700" if num <= 20 else "background:#ffc7ce;color:#9c0006;font-weight:700")
-                        elif key in ["AGE PREP >3M", "AGE PLANIF >3M"]:
+                        elif key in ["AGE PREP >3M", "AGE PLANIF >3M", "AGE EXEC >3M"]:
                             cell_style += "background:#c6efce;color:#006100;font-weight:700" if num <= 5 else ("background:#ffeb9c;color:#9c6500;font-weight:700" if num <= 10 else "background:#ffc7ce;color:#9c0006;font-weight:700")
                     except Exception:
                         pass
-                elif "BASE" in key and val not in ("", 0, "0"):
+                elif "BASE_" in key and val not in ("", 0, "0"):
                     cell_style += "font-weight:600"
             h += f'<td style="{cell_style}">{val}</td>'
         h += '</tr>'
@@ -73,25 +79,35 @@ def html_age_dispatch_table(rows):
     return h
 
 
-def build_age_table_rows(postes, df_prep, df_plan, label_total="TOTAL"):
+def build_age_table_rows(postes, df_prep, df_plan, df_exec=None, label_total="TOTAL"):
+    include_exec = df_exec is not None and not df_exec.empty
     rows = []
-    rows.append({
+    cible_row = {
         "Poste de travail": "CIBLE",
-        "AGE PREP <1M": "80 %", "BASE <1M": "",
-        "AGE PREP 1-3M": "15 %", "BASE 1-3M": "",
-        "AGE PREP >3M": "5 %", "BASE >3M": "",
-        "AGE PLANIF <1M": "80 %", "BASE <1M": "",
-        "AGE PLANIF 1-3M": "15 %", "BASE 1-3M": "",
-        "AGE PLANIF >3M": "5 %", "BASE >3M": "",
+        "AGE PREP <1M": "80 %", "BASE_P_INF": "",
+        "AGE PREP 1-3M": "15 %", "BASE_P_1_3": "",
+        "AGE PREP >3M": "5 %", "BASE_P_SUP": "",
+        "AGE PLANIF <1M": "80 %", "BASE_L_INF": "",
+        "AGE PLANIF 1-3M": "15 %", "BASE_L_1_3": "",
+        "AGE PLANIF >3M": "5 %", "BASE_L_SUP": "",
         "_t": "cible",
-    })
+    }
+    if include_exec:
+        cible_row.update({
+            "AGE EXEC <1M": "80 %", "BASE_E_INF": "",
+            "AGE EXEC 1-3M": "15 %", "BASE_E_1_3": "",
+            "AGE EXEC >3M": "5 %", "BASE_E_SUP": "",
+        })
+    rows.append(cible_row)
 
     t_p_tot = t_p_inf = t_p_1_3 = t_p_sup = 0
     t_l_tot = t_l_inf = t_l_1_3 = t_l_sup = 0
+    t_e_tot = t_e_inf = t_e_1_3 = t_e_sup = 0
 
     for p in postes:
-        cp = df_prep[df_prep["Poste travail princ."] == p]
-        lp = df_plan[df_plan["Poste travail princ."] == p]
+        cp = df_prep[df_prep["Poste travail princ."] == p] if df_prep is not None and not df_prep.empty else pd.DataFrame()
+        lp = df_plan[df_plan["Poste travail princ."] == p] if df_plan is not None and not df_plan.empty else pd.DataFrame()
+        ep = df_exec[df_exec["Poste travail princ."] == p] if df_exec is not None and not df_exec.empty else pd.DataFrame()
 
         nb_p = len(cp)
         p_inf = int((cp["ap"].isin(["<1 mois", "Inconnu"])).sum()) if "ap" in cp.columns else 0
@@ -103,41 +119,67 @@ def build_age_table_rows(postes, df_prep, df_plan, label_total="TOTAL"):
         l_1_3 = int((lp["alp"] == "1 mois < <3 mois").sum()) if "alp" in lp.columns else 0
         l_sup = int((lp["alp"] == ">3 mois").sum()) if "alp" in lp.columns else 0
 
+        nb_e = len(ep)
+        e_inf = int((ep["aex"].isin(["<1 mois", "Inconnu"])).sum()) if "aex" in ep.columns else 0
+        e_1_3 = int((ep["aex"] == "1 mois < <3 mois").sum()) if "aex" in ep.columns else 0
+        e_sup = int((ep["aex"] == ">3 mois").sum()) if "aex" in ep.columns else 0
+
         t_p_tot += nb_p; t_p_inf += p_inf; t_p_1_3 += p_1_3; t_p_sup += p_sup
         t_l_tot += nb_l; t_l_inf += l_inf; t_l_1_3 += l_1_3; t_l_sup += l_sup
+        t_e_tot += nb_e; t_e_inf += e_inf; t_e_1_3 += e_1_3; t_e_sup += e_sup
 
-        rows.append({
+        r = {
             "Poste de travail": p,
             "AGE PREP <1M": f"{round(p_inf / nb_p * 100)} %" if nb_p else "0 %",
-            "BASE <1M": p_inf,
+            "BASE_P_INF": p_inf,
             "AGE PREP 1-3M": f"{round(p_1_3 / nb_p * 100)} %" if nb_p else "0 %",
-            "BASE 1-3M": p_1_3,
+            "BASE_P_1_3": p_1_3,
             "AGE PREP >3M": f"{round(p_sup / nb_p * 100)} %" if nb_p else "0 %",
-            "BASE >3M": p_sup,
+            "BASE_P_SUP": p_sup,
             "AGE PLANIF <1M": f"{round(l_inf / nb_l * 100)} %" if nb_l else "0 %",
-            "BASE <1M": l_inf,
+            "BASE_L_INF": l_inf,
             "AGE PLANIF 1-3M": f"{round(l_1_3 / nb_l * 100)} %" if nb_l else "0 %",
-            "BASE 1-3M": l_1_3,
+            "BASE_L_1_3": l_1_3,
             "AGE PLANIF >3M": f"{round(l_sup / nb_l * 100)} %" if nb_l else "0 %",
-            "BASE >3M": l_sup,
-        })
+            "BASE_L_SUP": l_sup,
+        }
+        if include_exec:
+            r.update({
+                "AGE EXEC <1M": f"{round(e_inf / nb_e * 100)} %" if nb_e else "0 %",
+                "BASE_E_INF": e_inf,
+                "AGE EXEC 1-3M": f"{round(e_1_3 / nb_e * 100)} %" if nb_e else "0 %",
+                "BASE_E_1_3": e_1_3,
+                "AGE EXEC >3M": f"{round(e_sup / nb_e * 100)} %" if nb_e else "0 %",
+                "BASE_E_SUP": e_sup,
+            })
+        rows.append(r)
 
-    rows.append({
+    tot_r = {
         "Poste de travail": label_total,
         "AGE PREP <1M": f"{round(t_p_inf / t_p_tot * 100)} %" if t_p_tot else "0 %",
-        "BASE <1M": t_p_inf,
+        "BASE_P_INF": t_p_inf,
         "AGE PREP 1-3M": f"{round(t_p_1_3 / t_p_tot * 100)} %" if t_p_tot else "0 %",
-        "BASE 1-3M": t_p_1_3,
+        "BASE_P_1_3": t_p_1_3,
         "AGE PREP >3M": f"{round(t_p_sup / t_p_tot * 100)} %" if t_p_tot else "0 %",
-        "BASE >3M": t_p_sup,
+        "BASE_P_SUP": t_p_sup,
         "AGE PLANIF <1M": f"{round(t_l_inf / t_l_tot * 100)} %" if t_l_tot else "0 %",
-        "BASE <1M": t_l_inf,
+        "BASE_L_INF": t_l_inf,
         "AGE PLANIF 1-3M": f"{round(t_l_1_3 / t_l_tot * 100)} %" if t_l_tot else "0 %",
-        "BASE 1-3M": t_l_1_3,
+        "BASE_L_1_3": t_l_1_3,
         "AGE PLANIF >3M": f"{round(t_l_sup / t_l_tot * 100)} %" if t_l_tot else "0 %",
-        "BASE >3M": t_l_sup,
+        "BASE_L_SUP": t_l_sup,
         "_t": "total",
-    })
+    }
+    if include_exec:
+        tot_r.update({
+            "AGE EXEC <1M": f"{round(t_e_inf / t_e_tot * 100)} %" if t_e_tot else "0 %",
+            "BASE_E_INF": t_e_inf,
+            "AGE EXEC 1-3M": f"{round(t_e_1_3 / t_e_tot * 100)} %" if t_e_tot else "0 %",
+            "BASE_E_1_3": t_e_1_3,
+            "AGE EXEC >3M": f"{round(t_e_sup / t_e_tot * 100)} %" if t_e_tot else "0 %",
+            "BASE_E_SUP": t_e_sup,
+        })
+    rows.append(tot_r)
     return rows
 
 
@@ -220,6 +262,19 @@ def render_backlog_tab(dfp: pd.DataFrame, vp: list, df_toutes_dates: pd.DataFram
         values='Ordre', aggfunc='count', fill_value=0
     ).reindex(vp, fill_value=0)
 
+    # ── Backlog Exécution ────────────────────────────────────────────────
+    _statut_lanc_ex = (
+        (_zcor["Statut système"].fillna("").astype(str).str.strip().str.split().str[0] == "LANC")
+        | (_zcor["Statut système"].fillna("").astype(str).str.contains("LANC", na=False)
+           & ~_zcor["Statut système"].fillna("").astype(str).str.contains("CLOT|TCLO", na=False))
+    )
+    _non_clot_ex = ~_zcor["Statut OT"].isin(["CLOT", "TCLO"]) if "Statut OT" in _zcor.columns else True
+    _contient_sopl_ex = (
+        (_zcor["Contient SOPL"] == 1) if "Contient SOPL" in _zcor.columns
+        else _zcor["Statut utilisateur"].fillna("").astype(str).str.contains("SOPL", case=False, na=False)
+    )
+    df_exec = _zcor[_statut_lanc_ex & _non_clot_ex & _contient_sopl_ex].copy()
+
     # ── Statuts OT (graphiques generaux) ─────────────────────────────────
     text_col  = get_text_col(dfp)
     oms_df    = dfp[dfp[text_col].astype(str).str.contains('OMS', case=False, na=False)] if text_col else pd.DataFrame()
@@ -246,19 +301,19 @@ def render_backlog_tab(dfp: pd.DataFrame, vp: list, df_toutes_dates: pd.DataFram
         recap_prep.append({
             'Poste de travail': poste,
             'Caractérisé': carac,
-            'Non Caractérisé': non,
+            'Non Caractérisé (Anomalies)': non,
             'Total': tot,
             'Taux Carac %': f'{taux}%'
         })
 
     # Ligne total
     total_carac = sum(r['Caractérisé'] for r in recap_prep)
-    total_non   = sum(r['Non Caractérisé'] for r in recap_prep)
+    total_non   = sum(r['Non Caractérisé (Anomalies)'] for r in recap_prep)
     total_tot   = total_carac + total_non
     recap_prep.append({
         'Poste de travail': 'TOTAL',
         'Caractérisé': total_carac,
-        'Non Caractérisé': total_non,
+        'Non Caractérisé (Anomalies)': total_non,
         'Total': total_tot,
         'Taux Carac %': f'{round(total_carac/total_tot*100,1) if total_tot>0 else 0}%'
     })
@@ -267,19 +322,19 @@ def render_backlog_tab(dfp: pd.DataFrame, vp: list, df_toutes_dates: pd.DataFram
     with c1:
         # Tableau HTML
         h = '<table class="tw omt"><thead><tr>'
-        for col in ['Poste de travail','Caractérisé','Non Caractérisé','Total','Taux Carac %']:
+        for col in ['Poste de travail','Caractérisé','Non Caractérisé (Anomalies)','Total','Taux Carac %']:
             h += f'<th>{col}</th>'
         h += '</tr></thead><tbody>'
         for row in recap_prep:
             is_total = row['Poste de travail'] == 'TOTAL'
             style = 'font-weight:800;background:#e2e8f0' if is_total else ''
             h += f'<tr style="{style}">'
-            for col in ['Poste de travail','Caractérisé','Non Caractérisé','Total','Taux Carac %']:
+            for col in ['Poste de travail','Caractérisé','Non Caractérisé (Anomalies)','Total','Taux Carac %']:
                 v = row[col]
                 cell_style = ''
                 if col == 'Caractérisé':
                     cell_style = 'background:#d1fae5;color:#065f46;font-weight:600'
-                elif col == 'Non Caractérisé':
+                elif col == 'Non Caractérisé (Anomalies)':
                     cell_style = 'background:#fee2e2;color:#991b1b;font-weight:600'
                 elif col == 'Taux Carac %':
                     try:
@@ -334,18 +389,18 @@ def render_backlog_tab(dfp: pd.DataFrame, vp: list, df_toutes_dates: pd.DataFram
         recap_plan.append({
             'Poste de travail': poste,
             'Caractérisé': carac,
-            'Non Caractérisé': non,
+            'Non Caractérisé (Anomalies)': non,
             'Total': tot,
             'Taux Carac %': f'{taux}%'
         })
 
     total_carac = sum(r['Caractérisé'] for r in recap_plan)
-    total_non   = sum(r['Non Caractérisé'] for r in recap_plan)
+    total_non   = sum(r['Non Caractérisé (Anomalies)'] for r in recap_plan)
     total_tot   = total_carac + total_non
     recap_plan.append({
         'Poste de travail': 'TOTAL',
         'Caractérisé': total_carac,
-        'Non Caractérisé': total_non,
+        'Non Caractérisé (Anomalies)': total_non,
         'Total': total_tot,
         'Taux Carac %': f'{round(total_carac/total_tot*100,1) if total_tot>0 else 0}%'
     })
@@ -353,19 +408,19 @@ def render_backlog_tab(dfp: pd.DataFrame, vp: list, df_toutes_dates: pd.DataFram
     c3, c4 = st.columns([0.5, 0.5], vertical_alignment='top')
     with c3:
         h = '<table class="tw omt"><thead><tr>'
-        for col in ['Poste de travail','Caractérisé','Non Caractérisé','Total','Taux Carac %']:
+        for col in ['Poste de travail','Caractérisé','Non Caractérisé (Anomalies)','Total','Taux Carac %']:
             h += f'<th>{col}</th>'
         h += '</tr></thead><tbody>'
         for row in recap_plan:
             is_total = row['Poste de travail'] == 'TOTAL'
             style = 'font-weight:800;background:#e2e8f0' if is_total else ''
             h += f'<tr style="{style}">'
-            for col in ['Poste de travail','Caractérisé','Non Caractérisé','Total','Taux Carac %']:
+            for col in ['Poste de travail','Caractérisé','Non Caractérisé (Anomalies)','Total','Taux Carac %']:
                 v = row[col]
                 cell_style = ''
                 if col == 'Caractérisé':
                     cell_style = 'background:#d1fae5;color:#065f46;font-weight:600'
-                elif col == 'Non Caractérisé':
+                elif col == 'Non Caractérisé (Anomalies)':
                     cell_style = 'background:#fee2e2;color:#991b1b;font-weight:600'
                 elif col == 'Taux Carac %':
                     try:
@@ -405,30 +460,30 @@ def render_backlog_tab(dfp: pd.DataFrame, vp: list, df_toutes_dates: pd.DataFram
 
     st.markdown('---')
 
-    # Section : Répartition de l'Âge des Backlogs (Préparation & Planification)
+    # Section : Répartition de l'Âge des Backlogs (Préparation, Planification & Exécution)
     st.markdown(
-        '<div class="stl c">⏱️ Répartition de l\'Âge des Backlogs (Préparation & Planification)</div>',
+        '<div class="stl c">⏱️ Répartition de l\'Âge des Backlogs (Préparation, Planification & Exécution)</div>',
         unsafe_allow_html=True
     )
-    st.caption("Base : répartition par âge du Backlog Préparation et Planification (conforme aux indicateurs consolidés).")
+    st.caption("Base : répartition par âge du Backlog Préparation, Planification et Exécution (conforme aux indicateurs consolidés).")
 
     sf1_p = [p for p in vp if str(p).startswith("SF1")]
     sf2_p = [p for p in vp if str(p).startswith("SF2")]
 
     tab_tous, tab_sf1, tab_sf2 = st.tabs(["🌐 Tous les postes sélectionnés", "🏭 Division SF1", "🏭 Division SF2"])
     with tab_tous:
-        rows_all = build_age_table_rows(vp, df_prep, df_plan, label_total="TOTAL GÉNÉRAL")
-        st.markdown(html_age_dispatch_table(rows_all), unsafe_allow_html=True)
+        rows_all = build_age_table_rows(vp, df_prep, df_plan, df_exec=df_exec, label_total="TOTAL GÉNÉRAL")
+        st.markdown(html_age_dispatch_table(rows_all, include_exec=True), unsafe_allow_html=True)
     with tab_sf1:
         if sf1_p:
-            rows_sf1 = build_age_table_rows(sf1_p, df_prep, df_plan, label_total="TOTAL SF1")
-            st.markdown(html_age_dispatch_table(rows_sf1), unsafe_allow_html=True)
+            rows_sf1 = build_age_table_rows(sf1_p, df_prep, df_plan, df_exec=df_exec, label_total="TOTAL SF1")
+            st.markdown(html_age_dispatch_table(rows_sf1, include_exec=True), unsafe_allow_html=True)
         else:
             st.info("Aucun poste SF1 dans la sélection courante.")
     with tab_sf2:
         if sf2_p:
-            rows_sf2 = build_age_table_rows(sf2_p, df_prep, df_plan, label_total="TOTAL SF2")
-            st.markdown(html_age_dispatch_table(rows_sf2), unsafe_allow_html=True)
+            rows_sf2 = build_age_table_rows(sf2_p, df_prep, df_plan, df_exec=df_exec, label_total="TOTAL SF2")
+            st.markdown(html_age_dispatch_table(rows_sf2, include_exec=True), unsafe_allow_html=True)
         else:
             st.info("Aucun poste SF2 dans la sélection courante.")
 
