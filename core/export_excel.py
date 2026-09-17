@@ -233,58 +233,66 @@ def charger_historique_depuis_github():
     """
     Lit l'historique complet (depuis GitHub si configuré, ou depuis
     kpis.xlsx / kpis/indicateurs_kpis.xlsx en local) et le convertit en
-    DataFrame exploitable (une ligne par Date × Poste × KPI).
+    DataFrame standard exploitable (avec Date, Poste de travail, _section, KPIs...).
     """
     wb, msg = _charger_historique_classeur()
     if wb is None:
         return pd.DataFrame(), msg
 
-    lignes = []
-    for feuille in wb.sheetnames:
-        if feuille == "Sheet":
+    records = []
+    for sheet_name in wb.sheetnames:
+        if sheet_name == "Sheet":
             continue
-        ws = wb[feuille]
-        date_str = feuille.replace("-", "/")
-        section = None
-        entetes = None
-        for row in ws.iter_rows(values_only=True):
-            if row is None or all(v is None for v in row):
-                continue
-            premier = str(row[0]) if row[0] is not None else ""
-            if premier.startswith("INDICATEURS DE PERFORMANCE"):
-                section, entetes = "Performance", None
-                continue
-            if premier.startswith("INDICATEURS DE QUALITE"):
-                section, entetes = "Qualite", None
-                continue
-            if premier.startswith("ANOMALIES"):
-                section, entetes = None, None
-                continue
-            if section is None:
-                continue
-            if entetes is None:
-                entetes = [str(v) if v is not None else "" for v in row]
-                continue
-            poste = row[0]
-            if poste in (None, "", "CIBLE", "Cible", "Total general", "Total"):
-                continue
-            for j, kpi in enumerate(entetes[1:], start=1):
-                if not kpi or kpi.startswith("Score") or j >= len(row):
+        try:
+            ws = wb[sheet_name]
+            rows_data = list(ws.iter_rows(values_only=True))
+            section = None
+            headers = None
+            for row in rows_data:
+                if not row or not any(v is not None for v in row):
                     continue
-                val = row[j]
-                try:
-                    val = float(val)
-                except (TypeError, ValueError):
-                    continue
-                lignes.append({"Date": date_str, "Poste": poste, "KPI": kpi,
-                               "Valeur": val, "Famille": section})
+                cell0 = str(row[0]).strip() if row[0] is not None else ""
+                up = cell0.upper()
+                if "ANOMALIES PERFORMANCE" in up:
+                    section = "ano_perf"; headers = None; continue
+                elif "ANOMALIES QUALITE" in up:
+                    section = "ano_qual"; headers = None; continue
+                elif "INDICATEURS DE PERFORMANCE" in up:
+                    section = "perf"; headers = None; continue
+                elif "INDICATEURS DE QUALITE" in up:
+                    section = "qual"; headers = None; continue
+                if section and headers is None and cell0:
+                    headers = [str(c).strip() if c is not None else "" for c in row]; continue
+                if section and headers and cell0 and cell0 not in ("Cible", "Total general", "Total", ""):
+                    entry = {"Date": sheet_name.replace("-", "/")}
+                    for j, h in enumerate(headers):
+                        if j < len(row) and h:
+                            entry[h] = row[j]
+                    entry["_section"] = section
+                    records.append(entry)
+        except Exception:
+            continue
 
-    df = pd.DataFrame(lignes)
-    if not df.empty:
-        df["Date_dt"] = pd.to_datetime(df["Date"], format="%d/%m/%Y", errors="coerce")
-        df = df.sort_values("Date_dt")
+    if not records:
+        return pd.DataFrame(), msg
+
+    df = pd.DataFrame(records)
+    if "Date" in df.columns:
+        df["Date_parsed"] = pd.to_datetime(
+            df["Date"].str.replace("-", "/"), format="%d/%m/%Y", errors="coerce"
+        )
+
+    _non_numeric_cols = {"Date", "Poste de travail", "_section", "Date_parsed"}
+    for col in df.columns:
+        if col not in _non_numeric_cols:
+            df[col] = pd.to_numeric(df[col], errors="coerce")
+
+    if "Date_parsed" in df.columns:
+        df = df.sort_values("Date_parsed").reset_index(drop=True)
+
     nb_dates = len([s for s in wb.sheetnames if s != "Sheet"])
     return df, f"{nb_dates} date(s) chargée(s) ({msg})"
+
 
 
 def export_btn(df: pd.DataFrame, filename: str) -> None:
