@@ -268,10 +268,7 @@ def main() -> None:
 
         ano_map = build_ano_map(dfp, avf, now_ts, dfp_toutes_dates=df_period)
 
-        ano_p_rows = build_ano_rows(
-            vp, ano_map, QK,
-            fixed_zero=["OT préparation <1 mois", "OT planification <1 mois", "OT exécution <1 mois"]
-        )
+        ano_p_rows = build_ano_rows(vp, ano_map, QK)
         ano_q_rows = build_ano_rows(vp, ano_map, PK, fixed_zero=["OT Fiabilité","Total Avis de Panne"])
         ano_p_cols = ["Poste de travail"] + QK + ["Total Anomalies"]
         ano_q_cols = ["Poste de travail"] + PK + ["Total Anomalies"]
