@@ -15,6 +15,7 @@ tableau, l'information étant portée par les visuels.
 """
 import io
 import os
+import re
 import numpy as np
 import pandas as pd
 import streamlit as st
@@ -31,6 +32,37 @@ MOIS_FR = ["janvier", "février", "mars", "avril", "mai", "juin",
 
 # Statut d'approbation SAP (champ "Statut utilisateur")
 LIBELLE_APPROBATION = {"APRV": "Approuvé", "APRQ": "En attente", "REJT": "Rejeté"}
+
+# Statuts système des avis (SAP)
+DICT_STATUTS_AVIS = {
+    "AOUV": "OUVERT",
+    "AENC": "EN COURS",
+    "ACLO": "CLÔTURÉ",
+    "OAFF": "AFFICHÉ",
+    "AIMP": "IMPRIMÉ",
+    "TSUP": "STATUT TECHNIQUE SUPPLÉMENTAIRE",
+    "TAMO": "TRAITEMENT COMPLÉMENTAIRE",
+    "MARC": "MARQUÉ POUR SUPPRESSION",
+}
+
+# Natures de fuites et motifs de détection (ordre de priorité des expressions)
+NATURES_FUITES_PATTERNS = [
+    ("PRODUIT CHIMIQUE", r"\bproduits?\s+chimiques?\b|\bchimiques?\b"),
+    ("AMMONIAQUE", r"\b(ammoniaque|ammoniac|nh3)\b"),
+    ("HYDROCARBURE", r"\bhydrocarbures?\b"),
+    ("CONDENSAT", r"\bcondensats?\b"),
+    ("ACIDE", r"\bacides?\b|\bh2so4\b|\bh3po4\b|\bhcl\b"),
+    ("VAPEUR", r"\bvapeurs?\b"),
+    ("HUILE", r"\bhuiles?\b"),
+    ("GRAISSE", r"\bgraisses?\b"),
+    ("SOUDE", r"\bsoudes?\b|\bnaoh\b"),
+    ("FUEL", r"\b(fuel|fioul|mazout)\b"),
+    ("BOUE", r"\bboues?\b"),
+    ("GAZ", r"\bgaz\b"),
+    ("AIR", r"\bair\b"),
+    ("EAU", r"\beau[x]?\b"),
+    ("LIQUIDE", r"\bliquides?\b"),
+]
 
 # ── Palette harmonisée verts / bleus ──
 NAVY = "#1E3A5F"
@@ -50,6 +82,47 @@ PALETTE_APPROBATION = {"Approuvé": GREEN, "En attente": SKY, "Rejeté": INDIGO}
 PALETTE_OMS = {"Thermographie": BLUE, "Vibration": TEAL}
 PALETTE_LIEN = {"Avec avis": BLUE, "Sans avis": GREY}
 
+# Palette spécifique natures de fuites
+PALETTE_NATURES = {
+    "EAU": "#0EA5E9",
+    "GAZ": "#6366F1",
+    "HUILE": "#D97706",
+    "VAPEUR": "#64748B",
+    "ACIDE": "#EF4444",
+    "AIR": "#06B6D4",
+    "FUEL": "#78350F",
+    "HYDROCARBURE": "#B45309",
+    "GRAISSE": "#A16207",
+    "SOUDE": "#8B5CF6",
+    "AMMONIAQUE": "#14B8A6",
+    "CONDENSAT": "#38BDF8",
+    "BOUE": "#713F12",
+    "PRODUIT CHIMIQUE": "#F43F5E",
+    "LIQUIDE": "#3B82F6",
+    "FUITE NON DÉFINIE": "#94A3B8",
+}
+
+# Palette statuts avis
+PALETTE_STATUT_AVIS = {
+    "OUVERT (AOUV)": SKY,
+    "EN COURS (AENC)": BLUE,
+    "CLÔTURÉ (ACLO)": GREEN,
+    "AFFICHÉ (OAFF)": TEAL,
+    "IMPRIMÉ (AIMP)": CYAN,
+    "STATUT TECHNIQUE SUPPLÉMENTAIRE (TSUP)": INDIGO,
+    "TRAITEMENT COMPLÉMENTAIRE (TAMO)": "#8B5CF6",
+    "MARQUÉ POUR SUPPRESSION (MARC)": GREY,
+    "OUVERT": SKY,
+    "EN COURS": BLUE,
+    "CLÔTURÉ": GREEN,
+    "AFFICHÉ": TEAL,
+    "IMPRIMÉ": CYAN,
+    "STATUT TECHNIQUE SUPPLÉMENTAIRE": INDIGO,
+    "TRAITEMENT COMPLÉMENTAIRE": "#8B5CF6",
+    "MARQUÉ POUR SUPPRESSION": GREY,
+    "NON RENSEIGNÉ": "#CBD5E1",
+}
+
 
 # ═══════════════════════════════════════════════════════════════════
 # Utilitaires
@@ -57,6 +130,61 @@ PALETTE_LIEN = {"Avec avis": BLUE, "Sans avis": GREY}
 
 def _statut_court(serie):
     return serie.fillna("").astype(str).str.strip().str.split().str[0].replace("", "Inconnu")
+
+
+def _regrouper_atelier(poste):
+    """Regroupe les postes de travail en ateliers selon les règles définies."""
+    if poste is None:
+        return "AUTRE"
+    p = str(poste).strip()
+    if not p or p.lower() in ["nan", "none"]:
+        return "AUTRE"
+    p_upper = p.upper()
+
+    for code in ("TSP", "REX", "MCP", "DCP", "PP1", "PP2", "PS3", "PS4"):
+        if code in p_upper:
+            return code
+
+    # CU -> PC
+    if re.search(r'(?:^|[\s\-_]|[EMRI])CU(?:$|[\s\-_0-9])', p_upper) or re.search(r'\bCU\b', p_upper):
+        return "PC"
+
+    # UT -> CENTRAL
+    if re.search(r'(?:^|[\s\-_]|[EMRI])UT(?:$|[\s\-_0-9])', p_upper) or re.search(r'\bUT\b', p_upper):
+        return "CENTRAL"
+
+    return p
+
+
+def _analyser_nature(txt):
+    """Extrait la nature d'une fuite à partir du texte descriptif."""
+    if not txt:
+        return "FUITE NON DÉFINIE"
+    t = str(txt).lower()
+    for nat, pat in NATURES_FUITES_PATTERNS:
+        if re.search(pat, t, re.IGNORECASE):
+            return nat
+    return "FUITE NON DÉFINIE"
+
+
+def _extraire_premier_statut(statut_sys):
+    """Extrait uniquement le premier code du Statut système (avant premier espace)."""
+    if statut_sys is None:
+        return "NON RENSEIGNÉ"
+    txt = str(statut_sys).strip()
+    if not txt or txt.lower() in ["nan", "none"]:
+        return "NON RENSEIGNÉ"
+    return txt.split()[0].upper()
+
+
+def _libelle_statut_complet(code):
+    """Convertit un code statut système en libellé explicite avec son code."""
+    if not code or code == "NON RENSEIGNÉ":
+        return "NON RENSEIGNÉ"
+    libelle = DICT_STATUTS_AVIS.get(code, code)
+    if libelle != code:
+        return f"{libelle} ({code})"
+    return code
 
 
 def _approbation(df):
@@ -157,10 +285,14 @@ def _bar(pivot, titre, palette=None, xlabel="Nombre", max_postes=12):
         if tot > 0:
             ax.text(tot + maxi * 0.012, i, f"{int(tot)}", va="center",
                     fontsize=9, fontweight="bold", color=DARK)
-    ax.set_title(titre, fontsize=11.5, fontweight="bold", color=NAVY, loc="left", pad=24)
+    nb_cols = len(pivot.columns)
+    ncol = max(1, min(nb_cols, 4))
+    pad = 24 if nb_cols <= 4 else (24 + 14 * ((nb_cols - 1) // 4))
+    ax.set_title(titre, fontsize=11.5, fontweight="bold", color=NAVY, loc="left", pad=pad)
     ax.set_xlabel(xlabel, fontsize=9)
-    ax.legend(fontsize=8.5, frameon=False, ncol=max(1, len(pivot.columns)),
-              loc="lower left", bbox_to_anchor=(0, 1.005))
+    if nb_cols > 1 or (nb_cols == 1 and str(pivot.columns[0]) not in [titre, "Avis", "Fuites"]):
+        ax.legend(fontsize=8.5, frameon=False, ncol=ncol,
+                  loc="lower left", bbox_to_anchor=(0, 1.005))
     ax.grid(axis="x", color="#F1F5F9", linewidth=1)
     ax.set_axisbelow(True)
     ax.spines[["top", "right"]].set_visible(False)
@@ -179,17 +311,12 @@ def _bar(pivot, titre, palette=None, xlabel="Nombre", max_postes=12):
 # ═══════════════════════════════════════════════════════════════════
 
 @st.cache_data(show_spinner="Analyse HSE en cours...", max_entries=8)
-def _calculer_sections_hse(_dfp, _avf, vp_tuple, date_str, sel_annee, sel_mois, sel_sem):
+def _calculer_sections_hse(_dfp, _avf, vp_tuple, date_str, sel_annee, sel_mois, sel_sem, sel_atelier="Tous"):
     """
-    Calcule les découpages thématiques et TOUS les graphiques de la page.
+    Calcule les découpages thématiques, l'analyse des fuites et TOUS les graphiques de la page.
 
     MISE EN CACHE : la clé est constituée de la date d'extraction
-    (date.txt) et des filtres actifs — les DataFrames sont passés avec
-    un préfixe underscore (_dfp, _avf) pour que Streamlit NE les hache
-    PAS (opération très coûteuse sur 146 000 lignes). Conséquence : tant
-    que date.txt et les filtres ne changent pas, les 15 graphiques ne
-    sont calculés qu'une seule fois, au lieu d'être régénérés à chaque
-    interaction avec la page.
+    (date.txt) et des filtres actifs (période et atelier).
     """
     ot = _ajouter_periode(_dfp.copy(), "Créé le")
     avis = _ajouter_periode(_avf.copy(), "Créé le") if _avf is not None and not _avf.empty else pd.DataFrame()
@@ -200,17 +327,59 @@ def _calculer_sections_hse(_dfp, _avf, vp_tuple, date_str, sel_annee, sel_mois, 
     ot = _filtrer_periode(ot, sel_annee, sel_mois, sel_sem)
     avis = _filtrer_periode(avis, sel_annee, sel_mois, sel_sem)
 
+    col_p_ot = next((c for c in ot.columns if "poste" in str(c).lower() and "trav" in str(c).lower()), "Poste travail princ.")
+    col_p_av = next((c for c in avis.columns if "poste" in str(c).lower() and "trav" in str(c).lower()), "Poste travail princ.") if not avis.empty else "Poste travail princ."
+    col_d_av = next((c for c in avis.columns if str(c).lower() in ["description", "désignation", "designation"] or "descript" in str(c).lower() or "designat" in str(c).lower()), None) if not avis.empty else None
+    col_s_av = next((c for c in avis.columns if "statut" in str(c).lower() and "syst" in str(c).lower()), None) if not avis.empty else None
+
+    # Regroupement et filtrage par atelier
+    if not ot.empty and col_p_ot in ot.columns:
+        ot["_Atelier"] = ot[col_p_ot].apply(_regrouper_atelier)
+        if sel_atelier != "Tous":
+            ot = ot[ot["_Atelier"] == sel_atelier]
+
+    if not avis.empty and col_p_av in avis.columns:
+        avis["_Atelier"] = avis[col_p_av].apply(_regrouper_atelier)
+        if sel_atelier != "Tous":
+            avis = avis[avis["_Atelier"] == sel_atelier]
+
     ot["_Statut"] = _statut_court(ot["Statut système"]) if "Statut système" in ot.columns else "Inconnu"
     ot["_tw"] = ot["_tw_num"] if "_tw_num" in ot.columns else pd.to_numeric(ot.get("Type de travail"), errors="coerce")
     desig = ot["Désignation"].fillna("").astype(str) if "Désignation" in ot.columns else pd.Series("", index=ot.index)
     if not avis.empty:
         avis["_Approbation"] = _approbation(avis)
 
+    # Analyse des fuites & statuts système pour tous les avis du périmètre
+    df_avis_analyse = avis.copy()
+    if not df_avis_analyse.empty:
+        if col_d_av and col_d_av in df_avis_analyse.columns:
+            desig_av = df_avis_analyse[col_d_av].fillna("").astype(str)
+            masque_fuite = desig_av.str.contains(r"\bfuites?\b", case=False, na=False, regex=True)
+            df_avis_analyse["_EstFuite"] = masque_fuite
+            df_avis_analyse["_NatureFuite"] = None
+            if masque_fuite.any():
+                df_avis_analyse.loc[masque_fuite, "_NatureFuite"] = desig_av[masque_fuite].apply(_analyser_nature)
+        else:
+            df_avis_analyse["_EstFuite"] = False
+            df_avis_analyse["_NatureFuite"] = None
+
+        if col_s_av and col_s_av in df_avis_analyse.columns:
+            df_avis_analyse["_StatutCode"] = df_avis_analyse[col_s_av].apply(_extraire_premier_statut)
+            df_avis_analyse["_StatutLibelle"] = df_avis_analyse["_StatutCode"].apply(_libelle_statut_complet)
+        else:
+            df_avis_analyse["_StatutCode"] = "NON RENSEIGNÉ"
+            df_avis_analyse["_StatutLibelle"] = "NON RENSEIGNÉ"
+    else:
+        df_avis_analyse["_EstFuite"] = pd.Series(dtype=bool)
+        df_avis_analyse["_NatureFuite"] = pd.Series(dtype=str)
+        df_avis_analyse["_StatutCode"] = pd.Series(dtype=str)
+        df_avis_analyse["_StatutLibelle"] = pd.Series(dtype=str)
+
+    df_fuites = df_avis_analyse[df_avis_analyse["_EstFuite"] == True].copy() if not df_avis_analyse.empty else pd.DataFrame()
+
     ot_securite = ot[ot["_tw"] == TYPE_TRAVAIL_SECURITE]
     masque_therm = desig.str.contains("thermograph", case=False, na=False)
     masque_vib = desig.str.contains("vibration|vibratoire", case=False, na=False)
-    # OMS scindé en deux familles distinctes, chacune ayant sa propre
-    # section : les volumes et les problématiques diffèrent nettement.
     ot_oms_therm = ot[masque_therm]
     ot_oms_vib = ot[masque_vib & ~masque_therm]
     ot_structure = ot[desig.str.contains("structure", case=False, na=False)]
@@ -240,6 +409,39 @@ def _calculer_sections_hse(_dfp, _avf, vp_tuple, date_str, sel_annee, sel_mois, 
         if p2:
             buffers[f"pie_ot_{cle}"] = p2
 
+    # ── Graphiques Fuites & Ateliers ──
+    if not df_avis_analyse.empty and "_Atelier" in df_avis_analyse.columns:
+        # G1 : Nombre d'Avis par Atelier
+        piv_avis = df_avis_analyse.groupby("_Atelier").size().to_frame(name="Avis")
+        b1 = _bar(piv_avis, "Nombre d'Avis par Atelier", {"Avis": BLUE}, xlabel="Nombre d'avis", max_postes=25)
+        if b1:
+            buffers["bar_avis_atelier"] = b1
+
+        # G4 : Répartition des Avis par Statut
+        counts_statut = df_avis_analyse["_StatutLibelle"].value_counts().to_dict()
+        p4 = _pie(counts_statut, "Répartition des Avis par Statut", PALETTE_STATUT_AVIS)
+        if p4:
+            buffers["pie_statuts_avis"] = p4
+
+        # G5 : Statuts des Avis par Atelier
+        piv_statuts_at = pd.crosstab(df_avis_analyse["_Atelier"], df_avis_analyse["_StatutLibelle"])
+        b5 = _bar(piv_statuts_at, "Statuts des Avis par Atelier", PALETTE_STATUT_AVIS, xlabel="Nombre d'avis", max_postes=25)
+        if b5:
+            buffers["bar_statuts_atelier"] = b5
+
+    if not df_fuites.empty and "_Atelier" in df_fuites.columns:
+        # G2 : Nombre de fuites par Atelier
+        piv_fuites = df_fuites.groupby("_Atelier").size().to_frame(name="Fuites")
+        b2 = _bar(piv_fuites, "Nombre de fuites par Atelier", {"Fuites": "#D97706"}, xlabel="Nombre de fuites", max_postes=25)
+        if b2:
+            buffers["bar_fuites_atelier"] = b2
+
+        # G3 : Nature des fuites par Atelier
+        piv_natures = pd.crosstab(df_fuites["_Atelier"], df_fuites["_NatureFuite"])
+        b3 = _bar(piv_natures, "Nature des fuites par Atelier", PALETTE_NATURES, xlabel="Nombre de fuites", max_postes=25)
+        if b3:
+            buffers["bar_natures_atelier"] = b3
+
     for df, cle, titre in [
             (ot_securite, "secu", "OT Sécurité"),
             (ot_oms_therm, "therm", "OMS Thermographie"),
@@ -264,7 +466,9 @@ def _calculer_sections_hse(_dfp, _avf, vp_tuple, date_str, sel_annee, sel_mois, 
 
     return {"avis_zi": avis_zi, "avis_zh": avis_zh, "ot_securite": ot_securite,
             "ot_oms_therm": ot_oms_therm, "ot_oms_vib": ot_oms_vib,
-            "ot_structure": ot_structure, "buffers": buffers,
+            "ot_structure": ot_structure,
+            "df_avis_analyse": df_avis_analyse, "df_fuites": df_fuites,
+            "buffers": buffers,
             "annees": sorted({int(a) for a in pd.concat(
                 [s for s in (ot.get("_Année"), avis.get("_Année")) if s is not None]
             ).dropna().unique()}) if len(ot) or len(avis) else [],
@@ -379,12 +583,96 @@ def _section_ot(df, titre, icone, couleur_principale, buffers, cle):
                 st.image(buffers[k], use_container_width=True)
 
 
+def _tableau_synthese_fuites(df_fuites):
+    """Construit le tableau de synthèse Atelier | Nature fuite | Statut Avis | Nombre d'Avis."""
+    if df_fuites.empty:
+        return pd.DataFrame(columns=["Atelier", "Nature fuite", "Statut Avis", "Nombre d'Avis"])
+
+    t = (
+        df_fuites.groupby(["_Atelier", "_NatureFuite", "_StatutLibelle"])
+        .size()
+        .reset_index(name="Nombre d'Avis")
+    )
+    t = t.rename(
+        columns={
+            "_Atelier": "Atelier",
+            "_NatureFuite": "Nature fuite",
+            "_StatutLibelle": "Statut Avis",
+        }
+    )
+    t = t.sort_values(by="Nombre d'Avis", ascending=False).reset_index(drop=True)
+
+    # Ligne Total Général
+    total_val = int(t["Nombre d'Avis"].sum())
+    ligne_total = pd.DataFrame([
+        {
+            "Atelier": "TOTAL GÉNÉRAL",
+            "Nature fuite": "-",
+            "Statut Avis": "-",
+            "Nombre d'Avis": total_val,
+        }
+    ])
+    t = pd.concat([t, ligne_total], ignore_index=True)
+    return t
+
+
+def _section_analyse_avis_fuites(df_avis, df_fuites, buffers):
+    """Section d'analyse des fuites et statuts des avis par atelier."""
+    st.markdown("### 💧 Analyse des Fuites & Statuts des Avis par Atelier")
+    if df_avis.empty:
+        st.info("Aucun avis disponible sur le périmètre et la période sélectionnés.")
+        return
+
+    total_avis = len(df_avis)
+    total_fuites = len(df_fuites) if not df_fuites.empty else 0
+    pct_fuites = (total_fuites / total_avis * 100) if total_avis > 0 else 0
+    nb_ateliers_touches = df_fuites["_Atelier"].nunique() if not df_fuites.empty else 0
+    fuites_cloturees = int((df_fuites["_StatutCode"] == "ACLO").sum()) if not df_fuites.empty else 0
+    pct_clot = (fuites_cloturees / total_fuites * 100) if total_fuites > 0 else 0
+
+    c1, c2, c3, c4 = st.columns(4)
+    _carte(c1, "Total Avis", str(total_avis), NAVY, "sur le périmètre")
+    _carte(c2, "Total Fuites", str(total_fuites), "#D97706", f"{pct_fuites:.1f}% du total des avis")
+    _carte(c3, "Ateliers touchés", str(nb_ateliers_touches), BLUE, "ateliers avec fuites")
+    _carte(c4, "Fuites Clôturées", str(fuites_cloturees), GREEN, f"{pct_clot:.0f}% clôturées (ACLO)")
+
+    st.markdown("<div style='height: 12px;'></div>", unsafe_allow_html=True)
+
+    # Graphique 1 & Graphique 2 côte à côte
+    g1, g2 = st.columns(2)
+    if buffers.get("bar_avis_atelier"):
+        g1.image(buffers["bar_avis_atelier"], use_container_width=True)
+    if buffers.get("bar_fuites_atelier"):
+        g2.image(buffers["bar_fuites_atelier"], use_container_width=True)
+
+    # Graphique 3 : Nature des fuites par Atelier (pleine largeur)
+    if buffers.get("bar_natures_atelier"):
+        st.image(buffers["bar_natures_atelier"], use_container_width=True)
+
+    # Graphique 4 & Graphique 5
+    g4, g5 = st.columns([2, 3])
+    if buffers.get("pie_statuts_avis"):
+        g4.image(buffers["pie_statuts_avis"], use_container_width=True)
+    if buffers.get("bar_statuts_atelier"):
+        g5.image(buffers["bar_statuts_atelier"], use_container_width=True)
+
+    # Tableau de synthèse
+    st.markdown("#### 📋 Synthèse détaillée des fuites par atelier et statut")
+    tab_synth = _tableau_synthese_fuites(df_fuites)
+    if not tab_synth.empty:
+        st.dataframe(tab_synth, use_container_width=True, hide_index=True)
+    else:
+        st.info("Aucune donnée de fuite à afficher dans le tableau de synthèse.")
+
+
 # ═══════════════════════════════════════════════════════════════════
 # Rapport PDF
 # ═══════════════════════════════════════════════════════════════════
 
-def _libelle_periode(sel_annee, sel_mois_lbl, sel_sem):
+def _libelle_periode(sel_annee, sel_mois_lbl, sel_sem, sel_atelier="Tous"):
     parties = []
+    if sel_atelier != "Tous":
+        parties.append(f"atelier {sel_atelier}")
     if sel_sem != "Toutes":
         parties.append(f"semaine {sel_sem}")
     if sel_mois_lbl != "Tous":
@@ -514,26 +802,37 @@ def render_suivi_hse_tab(dfp, avf, vp, date_str=""):
     if not avis.empty and "Poste travail princ." in avis.columns:
         avis = avis[avis["Poste travail princ."].isin(vp)]
 
-    # ── Filtres période ──
+    # ── Filtres période & atelier ──
     st.markdown("#### 🎛️ Filtres")
     st.caption("Ces filtres s'appliquent EN PLUS des filtres division / poste / période du panneau latéral.")
     sources = [s for s in (ot.get("_Année"), avis.get("_Année")) if s is not None]
     annees = sorted({int(a) for a in pd.concat(sources).dropna().unique()}) if sources else []
     sources_s = [s for s in (ot.get("_Semaine"), avis.get("_Semaine")) if s is not None]
     semaines = sorted({s for s in pd.concat(sources_s).dropna().unique()}) if sources_s else []
-    f1, f2, f3 = st.columns(3)
+
+    # Ateliers disponibles sur le périmètre
+    col_p_ot = next((c for c in dfp.columns if "poste" in str(c).lower() and "trav" in str(c).lower()), "Poste travail princ.")
+    col_p_av = next((c for c in avf.columns if "poste" in str(c).lower() and "trav" in str(c).lower()), "Poste travail princ.") if avf is not None and not avf.empty else None
+    postes_ot = dfp[col_p_ot].dropna().unique() if col_p_ot in dfp.columns else []
+    postes_av = avf[col_p_av].dropna().unique() if (col_p_av and col_p_av in avf.columns) else []
+    tous_ateliers = sorted({_regrouper_atelier(p) for p in set(postes_ot) | set(postes_av) if str(p).strip() and str(p).lower() != "nan"})
+
+    f1, f2, f3, f4 = st.columns(4)
     sel_annee = f1.selectbox("Année", ["Toutes"] + [str(a) for a in annees], key="hse_annee")
     sel_mois_lbl = f2.selectbox("Mois", ["Tous"] + MOIS_FR, key="hse_mois")
     sel_mois = "Tous" if sel_mois_lbl == "Tous" else str(MOIS_FR.index(sel_mois_lbl) + 1)
     sel_sem = f3.selectbox("Semaine", ["Toutes"] + list(semaines), key="hse_sem")
+    sel_atelier = f4.selectbox("Atelier", ["Tous"] + tous_ateliers, key="hse_atelier")
 
     # ── Calcul (mis en cache : ne se relance que si date.txt ou les
     #    filtres changent — voir _calculer_sections_hse) ──
-    res = _calculer_sections_hse(dfp, avf, tuple(vp), date_str, sel_annee, sel_mois, sel_sem)
+    res = _calculer_sections_hse(dfp, avf, tuple(vp), date_str, sel_annee, sel_mois, sel_sem, sel_atelier)
     buffers = res["buffers"]
 
     st.markdown("---")
     _section_avis(res["avis_zi"], "Avis Inspection", "🔍", BLUE, buffers, "zi")
+    st.markdown("---")
+    _section_analyse_avis_fuites(res["df_avis_analyse"], res["df_fuites"], buffers)
     st.markdown("---")
     _section_avis(res["avis_zh"], "Avis HSE", "🦺", TEAL, buffers, "zh")
     st.markdown("---")
@@ -570,7 +869,7 @@ def render_suivi_hse_tab(dfp, avf, vp, date_str=""):
     # ── Rapport PDF ──
     st.markdown("---")
     st.markdown("#### 📄 Rapport de synthèse")
-    libelle = _libelle_periode(sel_annee, sel_mois_lbl, sel_sem)
+    libelle = _libelle_periode(sel_annee, sel_mois_lbl, sel_sem, sel_atelier)
     st.caption(f"Titre du rapport : « Suivi HSE{libelle} »" if libelle
                else "Aucun filtre de période actif — titre : « Suivi HSE ».")
 
