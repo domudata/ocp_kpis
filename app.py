@@ -495,28 +495,35 @@ def main() -> None:
                 n_dates = hist_df["Date"].nunique()
 
             with st.expander(f"📁 Historique : {n_dates} date(s) enregistrée(s) — cliquez pour détails", expanded=(n_dates < 2)):
-                st.caption(f"Source : GitHub — {_hist_msg}")
+                st.caption(f"Source : {_hist_msg}")
                 if n_dates < 2:
                     st.info(
                         "ℹ️ Il faut **au moins 2 dates** pour calculer des variations. "
                         "Actuellement, l'historique contient %d date(s).\n\n"
-                        "**L'enregistrement est désormais automatique** : à chaque chargement "
-                        "d'une extraction avec une nouvelle date dans `date.txt`, la date est "
-                        "ajoutée directement à `kpis/indicateurs_kpis.xlsx` sur GitHub — "
-                        "aucune action manuelle n'est nécessaire." % n_dates
+                        "**L'enregistrement est automatique** : à chaque chargement "
+                        "d'une extraction avec une nouvelle date, la date est "
+                        "ajoutée directement au fichier `kpis.xlsx`." % n_dates
                     )
                 else:
                     st.success(
-                        f"✅ {n_dates} dates enregistrées sur GitHub. "
-                        f"Chaque nouvelle extraction (nouvelle date dans `date.txt`) est ajoutée automatiquement."
+                        f"✅ {n_dates} dates enregistrées dans `kpis.xlsx`. "
+                        f"Chaque nouvelle extraction (nouvelle date) est ajoutée automatiquement."
                     )
                 try:
-                    from core.github_publish import download_file as _gh_dl
-                    _bytes_hist, _err_hist = _gh_dl("kpis/indicateurs_kpis.xlsx")
+                    _bytes_hist = None
+                    if os.path.exists("kpis.xlsx"):
+                        with open("kpis.xlsx", "rb") as _f_kpis:
+                            _bytes_hist = _f_kpis.read()
+                    elif os.path.exists("kpis/indicateurs_kpis.xlsx"):
+                        with open("kpis/indicateurs_kpis.xlsx", "rb") as _f_kpis:
+                            _bytes_hist = _f_kpis.read()
+                    else:
+                        from core.github_publish import download_file as _gh_dl
+                        _bytes_hist, _err_hist = _gh_dl("kpis/indicateurs_kpis.xlsx")
                     if _bytes_hist:
                         st.download_button(
-                            "⬇️ Télécharger l'historique complet (indicateurs_kpis.xlsx)",
-                            data=_bytes_hist, file_name="indicateurs_kpis.xlsx",
+                            "⬇️ Télécharger l'historique complet (kpis.xlsx)",
+                            data=_bytes_hist, file_name="kpis.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                             use_container_width=True,
                         )
@@ -595,24 +602,44 @@ def main() -> None:
                     dry_run=_launch_dry, progress_callback=_on_progress,
                     dfp_toutes_dates=df_full,
                 )
+                # Sauvegarde de la présentation PowerPoint dans le dossier presentation/
+                try:
+                    from core.export_pptx import build_presentation
+                    _pptx = build_presentation(
+                        vp, ckdf, ano_map, pa, qa, pscores, qscores,
+                        hist_df, fichier_date,
+                    )
+                    if _pptx:
+                        os.makedirs("presentation", exist_ok=True)
+                        _ent = "Maroc_Chimie" if all(str(p).startswith("SF1") for p in vp) else \
+                               ("FEEDS" if all(str(p).startswith("SF2") for p in vp) else "OCP")
+                        with open(os.path.join("presentation", "presentation_kpis.pptx"), "wb") as _f_pptx:
+                            _f_pptx.write(_pptx)
+                        with open(os.path.join("presentation", f"Presentation_KPIs_{_ent}_{fichier_date.replace('/','-')}.pptx"), "wb") as _f_pptx2:
+                            _f_pptx2.write(_pptx)
+                except Exception:
+                    pass
+
                 _progress.progress(1.0, text="Terminé.")
 
                 _ok_pdf = sum(1 for r in _results if r.get("pdf"))
                 _ok_xlsx = sum(1 for r in _results if r.get("xlsx"))
                 _ok_pub = sum(1 for r in _results if r.get("pdf_published"))
+                _ok_saved = sum(1 for r in _results if r.get("pdf_saved") or r.get("pdf"))
 
                 with _status_area.container():
                     if _launch_dry:
                         st.success(
                             f"✅ Génération test terminée : {_ok_pdf}/{len(_results)} PDF, "
-                            f"{_ok_xlsx}/{len(_results)} Excel."
+                            f"{_ok_xlsx}/{len(_results)} Excel enregistrés dans `presentation/`."
                         )
                     else:
                         st.success(
-                            f"✅ {_ok_pub}/{len(_results)} postes publiés sur GitHub "
-                            f"(presentation/<poste>/) — {_ok_pdf} PDF, "
-                            f"{_ok_xlsx} Excel générés."
+                            f"✅ Rapports enregistrés avec succès dans le dossier `presentation/` : "
+                            f"{_ok_pdf} PDF, {_ok_xlsx} Excel anomalies et la présentation PowerPoint."
                         )
+                        if _ok_pub > 0:
+                            st.info(f"☁️ {_ok_pub}/{len(_results)} rapports synchronisés sur GitHub.")
                     with st.expander("Détail par poste"):
                         for r in _results:
                             _icons = "".join([
