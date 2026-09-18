@@ -135,19 +135,20 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
         an["TOTAL_OT"] == 0, 100.0, ckpi(an["OT_CLOTURES"], an["TOTAL_OT"])
     )
 
-    # ── Exécution (définition officielle OCP : OT lancé, type ZCOR, statut utilisateur SOPL) ──
-    # Âge (jours) = Date de l'extraction (now_ts) - Date de début planifiée (colonne 'aex')
+    # ── Âge Exécution ──
+    # Périmètre : TOUS les OT ZCOR lancés avec SOPL.
+    # Important : les OT déjà exécutés ET les OT non exécutés sont conservés
+    # dans le total, afin que la répartition par âge représente 100 % du
+    # stock lancé + SOPL.
     _statut_lanc_ex = (
-        (df_all["Statut système"].fillna("").astype(str).str.strip().str.split().str[0] == "LANC")
-        | (df_all["Statut système"].fillna("").astype(str).str.contains("LANC", na=False)
-           & ~df_all["Statut système"].fillna("").astype(str).str.contains("CLOT|TCLO", na=False))
+        df_all["Statut système"].fillna("").astype(str).str.contains("LANC", case=False, na=False)
+        | df_all["Statut OT"].eq("LANC")
     )
-    _non_clot_ex = ~df_all["Statut OT"].isin(["CLOT", "TCLO"]) if "Statut OT" in df_all.columns else True
     _contient_sopl_ex = (
         (df_all["Contient SOPL"] == 1) if "Contient SOPL" in df_all.columns
         else df_all["Statut utilisateur"].fillna("").astype(str).str.contains("SOPL", case=False, na=False)
     )
-    _zcor_ex = (df_all["Type d'ordre"] == "ZCOR") & _statut_lanc_ex & _non_clot_ex & _contient_sopl_ex
+    _zcor_ex = (df_all["Type d'ordre"] == "ZCOR") & _statut_lanc_ex & _contient_sopl_ex
     _zcor_exec_all = df_all[_zcor_ex].copy()
 
     ex = cpiv(
@@ -223,7 +224,9 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     plc["Total"] = plc["CARACTERISE"] + plc["NON CARACTERISE"]
     plc["Backlog planification caractérisé"] = ckpi(plc["CARACTERISE"], plc["Total"])
 
-    # ── OT préparation <1/1-3/>3 mois — SUR LE BACKLOG COMPLET PRÉPARATION (_zcor_cree_all) ──
+    # ── OT préparation <1/1-3/>3 mois — STOCK COMPLET PRÉPARATION ──
+    # Le calcul de l'âge inclut les OT caractérisés ET NON CARACTÉRISÉS.
+    # Le périmètre est donc tout le stock ZCOR + CRÉÉ.
     pr = cpiv(_zcor_cree_all, pd.Series(True, index=_zcor_cree_all.index), "ap", posts)
     for c in ["<1 mois", ">3 mois", "1 mois < <3 mois", "Inconnu"]:
         pr[c] = pr.get(c, 0)
@@ -233,12 +236,10 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     pr["OT préparation 1mois< <3mois"] = ckpi(pr["1 mois < <3 mois"], pr["Total"], 0)
     pr["OT préparation >3 mois"] = ckpi(pr[">3 mois"], pr["Total"], 0)
 
-    # ── OT planification <1/1-3/>3 mois — SUR LE STOCK PLANIFICATION (LANC + ATPL) ──
-    _contient_atpl = (
-        _zcor_lanc_all["Statut utilisateur"].fillna("").astype(str).str.contains("ATPL", case=False, na=False)
-        | _zcor_lanc_all["Statut utilisateur"].apply(lambda x: match_exact_token(x, CODES_PLAN_EXACT))
-    )
-    _zcor_plan_age = _zcor_lanc_all[_contient_atpl].copy()
+    # ── OT planification <1/1-3/>3 mois — STOCK COMPLET PLANIFICATION ──
+    # Le calcul de l'âge inclut les OT caractérisés ET NON CARACTÉRISÉS.
+    # Le périmètre est donc tout le stock ZCOR + LANC + SOPL=0.
+    _zcor_plan_age = _zcor_lanc_all.copy()
     pl = cpiv(_zcor_plan_age, pd.Series(True, index=_zcor_plan_age.index), "alp", posts)
     for c in ["<1 mois", ">3 mois", "1 mois < <3 mois", "Inconnu"]:
         pl[c] = pl.get(c, 0)
