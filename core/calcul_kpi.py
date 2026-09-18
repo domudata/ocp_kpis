@@ -96,11 +96,20 @@ CODES_PLAN_EXACT = {"ATEI", "ATAL", "ATAS", "AGAR", "ATHS"}
 
 
 def match_exact_token(statut, codes: set) -> bool:
-    """True si statut, une fois débarrassé des espaces superflus, est
-    ÉGAL STRICTEMENT à l'un des codes — aucune tolérance de préfixe/suffixe."""
+    """RÉVISÉ (spécification officielle reçue — sections 5, 6, 7) :
+    un OT est CARACTERISE dès que l'un des codes apparaît N'IMPORTE OÙ
+    dans le champ "Statut utilisateur" — quelle que soit sa position
+    (début, milieu, fin, entouré d'autre texte, combiné à d'autres codes).
+    Logique "contains" explicitement exigée ; "==" et "startswith" sont
+    explicitement exclus par la spécification.
+    Exemples devant tous être CARACTERISE pour le code "ATPD" :
+    "ATPD", "OT ATPD", "Préparation - ATPD - OK", "ATMR / ATPD / ATMO".
+    (Le nom de la fonction est conservé pour ne pas casser les imports
+    existants ailleurs dans le code.)"""
     if statut is None or (isinstance(statut, float) and pd.isna(statut)):
         return False
-    return str(statut).strip().upper() in codes
+    t = str(statut).upper()
+    return any(code in t for code in codes)
 
 
 # ──────────────────────────────────────────────
