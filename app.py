@@ -33,8 +33,7 @@ try:
     from components.sidebar import render_sidebar
 
     from pages.dashboard import render_dashboard_tab
-    from pages.performance import render_performance_tab
-    from pages.qualite import render_qualite_tab
+    from pages.performance_qualite import render_performance_qualite_tab
     from pages.backlog import render_backlog_page
     from pages.evolution import render_evolution_tab
     from pages.plan_action import render_plan_action_tab
@@ -50,47 +49,31 @@ import hashlib as _hashlib
 import os as _os
 
 def _calc_signature():
-    try:
-        h = _hashlib.md5()
-        base_dir = _os.path.dirname(_os.path.abspath(__file__)) if "__file__" in globals() else _os.getcwd()
-        found_any = False
-        for _f in ("core/calcul_kpi.py", "core/anomalies.py", "core/prepare_data.py", "core/controle_kpi.py"):
-            _path = _os.path.join(base_dir, _f)
-            try:
-                with open(_path, "rb") as _fh:
-                    h.update(_fh.read())
-                    found_any = True
-            except Exception:
-                pass
-        if not found_any:
-            target = _os.path.abspath(__file__) if "__file__" in globals() else "app.py"
-            try:
-                h.update(str(_os.path.getmtime(target)).encode())
-            except Exception:
-                h.update(b"default")
-        return h.hexdigest()[:12], found_any
-    except Exception:
-        return "default", False
+    h = _hashlib.md5()
+    base_dir = _os.path.dirname(_os.path.abspath(__file__))
+    found_any = False
+    for _f in ("core/calcul_kpi.py", "core/anomalies.py", "core/prepare_data.py"):
+        _path = _os.path.join(base_dir, _f)
+        try:
+            with open(_path, "rb") as _fh:
+                h.update(_fh.read())
+                found_any = True
+        except Exception:
+            pass
+    if not found_any:
+        h.update(str(_os.path.getmtime(_os.path.abspath(__file__))).encode())
+    return h.hexdigest()[:12], found_any
 
 CALC_VERSION, _CALC_SIG_OK = _calc_signature()
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# MODIFICATION 1/3 : ajout du parametre df_toutes_dates, transmis tel quel a
+# calc_kpis(). Le reste de la fonction est inchange.
+# ═══════════════════════════════════════════════════════════════════════════
 @st.cache_data(show_spinner="Calcul des KPIs en cours...")
-def calc_kpis_cached(_df_period, _avdf_period, now_ts, apm_tuple, fichier_date, sdt, edt, _df_toutes_dates, calc_version=CALC_VERSION):
-    return calc_kpis(_df_period, _avdf_period, now_ts, list(apm_tuple), df_toutes_dates=_df_toutes_dates)
-
-
-@st.cache_data(show_spinner="Chargement et préparation des données...")
-def get_prepared_data(fichier_date, ot_mtime, av_mtime, calc_version=CALC_VERSION):
-    ot_bytes = av_bytes = None
-    if os.path.exists("ot.xlsx") and os.path.exists("avis.xlsx"):
-        with open("ot.xlsx", "rb") as f:
-            ot_bytes = f.read()
-        with open("avis.xlsx", "rb") as f:
-            av_bytes = f.read()
-    if ot_bytes and av_bytes:
-        return prepare_data(ot_bytes, av_bytes, fichier_date, calc_version=calc_version)
-    return pd.DataFrame(), pd.DataFrame(), [], pd.Timestamp.today().normalize(), pd.DataFrame()
+def calc_kpis_cached(df_period, avdf_period, now_ts, apm_tuple, fichier_date, sdt, edt, df_toutes_dates, calc_version=CALC_VERSION):
+    return calc_kpis(df_period, avdf_period, now_ts, list(apm_tuple), df_toutes_dates=df_toutes_dates)
 
 
 def main() -> None:
@@ -108,15 +91,10 @@ def main() -> None:
             pass
 
     inject_custom_css()
-    st.markdown("""
-    <style>
-    [data-testid="stSidebarNav"],
-    [data-testid="stSidebarNavItems"],
-    [data-testid="stSidebarNavSeparator"] {
-        display: none !important;
-    }
-    </style>
-    """, unsafe_allow_html=True)
+    st.markdown(
+        '<style>[data-testid="stSidebarNav"] { display: none; }</style>',
+        unsafe_allow_html=True
+    )
 
     st.markdown("""
     <style>
@@ -125,11 +103,13 @@ def main() -> None:
     [data-testid="stStatusWidget"] { display: none !important; }
     [data-testid="stDecoration"] { display: none !important; }
     #MainMenu { visibility: hidden !important; }
-    header { visibility: hidden !important; }
-    /* CORRIGÉ : le bouton "◀ ▶" qui affiche/masque le sidebar vit dans le
-       même conteneur que le header masqué ci-dessus. Sans cette règle, si
-       le sidebar se replie (fréquent sur petit écran / mobile), il devient
-       impossible de le rouvrir — le bouton étant lui aussi invisible. */
+    /* CORRIGÉ (root cause) : la règle générale "header { visibility:
+       hidden }" masquait TOUT le conteneur header — y compris le bouton
+       "◀ ▶" d'ouverture/fermeture du sidebar, qui vit à l'intérieur de ce
+       même header selon la version de Streamlit. Elle est retirée : les
+       sélecteurs spécifiques ci-dessus (#MainMenu, stToolbar, etc.)
+       suffisent à masquer les éléments de chrome indésirables sans
+       toucher au header lui-même ni à ce qu'il contient. */
     [data-testid="collapsedControl"] {
         visibility: visible !important;
         display: block !important;
@@ -164,11 +144,39 @@ def main() -> None:
     fichier_date = get_date_from_file()
 
     if "hse_affiche" not in st.session_state:
-        st.session_state.hse_affiche = True
+        st.session_state.hse_affiche = False
 
-    ot_mtime = os.path.getmtime("ot.xlsx") if os.path.exists("ot.xlsx") else 0
-    av_mtime = os.path.getmtime("avis.xlsx") if os.path.exists("avis.xlsx") else 0
-    df_full, av_full, apm, now_ts, avis_complet_full = get_prepared_data(fichier_date, ot_mtime, av_mtime, calc_version=CALC_VERSION)
+    if not st.session_state.hse_affiche:
+        c = random.choice(CONSIGNES_HSE)
+        st.markdown("""
+        <div style="min-height:100vh;display:flex;flex-direction:column;align-items:center;justify-content:center;background:linear-gradient(135deg,#1a365d,#2d3748,#1a365d);padding:40px">
+        <div style="font-size:64px;margin-bottom:20px">&#128282;</div>
+        <h1 style="text-align:center;font-size:46px;color:#fff;font-weight:900;margin:0">HSE - CONSIGNE DE SECURITE</h1>
+        <p style="text-align:center;color:rgba(255,255,255,.6);font-size:22px;margin-top:8px;letter-spacing:3px;text-transform:uppercase">Securite - Sante - Environnement</p>
+        <div style="background:linear-gradient(135deg,#f6e05e,#ed8936);padding:36px 48px;border-radius:20px;font-size:32px;font-weight:700;text-align:center;margin:40px 0;color:#1a202c;max-width:800px;box-shadow:0 20px 60px rgba(0,0,0,.3)">%s</div>
+        <h2 style="text-align:center;color:#48bb78;font-size:36px;font-weight:900">Aucun travail n'est plus urgent que la securite</h2>
+        <div style="margin-top:40px;width:200px;height:4px;background:rgba(255,255,255,.1);border-radius:2px;overflow:hidden">
+        <div style="width:100%%;height:100%%;background:linear-gradient(90deg,#48bb78,#38a169);border-radius:2px;animation:ld 5.5s ease-in-out forwards"></div>
+        </div>
+        <style>@keyframes ld{from{width:0}to{width:100%%}}</style>
+        </div>""" % c, unsafe_allow_html=True)
+        time.sleep(6)
+        st.session_state.hse_affiche = True
+        st.rerun()
+        st.stop()
+
+    ot_bytes = av_bytes = None
+    if os.path.exists("ot.xlsx") and os.path.exists("avis.xlsx"):
+        with open("ot.xlsx", "rb") as f:
+            ot_bytes = f.read()
+        with open("avis.xlsx", "rb") as f:
+            av_bytes = f.read()
+
+    if ot_bytes and av_bytes:
+        df_full, av_full, apm, now_ts, avis_complet_full = prepare_data(ot_bytes, av_bytes, fichier_date)
+    else:
+        df_full, av_full, apm, now_ts = pd.DataFrame(), pd.DataFrame(), [], pd.Timestamp.now()
+        avis_complet_full = pd.DataFrame()
 
     ctx = render_sidebar(fichier_date, apm, df_full, av_full, now_ts)
     vp      = ctx["vp"]
@@ -176,8 +184,6 @@ def main() -> None:
     av_full = ctx["av_full"]
     apm     = ctx["apm"]
     now_ts  = ctx["now_ts"]
-    if not ctx.get("avis_complet_full", pd.DataFrame()).empty:
-        avis_complet_full = ctx["avis_complet_full"]
 
     if df_full.empty:
         st.markdown('<div class="es">Veuillez charger les fichiers OT et AVIS via le panneau de filtres.</div>', unsafe_allow_html=True)
@@ -187,22 +193,22 @@ def main() -> None:
     try:
         sdt, edt = ctx["sdt"], ctx["edt"]
 
-        # Date de filtrage : Date de début planifiée en priorité, avec repli sur Créé le (notamment pour les OT en création)
-        if "Date de début planifiée" in df_full.columns and "Créé le" in df_full.columns:
-            _date_filtre_ot = df_full["Date de début planifiée"].fillna(df_full["Créé le"])
-        elif "Date de début planifiée" in df_full.columns:
-            _date_filtre_ot = df_full["Date de début planifiée"]
-        else:
-            _date_filtre_ot = pd.Series(pd.NaT, index=df_full.index)
-
-        df_period = df_full[_date_filtre_ot.between(sdt, edt)].copy()
+        df_period = df_full[
+            df_full["Date de début planifiée"].between(sdt, edt)
+        ].copy()
 
         avdf_period = av_full.copy()
         if "Créé le" in avdf_period.columns:
             avdf_period = avdf_period[avdf_period["Créé le"].between(sdt, edt)]
 
-        # Application du filtre de période de la sidebar à l'ensemble des indicateurs (Backlogs & Âges inclus selon demande explicite)
-        res = calc_kpis_cached(df_period, avdf_period, now_ts, tuple(apm), fichier_date, sdt, edt, df_period)
+        # ═══════════════════════════════════════════════════════════════
+        # MODIFICATION 2/3 : df_full (complet, avant tout filtre de date -
+        # voir plus haut, sdt/edt ne sont appliques qu'a df_period ci-dessus)
+        # est transmis comme df_toutes_dates. Les Backlogs preparation et
+        # planification l'utiliseront exclusivement ; tous les autres KPI
+        # continuent de recevoir df_period, filtre par periode comme avant.
+        # ═══════════════════════════════════════════════════════════════
+        res = calc_kpis_cached(df_period, avdf_period, now_ts, tuple(apm), fichier_date, sdt, edt, df_full)
 
         ckdf_full = res['ckdf']
         nd_full = res.get('nd', {})
@@ -222,89 +228,92 @@ def main() -> None:
         pa = {k: round(ckdf[k].mean(skipna=True), 2) for k in QK}
         qa = {k: round(ckdf[k].mean(skipna=True), 2) for k in PK}
 
-        def score_from_totals_01(kpi_dict, kpi_list):
-            valides = [k for k in kpi_list if k in kpi_dict and pd.notna(kpi_dict[k])]
-            if not valides:
-                return 0.0
-            total_1 = sum(gscore(k, kpi_dict[k], CIBLE.get(k, 100)) for k in valides)
-            return round((total_1 / len(valides)) * 100, 2)
-
-        def get_kpi_total(posts, kpi):
-            if kpi in nd_full and posts:
-                n_s, d_s = nd_full[kpi]
-                p_sub = [p for p in posts if p in n_s.index]
-                if p_sub:
-                    sn = n_s.loc[p_sub].sum()
-                    sd = d_s.loc[p_sub].sum()
-                    default_val = 0.0 if is_lb(kpi) else 100.0
-                    return (sn / sd * 100.0) if sd > 0 else default_val
-            p_sub = [p for p in posts if p in ckdf.index]
-            if p_sub and kpi in ckdf.columns:
-                return float(ckdf.loc[p_sub, kpi].mean(skipna=True))
-            return 0.0 if is_lb(kpi) else 100.0
-
-        # ── Score Performance / Qualite PAR POSTE (méthode 0 et 1) ──
+        # ── Score Performance / Qualite PAR POSTE ───────────────────────────
+        # Règle UNIFORME appliquée partout dans ce fichier : pour chaque
+        # cellule KPI, gscore() renvoie 0 (rouge / non conforme) ou 1
+        # (conforme / non rouge). Les valeurs NaN (KPI indisponible pour ce
+        # poste) sont exclues du calcul. Score = somme des 0/1 / nombre de
+        # KPI valides × 100.
         pscores = {}
         qscores = {}
         for poste in ckdf.index:
             r = ckdf.loc[poste]
-            pscores[poste] = score_from_totals_01({k: r[k] for k in QK if k in r.index}, QK)
-            qscores[poste] = score_from_totals_01({k: r[k] for k in PK if k in r.index}, PK)
+            valid_q = [k for k in QK if k in r.index and pd.notna(r[k])]
+            valid_p = [k for k in PK if k in r.index and pd.notna(r[k])]
+            pscores[poste] = (sum(gscore(k, r[k], CIBLE[k]) for k in valid_q) / len(valid_q) * 100) if valid_q else 0
+            qscores[poste] = (sum(gscore(k, r[k], CIBLE[k]) for k in valid_p) / len(valid_p) * 100) if valid_p else 0
 
         sf1_posts = [p for p in vp if str(p).startswith("SF1")]
         sf2_posts = [p for p in vp if str(p).startswith("SF2")]
 
-        # ── Score des CARTES SF1/SF2 — CALCUL DIRECT SUR LE TOTAL GÉNÉRAL (méthode 0 et 1) ──
-        # Applique la règle 0/1 directement sur le Total général de chaque division
-        sf1_p_vals = {k: get_kpi_total(sf1_posts, k) for k in QK}
-        sf1_q_vals = {k: get_kpi_total(sf1_posts, k) for k in PK}
-        sf1_p = round(score_from_totals_01(sf1_p_vals, QK), 1) if sf1_posts else None
-        sf1_q = round(score_from_totals_01(sf1_q_vals, PK), 1) if sf1_posts else None
+        # ── Score cellule par cellule — conservé pour le Total general ────
+        def calc_score_cellules(postes, liste_kpi):
+            total = 0
+            nombre_kpi = 0
 
-        sf2_p_vals = {k: get_kpi_total(sf2_posts, k) for k in QK}
-        sf2_q_vals = {k: get_kpi_total(sf2_posts, k) for k in PK}
-        sf2_p = round(score_from_totals_01(sf2_p_vals, QK), 1) if sf2_posts else None
-        sf2_q = round(score_from_totals_01(sf2_q_vals, PK), 1) if sf2_posts else None
+            for poste in postes:
+                if poste not in ckdf.index:
+                    continue
 
-        ano_map = build_ano_map(dfp, avf, now_ts, dfp_toutes_dates=df_period)
+                r = ckdf.loc[poste]
+
+                for kpi in liste_kpi:
+                    if kpi not in r.index:
+                        continue
+
+                    val = r[kpi]
+
+                    if pd.isna(val):
+                        continue
+
+                    total += gscore(
+                        kpi,
+                        float(val),
+                        CIBLE[kpi]
+                    )
+
+                    nombre_kpi += 1
+
+            return round(
+                (total / nombre_kpi) * 100,
+                2
+            ) if nombre_kpi else 0
+
+        # ═══════════════════════════════════════════════════════════════
+        # MODIFICATION 3/3 : dfp_toutes_dates=df_full transmis a build_ano_map
+        # (et plus bas a build_anomaly_dfs), pour que les listes d'anomalies
+        # des deux Backlogs restent cohérentes avec leurs nouvelles
+        # populations (calculées sur toutes les dates dans calc_kpis).
+        # ═══════════════════════════════════════════════════════════════
+        ano_map = build_ano_map(dfp, avf, now_ts, dfp_toutes_dates=df_full)
+
+        # ── Score des CARTES SF1/SF2 — IDENTIQUE À TOTAL GÉNÉRAL (demande
+        # explicite) : réutilise EXACTEMENT calc_score_cellules(), la même
+        # fonction qui calcule tot_p["Score Performance"] / tot_q["Score
+        # Qualite"] plus bas (calc_score_cellules(vp, QK) / (vp, PK)).
+        # Seul le périmètre de postes change (sf1_posts/sf2_posts au lieu
+        # de vp) — la formule est rigoureusement la même, garantissant
+        # qu'une carte affiche la même valeur que Total général lorsque le
+        # filtre du tableau de bord ne retient que les postes de cette
+        # division.
+        sf1_p = int(calc_score_cellules(sf1_posts, QK))
+        sf1_q = int(calc_score_cellules(sf1_posts, PK))
+        sf2_p = int(calc_score_cellules(sf2_posts, QK))
+        sf2_q = int(calc_score_cellules(sf2_posts, PK))
 
         ano_p_rows = build_ano_rows(vp, ano_map, QK)
         ano_q_rows = build_ano_rows(vp, ano_map, PK, fixed_zero=["OT Fiabilité","Total Avis de Panne"])
         ano_p_cols = ["Poste de travail"] + QK + ["Total Anomalies"]
         ano_q_cols = ["Poste de travail"] + PK + ["Total Anomalies"]
-        anomaly_dfs = build_anomaly_dfs(dfp, avf, now_ts, dfp_toutes_dates=df_period)
+        anomaly_dfs = build_anomaly_dfs(dfp, avf, now_ts, dfp_toutes_dates=df_full)
 
         with st.sidebar:
-            with st.expander("📥 Export anomalies & Audit OUI/NON", expanded=False):
-                # 1. Export 3 feuilles unifié conforme à la demande OCP
-                try:
-                    from core.controle_kpi import build_table_controle_complete, build_anomalies_excel_unified
-                    _tbl_ctrl = build_table_controle_complete(df_period, avdf_period, now_ts, df_full=df_period)
-                    _tbl_ctrl_filtered = _tbl_ctrl[_tbl_ctrl["Poste travail princ."].isin(vp)] if vp else _tbl_ctrl
-                    _unified_xlsx = build_anomalies_excel_unified(_tbl_ctrl_filtered)
-                    st.download_button(
-                        "⬇️ Audit OUI/NON & Synthèse (3 Feuilles .xlsx)",
-                        data=_unified_xlsx,
-                        file_name=f"audit_anomalies_3_feuilles_{fichier_date.replace('/','-')}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        use_container_width=True,
-                        type="primary",
-                    )
-                    st.caption(
-                        "Source unique : 1. NON_DETAIL (anomalies + motifs), "
-                        "2. ANOMALIES_KPI_POSTE, 3. SYNTHESE_KPI."
-                    )
-                except Exception as _e_u:
-                    st.caption(f"Export 3 feuilles indisponible : {_e_u}")
-
-                st.markdown("---")
-
-                # 2. Export opérationnel avec Responsables et Actions recommandées
+            with st.expander("📥 Export anomalies (OT + Avis)", expanded=False):
                 try:
                     from core.export_anomalies import build_anomalies_workbook
                     _xlsx_bytes = build_anomalies_workbook(anomaly_dfs, KPI_RESP_MAP, ACT_MAP)
                     st.download_button(
-                        "⬇️ Plan d'action anomalies (.xlsx)",
+                        "⬇️ Télécharger le fichier anomalies (.xlsx)",
                         data=_xlsx_bytes,
                         file_name=f"anomalies_OT_Avis_{fichier_date.replace('/','-')}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
@@ -312,7 +321,8 @@ def main() -> None:
                     )
                     st.caption(
                         "Contient 2 feuilles : Anomalies OT et Anomalies Avis, "
-                        "avec Responsable et Action recommandée."
+                        "avec Responsable et Action recommandée, filtrées selon "
+                        "la période / poste / atelier / division sélectionnés."
                     )
                 except Exception as _e:
                     st.caption(f"Export indisponible : {_e}")
@@ -347,32 +357,62 @@ def main() -> None:
         cible_q["Score Qualite"] = "100"
         qrows.append(cible_q)
 
-        # ── Total general Performance (conforme à la version consolidée, somme des âges = 100%) ──
+        _AGE_KPIS = {
+            "OT préparation <1 mois", "OT préparation 1mois< <3mois", "OT préparation >3 mois",
+            "OT planification <1 mois", "OT planification 1mois< <3mois", "OT planification >3 mois",
+            "OT exécution <1 mois", "OT exécution 1mois< <3mois", "OT exécution >3 mois",
+        }
         tot_p = {"Poste de travail": "Total general", "_t": "total"}
         for k in QK:
-            tot_p[k] = "%.1f" % get_kpi_total(vp_present, k)
+            if k in _AGE_KPIS:
+                vals = []
+                for rw in prows:
+                    if k in rw and rw.get("_t") not in ("cible", "total"):
+                        try:
+                            fv = float(rw[k])
+                            if pd.notna(fv):
+                                vals.append(fv)
+                        except Exception:
+                            pass
+                tot_p[k] = ("%.1f" % (sum(vals) / len(vals))) if vals else "nan"
+            else:
+                cc = tc = 0
+                for rw in prows:
+                    if k in rw and rw.get("_t") not in ("cible", "total"):
+                        try:
+                            fv = float(rw[k])
+                            if pd.notna(fv):
+                                cc += gscore(k, fv, CIBLE.get(k, 100))
+                                tc += 1
+                        except Exception:
+                            pass
+                tot_p[k] = ("%.1f" % ((cc / tc) * 100)) if tc > 0 else "nan"
 
-        tot_p_vals = {k: float(tot_p[k]) for k in QK if k in tot_p}
-        tot_p["Score Performance"] = "%.2f" % score_from_totals_01(tot_p_vals, QK)
+        tot_p["Score Performance"] = "%.2f" % calc_score_cellules(vp, QK)
         prows.append(tot_p)
 
-        # ── Total general Qualité (méthode 0 et 1) ──
         tot_q = {"Poste de travail": "Total general", "_t": "total"}
         for k in PK:
-            tot_q[k] = "%.1f" % get_kpi_total(vp_present, k)
+            cc = tc = 0
+            for rw in qrows:
+                if k in rw and rw.get("_t") not in ("cible", "total"):
+                    try:
+                        fv = float(rw[k])
+                        if pd.notna(fv):
+                            cc += gscore(k, fv, CIBLE.get(k, 100))
+                            tc += 1
+                    except Exception:
+                        pass
+            tot_q[k] = ("%.1f" % ((cc / tc) * 100)) if tc > 0 else "nan"
 
-        tot_q_vals = {k: float(tot_q[k]) for k in PK if k in tot_q}
-        tot_q["Score Qualite"] = "%.2f" % score_from_totals_01(tot_q_vals, PK)
+        tot_q["Score Qualite"] = "%.2f" % calc_score_cellules(vp, PK)
         qrows.append(tot_q)
 
-        _saved_key = f"_saved_{fichier_date}"
-        if not st.session_state.get(_saved_key):
-            save_kpis_to_excel(
-                prows, pcols, qrows, qcols,
-                ano_p_rows, ano_p_cols, ano_q_rows, ano_q_cols,
-                fichier_date,
-            )
-            st.session_state[_saved_key] = True
+        save_kpis_to_excel(
+            prows, pcols, qrows, qcols,
+            ano_p_rows, ano_p_cols, ano_q_rows, ano_q_cols,
+            fichier_date,
+        )
 
         from core.export_excel import charger_historique_depuis_github
         hist_df, _hist_msg = charger_historique_depuis_github()
@@ -467,63 +507,48 @@ def main() -> None:
 
         tabs = st.tabs([
             "🏠 Tableau de Bord",
-            "📈 Performance",
-            "✅ Qualite",
+            "📊 Performance / Qualité",
             "📂 Backlog",
             "📋 Suivi & Evolution",
             "🎯 Plan d'action",
-            "🔎 Audit des calculs KPI",
-            "🤖 Assistant IA",
-            "🔄 Fréquence Maintenance",
             "🦺 Suivi HSE",
+            "🔄 Fréquence Maintenance",
         ])
 
         with tabs[0]:
-            render_dashboard_tab(vp, pscores, qscores, pa, qa)
+            render_dashboard_tab(vp, pscores, qscores, pa, qa, hist_df)
         with tabs[1]:
-            render_performance_tab(prows, pcols, ano_p_rows, ano_p_cols, pa)
+            render_performance_qualite_tab(vp, ckdf, ano_map, anomaly_dfs)
         with tabs[2]:
-            render_qualite_tab(qrows, qcols, ano_q_rows, ano_q_cols, qa)
+            render_backlog_page(dfp, vp)
         with tabs[3]:
-            try:
-                render_backlog_page(dfp, vp, df_toutes_dates=df_period)
-            except TypeError:
-                render_backlog_page(dfp, vp)
-        with tabs[4]:
             n_dates = 0
             if not hist_df.empty and "Date" in hist_df.columns:
                 n_dates = hist_df["Date"].nunique()
 
             with st.expander(f"📁 Historique : {n_dates} date(s) enregistrée(s) — cliquez pour détails", expanded=(n_dates < 2)):
-                st.caption(f"Source : {_hist_msg}")
+                st.caption(f"Source : GitHub — {_hist_msg}")
                 if n_dates < 2:
                     st.info(
                         "ℹ️ Il faut **au moins 2 dates** pour calculer des variations. "
                         "Actuellement, l'historique contient %d date(s).\n\n"
-                        "**L'enregistrement est automatique** : à chaque chargement "
-                        "d'une extraction avec une nouvelle date, la date est "
-                        "ajoutée directement au fichier `kpis.xlsx`." % n_dates
+                        "**L'enregistrement est désormais automatique** : à chaque chargement "
+                        "d'une extraction avec une nouvelle date dans `date.txt`, la date est "
+                        "ajoutée directement à `kpis/indicateurs_kpis.xlsx` sur GitHub — "
+                        "aucune action manuelle n'est nécessaire." % n_dates
                     )
                 else:
                     st.success(
-                        f"✅ {n_dates} dates enregistrées dans `kpis.xlsx`. "
-                        f"Chaque nouvelle extraction (nouvelle date) est ajoutée automatiquement."
+                        f"✅ {n_dates} dates enregistrées sur GitHub. "
+                        f"Chaque nouvelle extraction (nouvelle date dans `date.txt`) est ajoutée automatiquement."
                     )
                 try:
-                    _bytes_hist = None
-                    if os.path.exists("kpis.xlsx"):
-                        with open("kpis.xlsx", "rb") as _f_kpis:
-                            _bytes_hist = _f_kpis.read()
-                    elif os.path.exists("kpis/indicateurs_kpis.xlsx"):
-                        with open("kpis/indicateurs_kpis.xlsx", "rb") as _f_kpis:
-                            _bytes_hist = _f_kpis.read()
-                    else:
-                        from core.github_publish import download_file as _gh_dl
-                        _bytes_hist, _err_hist = _gh_dl("kpis/indicateurs_kpis.xlsx")
+                    from core.github_publish import download_file as _gh_dl
+                    _bytes_hist, _err_hist = _gh_dl("kpis/indicateurs_kpis.xlsx")
                     if _bytes_hist:
                         st.download_button(
-                            "⬇️ Télécharger l'historique complet (kpis.xlsx)",
-                            data=_bytes_hist, file_name="kpis.xlsx",
+                            "⬇️ Télécharger l'historique complet (indicateurs_kpis.xlsx)",
+                            data=_bytes_hist, file_name="indicateurs_kpis.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                             use_container_width=True,
                         )
@@ -534,7 +559,7 @@ def main() -> None:
                 hist_df, var_df, journal_df, top5_df, bot5_df,
                 synth_perf, synth_qual, vp,
             )
-        with tabs[5]:
+        with tabs[4]:
             try:
                 from core.export_pptx import build_presentation
                 pptx_bytes = build_presentation(
@@ -600,46 +625,25 @@ def main() -> None:
                     ckdf, pscores, qscores, ano_map, dfp, avf, now_ts,
                     date_str=fichier_date, postes=list(vp),
                     dry_run=_launch_dry, progress_callback=_on_progress,
-                    dfp_toutes_dates=df_full,
                 )
-                # Sauvegarde de la présentation PowerPoint dans le dossier presentation/
-                try:
-                    from core.export_pptx import build_presentation
-                    _pptx = build_presentation(
-                        vp, ckdf, ano_map, pa, qa, pscores, qscores,
-                        hist_df, fichier_date,
-                    )
-                    if _pptx:
-                        os.makedirs("presentation", exist_ok=True)
-                        _ent = "Maroc_Chimie" if all(str(p).startswith("SF1") for p in vp) else \
-                               ("FEEDS" if all(str(p).startswith("SF2") for p in vp) else "OCP")
-                        with open(os.path.join("presentation", "presentation_kpis.pptx"), "wb") as _f_pptx:
-                            _f_pptx.write(_pptx)
-                        with open(os.path.join("presentation", f"Presentation_KPIs_{_ent}_{fichier_date.replace('/','-')}.pptx"), "wb") as _f_pptx2:
-                            _f_pptx2.write(_pptx)
-                except Exception:
-                    pass
-
                 _progress.progress(1.0, text="Terminé.")
 
                 _ok_pdf = sum(1 for r in _results if r.get("pdf"))
                 _ok_xlsx = sum(1 for r in _results if r.get("xlsx"))
                 _ok_pub = sum(1 for r in _results if r.get("pdf_published"))
-                _ok_saved = sum(1 for r in _results if r.get("pdf_saved") or r.get("pdf"))
 
                 with _status_area.container():
                     if _launch_dry:
                         st.success(
                             f"✅ Génération test terminée : {_ok_pdf}/{len(_results)} PDF, "
-                            f"{_ok_xlsx}/{len(_results)} Excel enregistrés dans `presentation/`."
+                            f"{_ok_xlsx}/{len(_results)} Excel."
                         )
                     else:
                         st.success(
-                            f"✅ Rapports enregistrés avec succès dans le dossier `presentation/` : "
-                            f"{_ok_pdf} PDF, {_ok_xlsx} Excel anomalies et la présentation PowerPoint."
+                            f"✅ {_ok_pub}/{len(_results)} postes publiés sur GitHub "
+                            f"(presentation/<poste>/) — {_ok_pdf} PDF, "
+                            f"{_ok_xlsx} Excel générés."
                         )
-                        if _ok_pub > 0:
-                            st.info(f"☁️ {_ok_pub}/{len(_results)} rapports synchronisés sur GitHub.")
                     with st.expander("Détail par poste"):
                         for r in _results:
                             _icons = "".join([
@@ -721,30 +725,11 @@ def main() -> None:
 
         with tabs[6]:
             try:
-                from pages.audit_kpi import render_audit_kpi_tab
-                render_audit_kpi_tab(df_period, avdf_period, now_ts, df_full=df_period, vp=list(vp), fichier_date=fichier_date)
-            except Exception as _e_aud:
-                st.error(f"Audit des calculs KPI indisponible : {_e_aud}")
-
-        with tabs[7]:
-            try:
-                from ai_assistant import render_ai_assistant
-                _entity = "Maroc Chimie" if all(str(p).startswith("SF1") for p in vp) else \
-                          ("FEEDS" if all(str(p).startswith("SF2") for p in vp) else "OCP — Maroc Chimie & FEEDS")
-                render_ai_assistant(
-                    _entity, vp, pa, qa, pscores, qscores, ano_map,
-                    fichier_date, CIBLE,
-                )
-            except Exception as _e:
-                st.error(f"Assistant IA indisponible : {_e}")
-
-        with tabs[8]:
-            try:
                 render_frequence_maintenance_tab(df_full)
             except Exception as _e:
                 st.error(f"Fréquence de maintenance indisponible : {_e}")
 
-        with tabs[9]:
+        with tabs[5]:
             try:
                 render_suivi_hse_tab(dfp, avis_complet, vp, fichier_date)
             except Exception as _e:
@@ -757,8 +742,5 @@ def main() -> None:
     st.markdown('<div class="footer">Bureau Methodes Maroc Chimie 2026</div>', unsafe_allow_html=True)
 
 
-try:
+if __name__ == "__main__":
     main()
-except Exception as _app_err:
-    st.error(f"❌ Erreur d'exécution de l'application : {_app_err}")
-    st.code(traceback.format_exc(), language="python")
