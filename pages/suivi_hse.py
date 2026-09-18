@@ -30,22 +30,14 @@ STATUTS_CLOTURE = ["TCLO", "CLOT"]
 MOIS_FR = ["janvier", "février", "mars", "avril", "mai", "juin",
            "juillet", "août", "septembre", "octobre", "novembre", "décembre"]
 
-# Statut d'approbation SAP (champ "Statut utilisateur")
 LIBELLE_APPROBATION = {"APRV": "Approuvé", "APRQ": "En attente", "REJT": "Rejeté"}
 
-# Statuts système des avis (SAP)
 DICT_STATUTS_AVIS = {
-    "AOUV": "OUVERT",
-    "AENC": "EN COURS",
-    "ACLO": "CLÔTURÉ",
-    "OAFF": "AFFICHÉ",
-    "AIMP": "IMPRIMÉ",
-    "TSUP": "STATUT TECHNIQUE SUPPLÉMENTAIRE",
-    "TAMO": "TRAITEMENT COMPLÉMENTAIRE",
-    "MARC": "MARQUÉ POUR SUPPRESSION",
+    "AOUV": "OUVERT", "AENC": "EN COURS", "ACLO": "CLÔTURÉ", "OAFF": "AFFICHÉ",
+    "AIMP": "IMPRIMÉ", "TSUP": "STATUT TECHNIQUE SUPPLÉMENTAIRE",
+    "TAMO": "TRAITEMENT COMPLÉMENTAIRE", "MARC": "MARQUÉ POUR SUPPRESSION",
 }
 
-# Natures de fuites et motifs de détection (ordre de priorité des expressions)
 NATURES_FUITES_PATTERNS = [
     ("PRODUIT CHIMIQUE", r"\bproduits?\s+chimiques?\b|\bchimiques?\b"),
     ("AMMONIAQUE", r"\b(ammoniaque|ammoniac|nh3)\b"),
@@ -64,17 +56,9 @@ NATURES_FUITES_PATTERNS = [
     ("LIQUIDE", r"\bliquides?\b"),
 ]
 
-# ── Palette harmonisée verts / bleus ──
-NAVY = "#1E3A5F"
-BLUE = "#2563EB"
-GREEN = "#10B981"
-TEAL = "#0D9488"
-SKY = "#0EA5E9"
-EMERAUDE = "#059669"
-CYAN = "#06B6D4"
-INDIGO = "#4F46E5"
-GREY = "#64748B"
-DARK = "#1E293B"
+NAVY = "#1E3A5F"; BLUE = "#2563EB"; GREEN = "#10B981"; TEAL = "#0D9488"
+SKY = "#0EA5E9"; EMERAUDE = "#059669"; CYAN = "#06B6D4"; INDIGO = "#4F46E5"
+GREY = "#64748B"; DARK = "#1E293B"
 
 PALETTE_STATUT = {"TCLO": GREEN, "CLOT": EMERAUDE, "CRÉÉ": SKY, "CREE": SKY,
                    "LANC": INDIGO, "PART": TEAL}
@@ -82,45 +66,18 @@ PALETTE_APPROBATION = {"Approuvé": GREEN, "En attente": SKY, "Rejeté": INDIGO}
 PALETTE_OMS = {"Thermographie": BLUE, "Vibration": TEAL}
 PALETTE_LIEN = {"Avec avis": BLUE, "Sans avis": GREY}
 
-# Palette spécifique natures de fuites
 PALETTE_NATURES = {
-    "EAU": "#0EA5E9",
-    "GAZ": "#6366F1",
-    "HUILE": "#D97706",
-    "VAPEUR": "#64748B",
-    "ACIDE": "#EF4444",
-    "AIR": "#06B6D4",
-    "FUEL": "#78350F",
-    "HYDROCARBURE": "#B45309",
-    "GRAISSE": "#A16207",
-    "SOUDE": "#8B5CF6",
-    "AMMONIAQUE": "#14B8A6",
-    "CONDENSAT": "#38BDF8",
-    "BOUE": "#713F12",
-    "PRODUIT CHIMIQUE": "#F43F5E",
-    "LIQUIDE": "#3B82F6",
-    "FUITE NON DÉFINIE": "#94A3B8",
+    "EAU": "#0EA5E9", "GAZ": "#6366F1", "HUILE": "#D97706", "VAPEUR": "#64748B",
+    "ACIDE": "#EF4444", "AIR": "#06B6D4", "FUEL": "#78350F", "HYDROCARBURE": "#B45309",
+    "GRAISSE": "#A16207", "SOUDE": "#8B5CF6", "AMMONIAQUE": "#14B8A6",
+    "CONDENSAT": "#38BDF8", "BOUE": "#713F12", "PRODUIT CHIMIQUE": "#F43F5E",
+    "LIQUIDE": "#3B82F6", "FUITE NON DÉFINIE": "#94A3B8",
 }
 
-# Palette statuts unifiés avis (Clôturé, En cours, Rejeté)
-PALETTE_STATUT_UNIFIE = {
-    "Clôturé": "#10B981",   # Vert
-    "En cours": "#0EA5E9",  # Bleu ciel
-    "Rejeté": "#EF4444",    # Rouge
-}
+PALETTE_STATUT_UNIFIE = {"Clôturé": "#10B981", "En cours": "#0EA5E9", "Rejeté": "#EF4444"}
 
-
-# ═══════════════════════════════════════════════════════════════════
-# Utilitaires
-# ═══════════════════════════════════════════════════════════════════
 
 def _classifier_statut(statut_sys, statut_util=None):
-    """
-    Règle unifiée demandée :
-      - 'En cours' si AOUV (ouvert) ou AENC (en cours)
-      - 'Clôturé' si ACLO (et non rejeté)
-      - 'Rejeté' pour tout le reste (et si statut utilisateur REJT)
-    """
     s_u = str(statut_util).strip().upper().split()[0] if statut_util and str(statut_util).lower() not in ["nan", "none"] else ""
     s_s = str(statut_sys).strip().upper().split()[0] if statut_sys and str(statut_sys).lower() not in ["nan", "none"] else ""
     if s_u == "REJT":
@@ -136,35 +93,25 @@ def _statut_court(serie):
 
 
 def _regrouper_atelier(poste):
-    """Regroupe les postes de travail en ateliers selon les règles définies."""
     if poste is None:
         return "AUTRE"
     p = str(poste).strip()
     if not p or p.lower() in ["nan", "none"]:
         return "AUTRE"
     p_upper = p.upper()
-
     if "GCMC" in p_upper or "GCFD" in p_upper:
         return "AUTRE"
-
     for code in ("TSP", "REX", "MCP", "DCP", "PP1", "PP2", "PS3", "PS4"):
         if code in p_upper:
             return code
-
-    # CU -> PC
     if re.search(r'(?:^|[\s\-_]|[EMRI])CU(?:$|[\s\-_0-9])', p_upper) or re.search(r'\bCU\b', p_upper):
         return "PC"
-
-    # UT -> CENTRAL
     if re.search(r'(?:^|[\s\-_]|[EMRI])UT(?:$|[\s\-_0-9])', p_upper) or re.search(r'\bUT\b', p_upper):
         return "CENTRAL"
-
     return p
 
 
-
 def _analyser_nature(txt):
-    """Extrait la nature d'une fuite à partir du texte descriptif."""
     if not txt:
         return "FUITE NON DÉFINIE"
     t = str(txt).lower()
@@ -175,7 +122,6 @@ def _analyser_nature(txt):
 
 
 def _extraire_premier_statut(statut_sys):
-    """Extrait uniquement le premier code du Statut système (avant premier espace)."""
     if statut_sys is None:
         return "NON RENSEIGNÉ"
     txt = str(statut_sys).strip()
@@ -185,7 +131,6 @@ def _extraire_premier_statut(statut_sys):
 
 
 def _libelle_statut_complet(code):
-    """Convertit un code statut système en libellé explicite avec son code."""
     if not code or code == "NON RENSEIGNÉ":
         return "NON RENSEIGNÉ"
     libelle = DICT_STATUTS_AVIS.get(code, code)
@@ -236,7 +181,6 @@ def _carte(col, label, valeur, couleur, sous=""):
 
 
 def _pie(donnees, titre, palette=None, seuil=7):
-    """Camembert avec éclatement automatique des petits secteurs."""
     donnees = {k: float(v) for k, v in donnees.items() if v and float(v) > 0}
     if not donnees:
         return None
@@ -266,10 +210,6 @@ def _pie(donnees, titre, palette=None, seuil=7):
 
 
 def _bar(pivot, titre, palette=None, xlabel="Nombre", max_postes=12):
-    """Barres empilées horizontales par poste de travail, triées par total.
-    Limité aux `max_postes` postes les plus représentés : au-delà, les
-    barres deviennent trop fines pour rester lisibles, et les postes
-    marginaux n'apportent pas d'information exploitable."""
     if pivot is None or pivot.empty:
         return None
     totaux = pivot.sum(axis=1).sort_values()
@@ -314,7 +254,6 @@ def _bar(pivot, titre, palette=None, xlabel="Nombre", max_postes=12):
 
 
 def _bar_statuts_avec_pct(pivot, titre, palette=None, xlabel="Nombre d'avis", max_postes=25):
-    """Barres empilées horizontales des statuts d'avis par atelier avec affichage du % En cours."""
     if pivot is None or pivot.empty:
         return None
     totaux = pivot.sum(axis=1).sort_values()
@@ -323,11 +262,9 @@ def _bar_statuts_avec_pct(pivot, titre, palette=None, xlabel="Nombre d'avis", ma
         totaux = totaux.tail(max_postes)
         titre = f"{titre} (top {max_postes} sur {n_total})"
     pivot = pivot.loc[totaux.index]
-
     ordre_cols = [c for c in ["Clôturé", "En cours", "Rejeté"] if c in pivot.columns]
     autres = [c for c in pivot.columns if c not in ordre_cols]
     pivot = pivot[ordre_cols + autres]
-
     hauteur = max(2.8, 0.42 * len(pivot) + 1.1)
     fig, ax = plt.subplots(figsize=(9, hauteur), dpi=170)
     gauche = np.zeros(len(pivot))
@@ -365,7 +302,6 @@ def _bar_statuts_avec_pct(pivot, titre, palette=None, xlabel="Nombre d'avis", ma
 
 
 def _bar_fuites_par_type(pivot, titre="Ventilation des avis fuites par type (Clôturé / En cours / %)", palette=None, max_types=18):
-    """Barres empilées horizontales par type d'avis fuites avec affichage du % clôturé et en cours."""
     if pivot is None or pivot.empty:
         return None
     totaux = pivot.sum(axis=1).sort_values()
@@ -374,11 +310,9 @@ def _bar_fuites_par_type(pivot, titre="Ventilation des avis fuites par type (Cl�
         totaux = totaux.tail(max_types)
         titre = f"{titre} (top {max_types} sur {n_total})"
     pivot = pivot.loc[totaux.index]
-
     ordre_cols = [c for c in ["Clôturé", "En cours", "Rejeté"] if c in pivot.columns]
     autres = [c for c in pivot.columns if c not in ordre_cols]
     pivot = pivot[ordre_cols + autres]
-
     hauteur = max(2.8, 0.42 * len(pivot) + 1.1)
     fig, ax = plt.subplots(figsize=(9.5, hauteur), dpi=170)
     gauche = np.zeros(len(pivot))
@@ -417,24 +351,12 @@ def _bar_fuites_par_type(pivot, titre="Ventilation des avis fuites par type (Cl�
     return buf
 
 
-# ═══════════════════════════════════════════════════════════════════
-# Sections
-# ═══════════════════════════════════════════════════════════════════
-
-
 @st.cache_data(show_spinner="Analyse HSE en cours...", max_entries=8)
 def _calculer_sections_hse(_dfp, _avf, vp_tuple, date_str, sel_annee, sel_mois, sel_sem, sel_atelier="Tous"):
-    """
-    Calcule les découpages thématiques, l'analyse des fuites et TOUS les graphiques de la page.
-
-    MISE EN CACHE : la clé est constituée de la date d'extraction
-    (date.txt) et des filtres actifs (période et atelier).
-    """
     ot = _ajouter_periode(_dfp.copy(), "Créé le")
     avis = _ajouter_periode(_avf.copy(), "Créé le") if _avf is not None and not _avf.empty else pd.DataFrame()
     vp = [p for p in vp_tuple if not re.search("GCMC|GCFD", str(p), re.IGNORECASE)]
 
-    # Exclusion stricte des postes GCMC / GCFD
     col_p_ot = next((c for c in ot.columns if "poste" in str(c).lower() and "trav" in str(c).lower()), "Poste travail princ.")
     col_p_av = next((c for c in avis.columns if "poste" in str(c).lower() and "trav" in str(c).lower()), "Poste travail princ.") if not avis.empty else "Poste travail princ."
 
@@ -443,7 +365,6 @@ def _calculer_sections_hse(_dfp, _avf, vp_tuple, date_str, sel_annee, sel_mois, 
     if not avis.empty and col_p_av in avis.columns:
         avis = avis[~avis[col_p_av].astype(str).str.contains("GCMC|GCFD", case=False, na=False)].copy()
 
-    # 1. Sections générales HSE : filtrées par la période ET par les postes visibles vp (sans filtre atelier)
     ot_gen = _filtrer_periode(ot, sel_annee, sel_mois, sel_sem)
     avis_gen = avis[avis[col_p_av].isin(vp)].copy() if (not avis.empty and col_p_av in avis.columns) else pd.DataFrame()
     avis_gen = _filtrer_periode(avis_gen, sel_annee, sel_mois, sel_sem)
@@ -464,7 +385,6 @@ def _calculer_sections_hse(_dfp, _avf, vp_tuple, date_str, sel_annee, sel_mois, 
     avis_zi = avis_gen[avis_gen["Type d'avis"] == "ZI"] if not avis_gen.empty and "Type d'avis" in avis_gen.columns else pd.DataFrame()
     avis_zh = avis_gen[avis_gen["Type d'avis"] == "ZH"] if not avis_gen.empty and "Type d'avis" in avis_gen.columns else pd.DataFrame()
 
-    # 2. Section Analyse des avis types fuites : SANS filtre de poste de travail vp, AVEC filtre atelier sel_atelier
     avis_fuites_source = avis.copy()
     avis_fuites_source = _filtrer_periode(avis_fuites_source, sel_annee, sel_mois, sel_sem)
 
@@ -498,7 +418,6 @@ def _calculer_sections_hse(_dfp, _avf, vp_tuple, date_str, sel_annee, sel_mois, 
 
     df_fuites = avis_fuites_source[avis_fuites_source["_EstFuite"] == True].copy() if not avis_fuites_source.empty else pd.DataFrame()
 
-    # Pré-calcul de tous les graphiques (l'opération la plus coûteuse)
     buffers = {}
     for df, cle, couleur, titre in [(avis_zi, "zi", BLUE, "Avis Inspection"),
                                       (avis_zh, "zh", TEAL, "Avis HSE")]:
@@ -520,35 +439,29 @@ def _calculer_sections_hse(_dfp, _avf, vp_tuple, date_str, sel_annee, sel_mois, 
         if p2:
             buffers[f"pie_ot_{cle}"] = p2
 
-    # ── Graphiques Avis Fuites ──
     if not df_fuites.empty:
-        # G1 : Répartition des avis types fuites par statut (Pie Chart) — À LA PLACE DE bar_avis_atelier
         counts_fuites_st = df_fuites["_StatutCat"].value_counts().to_dict()
         p1 = _pie(counts_fuites_st, "Répartition des avis types fuites par statut", PALETTE_STATUT_UNIFIE)
         if p1:
             buffers["pie_fuites_statut"] = p1
 
-        # G2 : Nombre d'avis fuites par Atelier
         if "_Atelier" in df_fuites.columns:
             piv_fuites = df_fuites.groupby("_Atelier").size().to_frame(name="Avis Fuites")
             b2 = _bar(piv_fuites, "Nombre d'avis fuites par Atelier", {"Avis Fuites": "#D97706"}, xlabel="Nombre d'avis fuites", max_postes=25)
             if b2:
                 buffers["bar_fuites_atelier"] = b2
 
-        # G3 : Ventilation des avis fuites par type (Clôturé / En cours / %)
         if "_NatureFuite" in df_fuites.columns:
             piv_fuites_type = pd.crosstab(df_fuites["_NatureFuite"], df_fuites["_StatutCat"])
             b3 = _bar_fuites_par_type(piv_fuites_type, "Ventilation des avis fuites par type (Clôturé / En cours / %)", PALETTE_STATUT_UNIFIE)
             if b3:
                 buffers["bar_fuites_type"] = b3
 
-        # G4 : Statuts des avis fuites par Atelier (avec % en cours)
         if "_Atelier" in df_fuites.columns:
             piv_statuts_at = pd.crosstab(df_fuites["_Atelier"], df_fuites["_StatutCat"])
             b4 = _bar_statuts_avec_pct(piv_statuts_at, "Statuts des avis fuites par Atelier (avec % en cours)", PALETTE_STATUT_UNIFIE, xlabel="Nombre d'avis fuites", max_postes=25)
             if b4:
                 buffers["bar_statuts_fuites_atelier"] = b4
-
 
     for df, cle, titre in [
             (ot_securite, "secu", "OT Sécurité"),
@@ -585,17 +498,6 @@ def _calculer_sections_hse(_dfp, _avf, vp_tuple, date_str, sel_annee, sel_mois, 
 
 @st.cache_data(show_spinner=False, ttl=120)
 def _charger_documents_joints(vp_tuple, chemin="documents_joints.xlsx"):
-    """
-    Charge le fichier de référence des documents joints par poste de
-    travail. Ce fichier est la SOURCE DE VÉRITÉ de cette information :
-    l'application ne fait que l'afficher, elle ne la calcule pas (la
-    donnée n'existe pas dans les extractions SAP disponibles).
-
-    Robustesse : la colonne de comptage est entièrement vide au départ,
-    ce qui peut faire échouer une lecture stricte. On accepte donc
-    plusieurs variantes de nom de colonne, et on recrée la colonne si
-    elle est absente. Retourne (DataFrame, message_diagnostic).
-    """
     if not os.path.exists(chemin):
         return None, f"Fichier `{chemin}` introuvable à la racine du dépôt."
     try:
@@ -603,14 +505,12 @@ def _charger_documents_joints(vp_tuple, chemin="documents_joints.xlsx"):
     except Exception as e:
         return None, f"Lecture impossible : {e}"
 
-    # Détection souple du nom de la colonne des postes
     col_poste = next((c for c in df.columns
                       if "poste" in str(c).lower()), None)
     if col_poste is None:
         return None, (f"Colonne des postes introuvable. Colonnes présentes : "
                       f"{list(df.columns)}")
 
-    # Détection souple de la colonne de comptage (créée si absente)
     col_nb = next((c for c in df.columns
                    if "doc" in str(c).lower() and c != col_poste), None)
     if col_nb is None:
@@ -635,10 +535,39 @@ def _charger_documents_joints(vp_tuple, chemin="documents_joints.xlsx"):
     return resultat, msg
 
 
-def _section_avis(df, titre, icone, couleur_principale, buffers, cle):
-    """Affiche une section d'avis. Les graphiques sont déjà calculés et
-    mis en cache par _calculer_sections_hse — cette fonction ne fait que
-    les afficher."""
+def _export_excel_bytes(df, nom_feuille="Données"):
+    """AJOUTÉ (demande explicite) : exporte un DataFrame en bytes .xlsx
+    pour le bouton de téléchargement Excel de chaque section."""
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        (df if not df.empty else pd.DataFrame({"Info": ["Aucune donnée pour la sélection actuelle."]})).to_excel(
+            writer, sheet_name=str(nom_feuille)[:31], index=False
+        )
+    buf.seek(0)
+    return buf.getvalue()
+
+
+def _bouton_excel_section(df, cle, libelle_fichier, date_str):
+    """AJOUTÉ (demande explicite) : bouton de téléchargement Excel des
+    données brutes d'une section — l'image du graphique déjà affichée
+    sert d'aperçu, ce bouton donne accès aux données complètes."""
+    st.download_button(
+        f"⬇️ Télécharger les données (Excel) — {len(df)} ligne(s)",
+        data=_export_excel_bytes(df, libelle_fichier),
+        file_name=f"{cle}_{str(date_str).replace('/', '-')}.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        use_container_width=True,
+        key=f"dl_excel_{cle}",
+    )
+
+
+def _section_active(nom, sections_actives):
+    """AJOUTÉ (demande explicite) : vérifie si une section doit être
+    affichée selon la sélection du filtre dynamique."""
+    return nom in sections_actives
+
+
+def _section_avis(df, titre, icone, couleur_principale, buffers, cle, date_str=""):
     st.markdown(f"### {icone} {titre}")
     if df.empty:
         st.info(f"Aucun {titre.lower()} sur le périmètre et la période sélectionnés.")
@@ -663,9 +592,10 @@ def _section_avis(df, titre, icone, couleur_principale, buffers, cle):
             if buffers.get(k):
                 st.image(buffers[k], use_container_width=True)
 
+    _bouton_excel_section(df, cle, titre, date_str)
 
-def _section_ot(df, titre, icone, couleur_principale, buffers, cle):
-    """Affiche une section d'ordres de travail (graphiques déjà en cache)."""
+
+def _section_ot(df, titre, icone, couleur_principale, buffers, cle, date_str=""):
     st.markdown(f"### {icone} {titre}")
     if df.empty:
         st.info(f"Aucun ordre de travail « {titre} » sur le périmètre et la période sélectionnés.")
@@ -690,9 +620,10 @@ def _section_ot(df, titre, icone, couleur_principale, buffers, cle):
             if buffers.get(k):
                 st.image(buffers[k], use_container_width=True)
 
+    _bouton_excel_section(df, cle, titre, date_str)
+
 
 def _tableau_avis_fuites_par_atelier_et_type(df_fuites):
-    """Construit le tableau croisé : pour chaque atelier, le nombre des avis fuites par type/nature."""
     if df_fuites is None or df_fuites.empty:
         return pd.DataFrame(columns=["Atelier", "Total Avis Fuites"])
 
@@ -705,19 +636,13 @@ def _tableau_avis_fuites_par_atelier_et_type(df_fuites):
     if ct.empty:
         return pd.DataFrame(columns=["Atelier", "Total Avis Fuites"])
 
-    # Trier les colonnes (natures) par volume décroissant
     col_totals = ct.sum(axis=0).sort_values(ascending=False)
     ct = ct[col_totals.index]
-
-    # Ajouter colonne Total Avis Fuites
     ct["Total Avis Fuites"] = ct.sum(axis=1)
-
-    # Trier les lignes (ateliers) par Total Avis Fuites décroissant
     ct = ct.sort_values(by="Total Avis Fuites", ascending=False)
 
     df_res = ct.reset_index().rename(columns={col_at: "Atelier"})
 
-    # Ligne TOTAL GÉNÉRAL
     tot_row = {"Atelier": "TOTAL GÉNÉRAL"}
     for col in df_res.columns:
         if col != "Atelier":
@@ -728,7 +653,6 @@ def _tableau_avis_fuites_par_atelier_et_type(df_fuites):
 
 
 def _html_tableau_avis_fuites(df_tab):
-    """Génère un affichage HTML soigné et responsive pour le tableau croisé Atelier x Type d'avis fuites."""
     if df_tab.empty:
         return '<div style="padding:10px;color:#64748B;">Aucun avis fuite à afficher.</div>'
     cols = list(df_tab.columns)
@@ -762,8 +686,7 @@ def _html_tableau_avis_fuites(df_tab):
     return h
 
 
-def _section_analyse_avis_fuites(df_fuites, buffers):
-    """Section d'analyse des avis types fuites."""
+def _section_analyse_avis_fuites(df_fuites, buffers, date_str=""):
     st.markdown("### 💧 Analyse des avis types fuites")
     if df_fuites is None or df_fuites.empty:
         st.info("Aucun avis fuite disponible sur la période et l'atelier sélectionnés.")
@@ -787,7 +710,6 @@ def _section_analyse_avis_fuites(df_fuites, buffers):
 
     st.markdown("<div style='height: 14px;'></div>", unsafe_allow_html=True)
 
-    # Ligne 1 : Graphique 1 (Répartition des avis types fuites par statut) & Graphique 2 (Nombre d'avis fuites par Atelier)
     g1, g2 = st.columns([2, 3])
     if buffers.get("pie_fuites_statut"):
         g1.image(buffers["pie_fuites_statut"], use_container_width=True)
@@ -797,14 +719,12 @@ def _section_analyse_avis_fuites(df_fuites, buffers):
     st.markdown("---")
     st.markdown("#### 🔍 Analyse & Répartition par Type d'Avis Fuites")
 
-    # Ligne 2 : Graphique 3 (Ventilation par type) & Graphique 4 (Statuts par Atelier avec % en cours)
     g3, g4 = st.columns([3, 3])
     if buffers.get("bar_fuites_type"):
         g3.image(buffers["bar_fuites_type"], use_container_width=True)
     if buffers.get("bar_statuts_fuites_atelier"):
         g4.image(buffers["bar_statuts_fuites_atelier"], use_container_width=True)
 
-    # Ligne 3 : Tableau croisé Atelier x Type d'avis fuites
     st.markdown("##### 📊 Nombre des avis fuites par atelier et par type")
     tab_croise = _tableau_avis_fuites_par_atelier_et_type(df_fuites)
     if not tab_croise.empty:
@@ -812,11 +732,8 @@ def _section_analyse_avis_fuites(df_fuites, buffers):
     else:
         st.info("Aucun avis fuite à afficher.")
 
+    _bouton_excel_section(df_fuites, "fuites", "Analyse fuites", date_str)
 
-
-# ═══════════════════════════════════════════════════════════════════
-# Rapport PDF
-# ═══════════════════════════════════════════════════════════════════
 
 def _libelle_periode(sel_annee, sel_mois_lbl, sel_sem, sel_atelier="Tous"):
     parties = []
@@ -882,9 +799,6 @@ def _generer_rapport_pdf(buffers, sections_stats, libelle, date_str, nb_postes):
         return t
 
     def _img(buf, largeur_cm, hauteur_max_cm=11.5):
-        """Insère une image en respectant son ratio, MAIS en la bornant en
-        hauteur : un graphique à barres comportant beaucoup de postes peut
-        sinon dépasser la hauteur utile de la page (erreur ReportLab)."""
         buf.seek(0)
         w, h = PILImage.open(buf).size
         buf.seek(0)
@@ -929,16 +843,7 @@ def _generer_rapport_pdf(buffers, sections_stats, libelle, date_str, nb_postes):
     return buf.getvalue()
 
 
-# ═══════════════════════════════════════════════════════════════════
-# Page principale
-# ═══════════════════════════════════════════════════════════════════
-
 def render_suivi_hse_tab(dfp, avf, vp, date_str=""):
-    """
-    dfp : DataFrame des OT déjà filtré par la sidebar.
-    avf : DataFrame des avis déjà chargé (fichier principal avis.xlsx).
-    vp  : liste des postes de travail visibles selon la sidebar.
-    """
     st.markdown("## 🦺 Suivi HSE")
     st.caption("Avis d'inspection et HSE, ordres de travail sécurité, OMS et contrôle structure.")
 
@@ -949,7 +854,6 @@ def render_suivi_hse_tab(dfp, avf, vp, date_str=""):
     col_p_ot = next((c for c in dfp.columns if "poste" in str(c).lower() and "trav" in str(c).lower()), "Poste travail princ.")
     col_p_av = next((c for c in avf.columns if "poste" in str(c).lower() and "trav" in str(c).lower()), "Poste travail princ.") if avf is not None and not avf.empty else None
 
-    # Exclusion systématique de SF1-GCMC et SF2-GCFD / SF2-GCMC
     if col_p_ot in dfp.columns:
         dfp = dfp[~dfp[col_p_ot].astype(str).str.contains("GCMC|GCFD", case=False, na=False)].copy()
     if col_p_av and col_p_av in avf.columns:
@@ -959,7 +863,6 @@ def render_suivi_hse_tab(dfp, avf, vp, date_str=""):
     ot = _ajouter_periode(dfp.copy(), "Créé le")
     avis = _ajouter_periode(avf.copy(), "Créé le") if avf is not None and not avf.empty else pd.DataFrame()
 
-    # ── Filtres période & atelier ──
     st.markdown("#### 🎛️ Filtres")
     st.caption("Ces filtres s'appliquent EN PLUS des filtres division / poste / période du panneau latéral.")
     sources = [s for s in (ot.get("_Année"), avis.get("_Année")) if s is not None]
@@ -967,7 +870,6 @@ def render_suivi_hse_tab(dfp, avf, vp, date_str=""):
     sources_s = [s for s in (ot.get("_Semaine"), avis.get("_Semaine")) if s is not None]
     semaines = sorted({s for s in pd.concat(sources_s).dropna().unique()}) if sources_s else []
 
-    # Ateliers disponibles sur le périmètre (sans GCMC/GCFD)
     postes_ot = dfp[col_p_ot].dropna().unique() if col_p_ot in dfp.columns else []
     postes_av = avf[col_p_av].dropna().unique() if (col_p_av and col_p_av in avf.columns) else []
     tous_ateliers = sorted({
@@ -982,27 +884,45 @@ def render_suivi_hse_tab(dfp, avf, vp, date_str=""):
     sel_sem = f3.selectbox("Semaine", ["Toutes"] + list(semaines), key="hse_sem")
     sel_atelier = f4.selectbox("Atelier", ["Tous"] + tous_ateliers, key="hse_atelier")
 
-    # ── Calcul (mis en cache : ne se relance que si date.txt ou les
-    #    filtres changent — voir _calculer_sections_hse) ──
+    # ── Filtre dynamique des sections a afficher (demande explicite) ──
+    # Par defaut, seules 2 sections sont affichees (au lieu des 7) pour
+    # alleger la page — l'utilisateur choisit celles qu'il veut voir.
+    TOUTES_SECTIONS = [
+        "Avis Inspection", "Analyse des avis fuites", "Avis HSE",
+        "OT Sécurité", "OMS Thermographie", "OMS Vibration", "Contrôle structure",
+    ]
+    sections_actives = st.multiselect(
+        "🧭 Sections à afficher",
+        TOUTES_SECTIONS,
+        default=["Avis Inspection", "Avis HSE"],
+        key="hse_sections_actives",
+    )
+
     res = _calculer_sections_hse(dfp, avf, tuple(vp), date_str, sel_annee, sel_mois, sel_sem, sel_atelier)
     buffers = res["buffers"]
 
-    st.markdown("---")
-    _section_avis(res["avis_zi"], "Avis Inspection", "🔍", BLUE, buffers, "zi")
-    st.markdown("---")
-    _section_analyse_avis_fuites(res["df_fuites"], buffers)
-    st.markdown("---")
-    _section_avis(res["avis_zh"], "Avis HSE", "🦺", TEAL, buffers, "zh")
-    st.markdown("---")
-    _section_ot(res["ot_securite"], "OT Sécurité", "🛡️", EMERAUDE, buffers, "secu")
-    st.markdown("---")
-    _section_ot(res["ot_oms_therm"], "OMS Thermographie", "🌡️", BLUE, buffers, "therm")
-    st.markdown("---")
-    _section_ot(res["ot_oms_vib"], "OMS Vibration", "📳", TEAL, buffers, "vib")
-    st.markdown("---")
-    _section_ot(res["ot_structure"], "Contrôle structure", "🏗️", CYAN, buffers, "struct")
+    if "Avis Inspection" in sections_actives:
+        st.markdown("---")
+        _section_avis(res["avis_zi"], "Avis Inspection", "🔍", BLUE, buffers, "zi", date_str)
+    if "Analyse des avis fuites" in sections_actives:
+        st.markdown("---")
+        _section_analyse_avis_fuites(res["df_fuites"], buffers, date_str)
+    if "Avis HSE" in sections_actives:
+        st.markdown("---")
+        _section_avis(res["avis_zh"], "Avis HSE", "🦺", TEAL, buffers, "zh", date_str)
+    if "OT Sécurité" in sections_actives:
+        st.markdown("---")
+        _section_ot(res["ot_securite"], "OT Sécurité", "🛡️", EMERAUDE, buffers, "secu", date_str)
+    if "OMS Thermographie" in sections_actives:
+        st.markdown("---")
+        _section_ot(res["ot_oms_therm"], "OMS Thermographie", "🌡️", BLUE, buffers, "therm", date_str)
+    if "OMS Vibration" in sections_actives:
+        st.markdown("---")
+        _section_ot(res["ot_oms_vib"], "OMS Vibration", "📳", TEAL, buffers, "vib", date_str)
+    if "Contrôle structure" in sections_actives:
+        st.markdown("---")
+        _section_ot(res["ot_structure"], "Contrôle structure", "🏗️", CYAN, buffers, "struct", date_str)
 
-    # ── Documents joints par poste de travail ──
     st.markdown("---")
     st.markdown("### 📎 Documents joints par poste de travail")
     tab_docs, msg_docs = _charger_documents_joints(tuple(vp))
@@ -1024,7 +944,6 @@ def render_suivi_hse_tab(dfp, avf, vp, date_str=""):
         )
         st.dataframe(tab_docs, use_container_width=True, hide_index=True, height=320)
 
-    # ── Rapport PDF ──
     st.markdown("---")
     st.markdown("#### 📄 Rapport de synthèse")
     libelle = _libelle_periode(sel_annee, sel_mois_lbl, sel_sem, sel_atelier)
