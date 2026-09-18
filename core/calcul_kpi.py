@@ -107,6 +107,76 @@ def match_exact_token(statut, codes: set) -> bool:
 # Calcul principal des KPI
 # ──────────────────────────────────────────────
 
+def age_category_from_date(date_series: pd.Series, now_ts) -> pd.Series:
+    """
+    Calcule l'âge à partir de la Date de début planifiée.
+
+    Règles :
+      < 1 mois       : âge < 30 jours
+      1 à < 3 mois   : 30 <= âge < 90 jours
+      > 3 mois       : âge >= 90 jours
+
+    Les dates inconnues restent dans <1 mois afin de ne pas exclure
+    les OT du total.
+    """
+    dates = pd.to_datetime(date_series, errors="coerce")
+    age_days = (pd.Timestamp(now_ts) - dates).dt.days
+
+    return pd.Series(
+        np.select(
+            [
+                age_days.isna(),
+                age_days < 30,
+                (age_days >= 30) & (age_days < 90),
+                age_days >= 90,
+            ],
+            [
+                "<1 mois",
+                "<1 mois",
+                "1 mois < <3 mois",
+                ">3 mois",
+            ],
+            default="<1 mois",
+        ),
+        index=date_series.index,
+    )
+
+
+def build_age_table(df_age: pd.DataFrame, age_col: str, posts: list) -> pd.DataFrame:
+    """Construit les effectifs et pourcentages d'âge pour tous les OT du périmètre."""
+    if df_age.empty:
+        out = pd.DataFrame(index=posts)
+        for c in ["<1 mois", "1 mois < <3 mois", ">3 mois"]:
+            out[c] = 0
+    else:
+        out = pd.pivot_table(
+            df_age,
+            index="Poste travail princ.",
+            columns=age_col,
+            values="Ordre",
+            aggfunc="count",
+            fill_value=0,
+        ).reindex(posts, fill_value=0)
+
+        for c in ["<1 mois", "1 mois < <3 mois", ">3 mois"]:
+            if c not in out.columns:
+                out[c] = 0
+
+    out = out[["<1 mois", "1 mois < <3 mois", ">3 mois"]].copy()
+    out["Total"] = out[["<1 mois", "1 mois < <3 mois", ">3 mois"]].sum(axis=1)
+
+    # Les trois KPI représentent les proportions réelles.
+    # Leur somme = 100 % lorsque Total > 0.
+    out["score_<1"] = np.where(
+        out["Total"] == 0, 100.0, out["<1 mois"] / out["Total"] * 100
+    )
+    out["score_1_3"] = np.where(
+        out["Total"] == 0, 0.0, out["1 mois < <3 mois"] / out["Total"] * 100
+    )
+    out["score_>3"] = np.where(
+        out["Total"] == 0, 0.0, out[">3 mois"] / out["Total"] * 100
+    )
+    return out
 def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
               df_toutes_dates: pd.DataFrame = None) -> dict:
     """
@@ -134,35 +204,6 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     an["TAUX_REALISATION_CORRECTIF/PT"] = np.where(
         an["TOTAL_OT"] == 0, 100.0, ckpi(an["OT_CLOTURES"], an["TOTAL_OT"])
     )
-
-    # ── Âge Exécution ──
-    # Périmètre : TOUS les OT ZCOR lancés avec SOPL.
-    # Important : les OT déjà exécutés ET les OT non exécutés sont conservés
-    # dans le total, afin que la répartition par âge représente 100 % du
-    # stock lancé + SOPL.
-    _statut_lanc_ex = (
-        df_all["Statut système"].fillna("").astype(str).str.contains("LANC", case=False, na=False)
-        | df_all["Statut OT"].eq("LANC")
-    )
-    _contient_sopl_ex = (
-        (df_all["Contient SOPL"] == 1) if "Contient SOPL" in df_all.columns
-        else df_all["Statut utilisateur"].fillna("").astype(str).str.contains("SOPL", case=False, na=False)
-    )
-    _zcor_ex = (df_all["Type d'ordre"] == "ZCOR") & _statut_lanc_ex & _contient_sopl_ex
-    _zcor_exec_all = df_all[_zcor_ex].copy()
-
-    ex = cpiv(
-        _zcor_exec_all,
-        pd.Series(True, index=_zcor_exec_all.index),
-        "aex", posts
-    )
-    for c in ["<1 mois", ">3 mois", "1 mois < <3 mois", "Inconnu"]:
-        ex[c] = ex.get(c, 0)
-    ex["<1 mois"] = ex["<1 mois"] + ex["Inconnu"]
-    ex["Total"] = ex[["<1 mois", "1 mois < <3 mois", ">3 mois"]].sum(axis=1)
-    ex["OT exécution <1 mois"] = ckpi(ex["<1 mois"], ex["Total"])
-    ex["OT exécution 1mois< <3mois"] = ckpi(ex["1 mois < <3 mois"], ex["Total"], 0)
-    ex["OT exécution >3 mois"] = ckpi(ex[">3 mois"], ex["Total"], 0)
 
     # ── OT LANC ESTIME — CONTIENT LANC ET TYPE ZCOR (demande explicite : statut contient LANC, type ZCOR, budget=0 anomalie) ──
     _statut_lanc = df["Statut système"].fillna("").astype(str).str.contains("LANC", na=False) | (df["Statut OT"] == "LANC")
@@ -224,31 +265,82 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     plc["Total"] = plc["CARACTERISE"] + plc["NON CARACTERISE"]
     plc["Backlog planification caractérisé"] = ckpi(plc["CARACTERISE"], plc["Total"])
 
-    # ── OT préparation <1/1-3/>3 mois — STOCK COMPLET PRÉPARATION ──
-    # Le calcul de l'âge inclut les OT caractérisés ET NON CARACTÉRISÉS.
-    # Le périmètre est donc tout le stock ZCOR + CRÉÉ.
-    pr = cpiv(_zcor_cree_all, pd.Series(True, index=_zcor_cree_all.index), "ap", posts)
-    for c in ["<1 mois", ">3 mois", "1 mois < <3 mois", "Inconnu"]:
-        pr[c] = pr.get(c, 0)
-    pr["<1 mois"] = pr["<1 mois"] + pr["Inconnu"]
-    pr["Total"] = pr["<1 mois"] + pr["1 mois < <3 mois"] + pr[">3 mois"]
-    pr["OT préparation <1 mois"] = ckpi(pr["<1 mois"], pr["Total"])
-    pr["OT préparation 1mois< <3mois"] = ckpi(pr["1 mois < <3 mois"], pr["Total"], 0)
-    pr["OT préparation >3 mois"] = ckpi(pr[">3 mois"], pr["Total"], 0)
+    # ── ÂGE PRÉPARATION ──────────────────────────────────────
+    # IMPORTANT : le calcul de l'âge ne dépend PAS de la caractérisation.
+    # Population = TOUS les ZCOR avec statut système CRÉÉ :
+    # caractérisés + NON caractérisés.
+    _zcor_cree_age = _zcor_all[
+        _zcor_all["Statut système"]
+        .fillna("")
+        .astype(str)
+        .str.strip()
+        .str.split()
+        .str[0]
+        .isin(["CRÉÉ", "CREE"])
+    ].copy()
 
-    # ── OT planification <1/1-3/>3 mois — STOCK COMPLET PLANIFICATION ──
-    # Le calcul de l'âge inclut les OT caractérisés ET NON CARACTÉRISÉS.
-    # Le périmètre est donc tout le stock ZCOR + LANC + SOPL=0.
-    _zcor_plan_age = _zcor_lanc_all.copy()
-    pl = cpiv(_zcor_plan_age, pd.Series(True, index=_zcor_plan_age.index), "alp", posts)
-    for c in ["<1 mois", ">3 mois", "1 mois < <3 mois", "Inconnu"]:
-        pl[c] = pl.get(c, 0)
-    pl["<1 mois"] = pl["<1 mois"] + pl["Inconnu"]
-    pl["Total"] = pl["<1 mois"] + pl["1 mois < <3 mois"] + pl[">3 mois"]
-    pl["OT planification <1 mois"] = ckpi(pl["<1 mois"], pl["Total"])
-    pl["OT planification 1mois< <3mois"] = ckpi(pl["1 mois < <3 mois"], pl["Total"], 0)
-    pl["OT planification >3 mois"] = ckpi(pl[">3 mois"], pl["Total"], 0)
+    _zcor_cree_age["_age_prep"] = age_category_from_date(
+        _zcor_cree_age["Date de début planifiée"], now_ts
+    )
 
+    pr = build_age_table(_zcor_cree_age, "_age_prep", posts)
+
+    pr["OT préparation <1 mois"] = pr["score_<1"]
+    pr["OT préparation 1mois< <3mois"] = pr["score_1_3"]
+    pr["OT préparation >3 mois"] = pr["score_>3"]
+
+
+    # ── ÂGE PLANIFICATION ───────────────────────────────────
+    # IMPORTANT : le calcul de l'âge ne dépend PAS de la caractérisation.
+    # Population = TOUS les ZCOR LANC + SOPL = 0 :
+    # caractérisés + NON caractérisés.
+    _zcor_lanc_age = _zcor_all[
+        (
+            _zcor_all["Statut système"]
+            .fillna("")
+            .astype(str)
+            .str.strip()
+            .str.split()
+            .str[0]
+            == "LANC"
+        )
+        & (_zcor_all["Contient SOPL"] == 0)
+    ].copy()
+
+    _zcor_lanc_age["_age_plan"] = age_category_from_date(
+        _zcor_lanc_age["Date de début planifiée"], now_ts
+    )
+
+    pl = build_age_table(_zcor_lanc_age, "_age_plan", posts)
+
+    pl["OT planification <1 mois"] = pl["score_<1"]
+    pl["OT planification 1mois< <3mois"] = pl["score_1_3"]
+    pl["OT planification >3 mois"] = pl["score_>3"]
+
+
+    # ── ÂGE EXÉCUTION ────────────────────────────────────────
+    # IMPORTANT : population = TOUS les ZCOR LANC + SOPL = 1.
+    # On inclut les OT exécutés ET les OT NON exécutés.
+    # Aucun filtre CLOT/TCLO n'est appliqué au dénominateur.
+    _zcor_exec_age = _zcor_all[
+        (
+            _zcor_all["Statut système"]
+            .fillna("")
+            .astype(str)
+            .str.contains("LANC", na=False)
+        )
+        & (_zcor_all["Contient SOPL"] == 1)
+    ].copy()
+
+    _zcor_exec_age["_age_exec"] = age_category_from_date(
+        _zcor_exec_age["Date de début planifiée"], now_ts
+    )
+
+    ex = build_age_table(_zcor_exec_age, "_age_exec", posts)
+
+    ex["OT exécution <1 mois"] = ex["score_<1"]
+    ex["OT exécution 1mois< <3mois"] = ex["score_1_3"]
+    ex["OT exécution >3 mois"] = ex["score_>3"]
     # ── OT confirmé / coûts égaux (inchangé) ──
     # ── OT CONFIME — CORRIGÉ (bug de colonne) ──
     # L'ancienne boucle calculait OT CONFIME et OT_COR_EGAL à partir de la
