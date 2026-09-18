@@ -110,19 +110,22 @@ def build_age_table_rows(postes, df_prep, df_plan, df_exec=None, label_total="TO
         ep = df_exec[df_exec["Poste travail princ."] == p] if df_exec is not None and not df_exec.empty else pd.DataFrame()
 
         nb_p = len(cp)
-        p_inf = int((cp["ap"].isin(["<1 mois", "Inconnu"])).sum()) if "ap" in cp.columns else 0
-        p_1_3 = int((cp["ap"] == "1 mois < <3 mois").sum()) if "ap" in cp.columns else 0
-        p_sup = int((cp["ap"] == ">3 mois").sum()) if "ap" in cp.columns else 0
+        cp_non = cp[cp["Carac Prep"] == "NON CARACTERISE"] if "Carac Prep" in cp.columns else cp[~cp["Statut utilisateur"].apply(lambda x: match_exact_token(x, CODES_PREP_EXACT))] if "Statut utilisateur" in cp.columns else cp
+        p_inf = int((cp_non["ap"].isin(["<1 mois", "Inconnu"])).sum()) if "ap" in cp_non.columns else 0
+        p_1_3 = int((cp_non["ap"] == "1 mois < <3 mois").sum()) if "ap" in cp_non.columns else 0
+        p_sup = int((cp_non["ap"] == ">3 mois").sum()) if "ap" in cp_non.columns else 0
 
         nb_l = len(lp)
-        l_inf = int((lp["alp"].isin(["<1 mois", "Inconnu"])).sum()) if "alp" in lp.columns else 0
-        l_1_3 = int((lp["alp"] == "1 mois < <3 mois").sum()) if "alp" in lp.columns else 0
-        l_sup = int((lp["alp"] == ">3 mois").sum()) if "alp" in lp.columns else 0
+        lp_non = lp[lp["Carac Plan"] == "NON CARACTERISE"] if "Carac Plan" in lp.columns else lp[~lp["Statut utilisateur"].apply(lambda x: match_exact_token(x, CODES_PLAN_EXACT))] if "Statut utilisateur" in lp.columns else lp
+        l_inf = int((lp_non["alp"].isin(["<1 mois", "Inconnu"])).sum()) if "alp" in lp_non.columns else 0
+        l_1_3 = int((lp_non["alp"] == "1 mois < <3 mois").sum()) if "alp" in lp_non.columns else 0
+        l_sup = int((lp_non["alp"] == ">3 mois").sum()) if "alp" in lp_non.columns else 0
 
         nb_e = len(ep)
-        e_inf = int((ep["aex"].isin(["<1 mois", "Inconnu"])).sum()) if "aex" in ep.columns else 0
-        e_1_3 = int((ep["aex"] == "1 mois < <3 mois").sum()) if "aex" in ep.columns else 0
-        e_sup = int((ep["aex"] == ">3 mois").sum()) if "aex" in ep.columns else 0
+        ep_non = ep[ep["Carac Exec"] == "NON CARACTERISE"] if "Carac Exec" in ep.columns else ep[~ep["Statut utilisateur"].apply(lambda x: match_exact_token(x, ALL_CARAC_EXACT))] if "Statut utilisateur" in ep.columns else ep
+        e_inf = int((ep_non["aex"].isin(["<1 mois", "Inconnu"])).sum()) if "aex" in ep_non.columns else 0
+        e_1_3 = int((ep_non["aex"] == "1 mois < <3 mois").sum()) if "aex" in ep_non.columns else 0
+        e_sup = int((ep_non["aex"] == ">3 mois").sum()) if "aex" in ep_non.columns else 0
 
         t_p_tot += nb_p; t_p_inf += p_inf; t_p_1_3 += p_1_3; t_p_sup += p_sup
         t_l_tot += nb_l; t_l_inf += l_inf; t_l_1_3 += l_1_3; t_l_sup += l_sup
@@ -274,6 +277,10 @@ def render_backlog_tab(dfp: pd.DataFrame, vp: list, df_toutes_dates: pd.DataFram
         else _zcor["Statut utilisateur"].fillna("").astype(str).str.contains("SOPL", case=False, na=False)
     )
     df_exec = _zcor[_statut_lanc_ex & _non_clot_ex & _contient_sopl_ex].copy()
+    df_exec["Carac Exec"] = np.where(
+        df_exec["Statut utilisateur"].apply(lambda x: match_exact_token(x, ALL_CARAC_EXACT)),
+        "CARACTERISE", "NON CARACTERISE"
+    )
 
     # ── Statuts OT (graphiques generaux) ─────────────────────────────────
     text_col  = get_text_col(dfp)
