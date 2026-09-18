@@ -312,10 +312,15 @@ def show_statut_hbar(piv_df: pd.DataFrame, title: str,
                           f"{title} — Taux de réalisation par poste", s1, s2)
 
 def show_grouped_hbar(vp, pscores: dict, qscores: dict, title: str,
-                       s1=S1_DEFAULT, s2=S2_DEFAULT) -> None:
+                       s1=S1_DEFAULT, s2=S2_DEFAULT, thin: bool = False) -> None:
     """
     Comparaison Performance / Qualite PAR POSTE en barres horizontales
     groupees, avec lignes de seuil s1/s2 (style rapport OCP).
+
+    thin=True (AJOUTÉ, demande explicite) : barres très fines — augmente
+    les écarts inter-barres/inter-groupes et réduit la hauteur par poste,
+    pour un rendu plus compact quand Performance et Qualité sont
+    regroupées sur un même graphique.
     """
     postes = [p for p in vp if p in pscores or p in qscores]
     if not postes:
@@ -328,20 +333,25 @@ def show_grouped_hbar(vp, pscores: dict, qscores: dict, title: str,
     def _score_colors(vals):
         return [C_HIGH if v >= s2 else (C_MID if v >= s1 else C_LOW) for v in vals]
 
+    bargap = 0.45 if thin else 0.25
+    bargroupgap = 0.25 if thin else 0.08
+    par_poste = 34 if thin else 52
+    bar_line_w = 0.5 if thin else 1
+
     fig = go.Figure()
     fig.add_trace(go.Bar(
         x=p_vals, y=postes, orientation='h', name='Performance',
-        marker=dict(color=_score_colors(p_vals), line=dict(color='white', width=1)),
+        marker=dict(color=_score_colors(p_vals), line=dict(color='white', width=bar_line_w)),
         text=[f"{v:.0f}%" for v in p_vals], textposition='outside',
-        textfont=dict(size=11, family='Inter'),
+        textfont=dict(size=10 if thin else 11, family='Inter'),
         hovertemplate="<b>%{y}</b><br>Performance : %{x:.1f}%<extra></extra>",
     ))
     fig.add_trace(go.Bar(
         x=q_vals, y=postes, orientation='h', name='Qualité',
-        marker=dict(color=_score_colors(q_vals), line=dict(color='white', width=1),
+        marker=dict(color=_score_colors(q_vals), line=dict(color='white', width=bar_line_w),
                     pattern=dict(shape="/", size=4, solidity=0.35)),
         text=[f"{v:.0f}%" for v in q_vals], textposition='outside',
-        textfont=dict(size=11, family='Inter'),
+        textfont=dict(size=10 if thin else 11, family='Inter'),
         hovertemplate="<b>%{y}</b><br>Qualité : %{x:.1f}%<extra></extra>",
     ))
 
@@ -354,8 +364,8 @@ def show_grouped_hbar(vp, pscores: dict, qscores: dict, title: str,
 
     fig.update_layout(
         title=dict(text=title, x=0.5, xanchor='center', font=dict(size=16, color='#1e293b')),
-        barmode='group', bargap=0.25, bargroupgap=0.08,
-        height=max(350, 52 * len(postes) + 130),
+        barmode='group', bargap=bargap, bargroupgap=bargroupgap,
+        height=max(350, par_poste * len(postes) + 130),
         xaxis=dict(range=[0, 115], showgrid=False, showticklabels=False, zeroline=False, fixedrange=True),
         yaxis=dict(autorange="reversed", tickfont=dict(size=12, family='Inter', color='#1e293b'), fixedrange=True, automargin=True),
         plot_bgcolor='white', paper_bgcolor='white',
