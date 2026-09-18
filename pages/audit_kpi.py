@@ -1,298 +1,682 @@
 # -*- coding: utf-8 -*-
 """
-Onglet Streamlit : 🔎 Audit des calculs KPI & Contrôle OUI / NON.
-Permet d'auditer en temps réel chaque OT / Avis avec ses conditions SAP, son résultat OUI/NON,
-son motif de rejet, et de télécharger les extractions Excel (KPI unique ou classeur 3 feuilles).
+Module central de contrôle OUI / NON des KPIs SAP OCP.
+SOURCE UNIQUE DE VÉRITÉ :
+Pour chaque KPI, ce module évalue chaque OT / Avis éligible et détermine :
+  - OUI : respecte toutes les conditions du KPI
+  - NON : ne respecte pas au moins une condition
+  - Motif_NON : explication détaillée du rejet
+  - Les colonnes SAP d'origine ayant servi au calcul.
 """
 
 import io
-import streamlit as st
+import re
+import numpy as np
 import pandas as pd
+from openpyxl import Workbook
+from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
 
-from core.controle_kpi import (
-    build_table_controle_complete,
-    get_kpi_summary,
-    build_anomalies_excel_unified,
+from core.constants import (
+    QK, PK, ALL_KPI, CIBLE, LOWER_BETTER,
+    CODES_PREP_EXACT, CODES_PLAN_EXACT, ALL_CARAC_EXACT,
 )
 
 
-def render_audit_kpi_tab(df_period: pd.DataFrame, avdf_period: pd.DataFrame,
-                         now_ts, df_full: pd.DataFrame, vp: list, fichier_date: str = "") -> None:
-    st.markdown('<div class="stl p">🔎 Audit des calculs KPI & Source Unique OUI / NON</div>', unsafe_allow_html=True)
-    st.caption("Traçabilité intégrale et vérification ligne par ligne à partir des données SAP originales.")
+def match_exact_token(statut, codes: set) -> bool:
+    if statut is None or (isinstance(statut, float) and pd.isna(statut)):
+        return False
+    words = set(re.findall(r'[A-Za-z0-9]+', str(statut).upper()))
+    return bool(words & codes)
 
-    # ── Construction de la table unique de contrôle ──
-    table_ctrl = build_table_controle_complete(df_period, avdf_period, now_ts, df_full=df_full)
 
-    if table_ctrl.empty:
-        st.warning("⚠️ Aucune donnée disponible pour l'audit des KPI.")
-        return
+def get_division(poste: str) -> str:
+    p = str(poste).strip().upper()
+    if p.startswith("SF1"):
+        return "SF1"
+    elif p.startswith("SF2"):
+        return "SF2"
+    return "AUTRE"
 
-    # Restreindre aux postes filtrés si applicable
-    if vp:
-        table_ctrl_filtree = table_ctrl[table_ctrl["Poste travail princ."].isin(vp)].copy()
-    else:
-        table_ctrl_filtree = table_ctrl.copy()
 
-    kpis_dispos = sorted(table_ctrl["KPI"].unique().tolist())
+# ─────────────────────────────────────────────────────────────────────────────
+# 1. ÉVALUATION DÉDIÉE : Préparation_Taux d'estimation du travail (OT lancés)
+# ─────────────────────────────────────────────────────────────────────────────
 
-    # Placer 'OT LANC ESTIME' en tête par défaut
-    default_idx = 0
-    if "OT LANC ESTIME" in kpis_dispos:
-        default_idx = kpis_dispos.index("OT LANC ESTIME")
+def eval_ot_lanc_estime(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    KPI : Préparation_Taux d'estimation du travail (OT lancés) / OT LANC ESTIME.
+    Dénominateur : OT correctifs lancés
+      - Type d'ordre == 'ZCOR'
+      - Statut système contient 'LANC' ou Statut OT == 'LANC'
+    Numérateur / OUI :
+      - Charge estimée > 0 (Total coûts budgétés > 0)
+    Condition NON :
+      - Total coûts budgétés == 0 ou manquant (non estimé)
+    Motif_NON :
+      - 'Charge estimée non renseignée (Total coûts budgétés = 0 DH)'
+    """
+    if df.empty:
+        return pd.DataFrame()
 
-    kpi_labels = {
-        "OT LANC ESTIME": "Préparation_Taux d'estimation du travail (OT lancés) [OT LANC ESTIME]",
-        "TAUX_REALISATION_CORRECTIF/PT": "Taux de réalisation correctif / PT [TAUX_REALISATION_CORRECTIF/PT]",
-        "Backlog préparation caractérisé": "Préparation_Taux de caractérisation Backlog préparation",
-        "Backlog planification caractérisé": "Planification _Taux de caractérisation Backlog Planification",
-        "OT préparation <1 mois": "Age du Backlog des OT (Préparation)_<1mois",
-        "OT préparation 1mois< <3mois": "Age du Backlog des OT (Préparation)_1mois<..<3mois",
-        "OT préparation >3 mois": "Age du Backlog des OT (Préparation)_>3mois",
-        "OT planification <1 mois": "Age du Backlog des OT (Planification)_<1mois",
-        "OT planification 1mois< <3mois": "Age du Backlog des OT (Planification)_1mois<..<3mois",
-        "OT planification >3 mois": "Age du Backlog des OT (Planification)_>3mois",
-        "OT exécution <1 mois": "Age du Backlog des OT (Exécution)_<1mois",
-        "OT exécution 1mois< <3mois": "Age du Backlog des OT (Exécution)_1mois<..<3mois",
-        "OT exécution >3 mois": "Age du Backlog des OT (Exécution)_>3mois",
-        "OT CONFIME": "OT Confirmé (Heures réelles) [OT CONFIME]",
-        "OT_COR_EGAL": "Cohérence Coûts Réels / Budgétés [OT_COR_EGAL]",
-        "Taux d'approbation des Avis": "Taux d'approbation des Avis",
-        "Performance Graissage": "Performance Graissage (TW 350)",
-        "Performance Inspection": "Performance Inspection (TW 290, 300, 310)",
-        "Performance Systématiques": "Performance Systématiques (TW 360)",
-    }
+    statut_sys = df.get("Statut système", pd.Series("", index=df.index)).fillna("").astype(str)
+    statut_ot = df.get("Statut OT", pd.Series("", index=df.index)).fillna("").astype(str)
+    type_ordre = df.get("Type d'ordre", pd.Series("", index=df.index)).fillna("").astype(str).str.strip().str.upper()
 
-    col_sel1, col_sel2 = st.columns([2, 1])
-    with col_sel1:
-        sel_kpi = st.selectbox(
-            "Sélectionner le KPI à auditer :",
-            kpis_dispos,
-            index=default_idx,
-            format_func=lambda k: kpi_labels.get(k, k),
-            key="audit_kpi_selector",
-        )
-    with col_sel2:
-        div_options = ["Toutes", "SF1 (Maroc Chimie)", "SF2 (FEEDS)"]
-        sel_div = st.selectbox("Filtrer par Division :", div_options, key="audit_div_selector")
+    is_zcor = type_ordre == "ZCOR"
+    is_lanc = statut_sys.str.contains("LANC", na=False) | (statut_ot == "LANC")
+    scope = df[is_zcor & is_lanc].copy()
 
-    # ── Données du KPI sélectionné ──
-    kpi_data = table_ctrl_filtree[table_ctrl_filtree["KPI"] == sel_kpi].copy()
+    if scope.empty:
+        return pd.DataFrame()
 
-    if sel_div == "SF1 (Maroc Chimie)":
-        kpi_data = kpi_data[kpi_data["Division"] == "SF1"]
-    elif sel_div == "SF2 (FEEDS)":
-        kpi_data = kpi_data[kpi_data["Division"] == "SF2"]
+    budget = pd.to_numeric(scope.get("Total coûts budgétés", 0), errors="coerce").fillna(0)
+    is_estime = budget > 0
 
-    # ── Explication de la règle métier vérifiée ──
-    if sel_kpi == "OT LANC ESTIME":
-        st.info(
-            "📐 **Formule vérifiée :**  \n"
-            "$$\\text{Taux d'estimation du travail} = \\frac{\\text{Nombre d'OT (OT lancés où charge estimée } > 0)}{\\text{OT correctifs lancés}} \\times 100$$\n"
-            "- **Dénominateur (Périmètre SAP) :** Ordres correctifs (`Type d'ordre == 'ZCOR'`) et lancés (`Statut système` contient `LANC` ou `Statut OT == 'LANC'`).  \n"
-            "- **Condition OUI :** Charge / Budget estimé strictement supérieur à 0 (`Total coûts budgétés > 0`).  \n"
-            "- **Condition NON (Anomalie) :** Charge non estimée (`Total coûts budgétés == 0` ou vide).  \n"
-            "- **Règle de traçabilité :** Total = OUI + NON | Anomalies = COUNT(NON)."
-        )
-    elif sel_kpi == "Backlog préparation caractérisé":
-        st.info(
-            "📐 **Formule vérifiée :**  \n"
-            "$$\\text{Taux de caractérisation préparation} = \\frac{\\text{Nombre total d'OT en cours de préparation caractérisés conformément}}{\\text{OT total en préparation (Statut système CRÉÉ)}} \\times 100$$\n"
-            "- **Dénominateur :** Type d'ordre `ZCOR` et Statut système commence par `CRÉÉ` / `CREE`.  \n"
-            "- **Condition OUI :** Statut utilisateur contient au moins un code parmi `ATPD`, `ATMR`, `ATER`, `ATRS`, `ATMO`.  \n"
-            "- **Condition NON (Anomalie) :** Non caractérisé (aucun de ces codes)."
-        )
-    elif sel_kpi == "Backlog planification caractérisé":
-        st.info(
-            "📐 **Formule vérifiée :**  \n"
-            "$$\\text{Taux de caractérisation planification} = \\frac{\\text{Nombre total d'OT en cours de planification caractérisés conformément}}{\\text{OT total en planification (Statut système LANC)}} \\times 100$$\n"
-            "- **Dénominateur :** Type d'ordre `ZCOR` et Statut système commence par `LANC` (hors exécution SOPL).  \n"
-            "- **Condition OUI :** Statut utilisateur contient au moins un code parmi `ATPL`, `ATEI`, `ATAL`, `ATAS`, `AGAR`, `ATHS`.  \n"
-            "- **Condition NON (Anomalie) :** Non caractérisé (aucun de ces codes)."
-        )
-    elif "préparation" in sel_kpi.lower() and ("mois" in sel_kpi or "1mois" in sel_kpi):
-        st.info(
-            f"📐 **Formule vérifiée pour {sel_kpi} :**  \n"
-            "- **Périmètre :** OT correctifs `ZCOR` en statut système `CRÉÉ`.  \n"
-            "- **Date de calcul d'âge :** `Créé le` (ou date début planifiée si absent).  \n"
-            "- **Objectif :** Suivre le flux de préparation rapide et identifier les ordres vieillissants/bloqués."
-        )
-    elif "planification" in sel_kpi.lower() and ("mois" in sel_kpi or "1mois" in sel_kpi):
-        st.info(
-            f"📐 **Formule vérifiée pour {sel_kpi} :**  \n"
-            "- **Périmètre :** Statut système `LANC` + Statut utilisateur `ATPL` (en cours de planification).  \n"
-            "- **Date de calcul d'âge :** `Date de début planifiée`.  \n"
-            "- **Objectif :** Détecter les OT planifiés bloqués ou non exécutés."
-        )
-    elif "exécution" in sel_kpi.lower() and ("mois" in sel_kpi or "1mois" in sel_kpi):
-        st.info(
-            f"📐 **Formule vérifiée pour {sel_kpi} :**  \n"
-            "- **Périmètre :** Statut système `LANC` + Statut utilisateur `SOPL` (en cours d'exécution).  \n"
-            "- **Date de calcul d'âge :** `Date de début planifiée`.  \n"
-            "- **Objectif :** Mesurer la réactivité des équipes dans l'exécution des OT après planification."
-        )
-    elif sel_kpi == "OT_COR_EGAL":
-        st.info(
-            "📐 **Formule vérifiée pour OT_COR_EGAL :**  \n"
-            "$$\\text{Cohérence Coûts Réels / Budgétés} = \\frac{\\text{Nombre d'OT (ZCOR clôturés avec Coûts réels } > 0 \\text{ et } \\ne \\text{ Budget)}}{\\text{Total OT correctifs clôturés (ZCOR + CLOT/TCLO)}} \\times 100$$\n"
-            "- **Dénominateur (Périmètre SAP) :** Ordres correctifs (`Type d'ordre == 'ZCOR'`) clôturés (`Statut système` ou `Statut OT` contient `CLOT` ou `TCLO`).  \n"
-            "- **Condition OUI (Conforme) :** Coûts réels strictement positifs (`Total coûts réels > 0`) **ET** différents du budget (`Total coûts réels != Total coûts budgétés`).  \n"
-            "- **Condition NON (Anomalie) :** Coûts réels non saisis ou nuls (`Total coûts réels <= 0`) **OU** identiques au budget sans ajustement (`Total coûts réels == Total coûts budgétés`).  \n"
-            "- **Règle de traçabilité :** Total = OUI + NON | Anomalies = COUNT(NON)."
-        )
-
-    # ── Calculs et Métriques de synthèse SF1 / SF2 / Total ──
-    summary_all = get_kpi_summary(table_ctrl_filtree, sel_kpi)
-    d_df = summary_all["divisions"]
-    tot_info = summary_all["total"]
-
-    sf1_info = d_df[d_df["Division"] == "SF1"].iloc[0] if (not d_df.empty and "SF1" in d_df["Division"].values) else {"Total": 0, "OUI": 0, "NON": 0, "KPI %": 0.0}
-    sf2_info = d_df[d_df["Division"] == "SF2"].iloc[0] if (not d_df.empty and "SF2" in d_df["Division"].values) else {"Total": 0, "OUI": 0, "NON": 0, "KPI %": 0.0}
-
-    # Cible active selon le filtre de division
-    if sel_div == "SF1 (Maroc Chimie)":
-        active_scope_info = sf1_info
-        active_label = "SF1 (Maroc Chimie)"
-    elif sel_div == "SF2 (FEEDS)":
-        active_scope_info = sf2_info
-        active_label = "SF2 (FEEDS)"
-    else:
-        active_scope_info = tot_info
-        active_label = "Total Général (SF1 + SF2)"
-
-    st.markdown("#### 📊 Résultats de Contrôle — Division & Global")
-    c1, c2, c3 = st.columns(3)
-
-    with c1:
-        st.markdown(
-            f"""<div style="background:#eff6ff;padding:14px;border-radius:8px;border-left:4px solid #3b82f6;">
-            <div style="font-weight:800;font-size:14px;color:#1e40af;">🏭 SF1 — Maroc Chimie</div>
-            <div style="margin-top:6px;font-size:13px;"><b>Total OT :</b> {int(sf1_info['Total'])}</div>
-            <div style="color:#059669;font-size:13px;"><b>Nombre OUI (Conformes) :</b> {int(sf1_info['OUI'])}</div>
-            <div style="color:#dc2626;font-size:13px;"><b>Nombre NON (Anomalies) :</b> {int(sf1_info['NON'])}</div>
-            <div style="margin-top:6px;font-size:16px;font-weight:800;color:#1e3a5f;">Taux : {sf1_info['KPI %']:.1f}%</div>
-            </div>""",
-            unsafe_allow_html=True,
-        )
-
-    with c2:
-        st.markdown(
-            f"""<div style="background:#f0fdf4;padding:14px;border-radius:8px;border-left:4px solid #10b981;">
-            <div style="font-weight:800;font-size:14px;color:#065f46;">🏭 SF2 — FEEDS</div>
-            <div style="margin-top:6px;font-size:13px;"><b>Total OT :</b> {int(sf2_info['Total'])}</div>
-            <div style="color:#059669;font-size:13px;"><b>Nombre OUI (Conformes) :</b> {int(sf2_info['OUI'])}</div>
-            <div style="color:#dc2626;font-size:13px;"><b>Nombre NON (Anomalies) :</b> {int(sf2_info['NON'])}</div>
-            <div style="margin-top:6px;font-size:16px;font-weight:800;color:#1e3a5f;">Taux : {sf2_info['KPI %']:.1f}%</div>
-            </div>""",
-            unsafe_allow_html=True,
-        )
-
-    with c3:
-        st.markdown(
-            f"""<div style="background:#f8fafc;padding:14px;border-radius:8px;border-left:4px solid #64748b;">
-            <div style="font-weight:800;font-size:14px;color:#1e293b;">🏢 {active_label}</div>
-            <div style="margin-top:6px;font-size:13px;"><b>Total OT :</b> {int(active_scope_info.get('Total', 0))}</div>
-            <div style="color:#059669;font-size:13px;"><b>Nombre OUI (Conformes) :</b> {int(active_scope_info.get('OUI', 0))}</div>
-            <div style="color:#dc2626;font-size:13px;"><b>Nombre NON (Anomalies) :</b> {int(active_scope_info.get('NON', 0))}</div>
-            <div style="margin-top:6px;font-size:16px;font-weight:800;color:#1e3a5f;">Taux : {active_scope_info.get('KPI %', 0):.1f}%</div>
-            </div>""",
-            unsafe_allow_html=True,
-        )
-
-    # ── Contrôles de Cohérence Automatiques ──
-    st.markdown("---")
-    ctrl_tot = int(active_scope_info.get('Total', 0))
-    ctrl_oui = int(active_scope_info.get('OUI', 0))
-    ctrl_non = int(active_scope_info.get('NON', 0))
-    check1_ok = (ctrl_tot == ctrl_oui + ctrl_non)
-
-    c_chk1, c_chk2, c_chk3 = st.columns(3)
-    with c_chk1:
-        if check1_ok:
-            st.success(f"✅ **Contrôle 1 (Total = OUI + NON)** : {ctrl_tot} = {ctrl_oui} + {ctrl_non}")
-        else:
-            st.error(f"❌ **Erreur Contrôle 1** : Total ({ctrl_tot}) ≠ OUI ({ctrl_oui}) + NON ({ctrl_non})")
-
-    with c_chk2:
-        st.success(f"✅ **Contrôle 2 (Anomalies = NON)** : {ctrl_non} anomalies identifiées")
-
-    with c_chk3:
-        nb_doublons = len(kpi_data) - kpi_data["Ordre"].nunique() if ("Ordre" in kpi_data.columns and not kpi_data.empty) else 0
-        if nb_doublons == 0:
-            st.success("✅ **Contrôle 5 (Unicité)** : Aucun doublon")
-        else:
-            st.warning(f"⚠️ **Attention** : {nb_doublons} doublon(s) détecté(s)")
-
-    # ── Boutons d'export Excel ──
-    st.markdown("---")
-    col_exp1, col_exp2 = st.columns(2)
-
-    # 1. Export du KPI sélectionné (Tous les OT avec résultat OUI/NON)
-    with col_exp1:
-        buf_kpi = io.BytesIO()
-        with pd.ExcelWriter(buf_kpi, engine="openpyxl") as writer:
-            cols_export = [
-                "Ordre", "Poste travail princ.", "Division", "KPI", "Résultat", "Motif_NON",
-                "Total coûts budgétés", "Total coûts réels", "Statut système", "Statut utilisateur",
-                "Statut OT", "Date de début planifiée", "Créé le", "Désignation", "Poste technique",
-            ]
-            cols_present = [c for c in cols_export if c in kpi_data.columns]
-            kpi_data[cols_present].to_excel(writer, sheet_name=sel_kpi[:31], index=False)
-        buf_kpi.seek(0)
-
-        st.download_button(
-            f"📥 Exporter les OT de {sel_kpi} (.xlsx)",
-            data=buf_kpi.getvalue(),
-            file_name=f"audit_{sel_kpi.replace('/', '_')}_{fichier_date.replace('/', '-')}.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            use_container_width=True,
-            type="primary",
-        )
-
-    # 2. Export complet multi-feuilles des anomalies (NON_DETAIL, ANOMALIES_KPI_POSTE, SYNTHESE_KPI)
-    with col_exp2:
-        try:
-            excel_unified_bytes = build_anomalies_excel_unified(table_ctrl_filtree)
-            st.download_button(
-                "📥 Exporter TOUTES les anomalies (3 Feuilles Excel)",
-                data=excel_unified_bytes,
-                file_name=f"anomalies_NON_DETAIL_3_feuilles_{fichier_date.replace('/', '-')}.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                use_container_width=True,
-            )
-        except Exception as _e_ex:
-            st.caption(f"Export unifié indisponible : {_e_ex}")
-
-    # ── Tableau détaillé interactif OUI / NON ──
-    st.markdown("---")
-    st.markdown("#### 📋 Détail Ligne par Ligne (Audit SAP)")
-
-    col_f1, col_f2 = st.columns([1, 2])
-    with col_f1:
-        filtre_res = st.radio(
-            "Afficher :",
-            ["Tous", "NON uniquement (Anomalies)", "OUI uniquement (Conformes)"],
-            horizontal=True,
-            key="audit_res_radio",
-        )
-
-    df_affiche = kpi_data.copy()
-    if filtre_res == "NON uniquement (Anomalies)":
-        df_affiche = df_affiche[df_affiche["Résultat"] == "NON"]
-    elif filtre_res == "OUI uniquement (Conformes)":
-        df_affiche = df_affiche[df_affiche["Résultat"] == "OUI"]
-
-    st.caption(f"Affichage de **{len(df_affiche)}** ligne(s) sur **{len(kpi_data)}**.")
-
-    cols_vue = [
-        "Ordre", "Poste travail princ.", "Division", "Résultat", "Motif_NON",
-        "Total coûts budgétés", "Statut système", "Statut utilisateur", "Statut OT",
-        "Date de début planifiée", "Créé le", "Désignation", "Poste technique",
-    ]
-    cols_vue_exist = [c for c in cols_vue if c in df_affiche.columns]
-
-    st.dataframe(
-        df_affiche[cols_vue_exist],
-        use_container_width=True,
-        hide_index=True,
+    scope["KPI"] = "OT LANC ESTIME"
+    scope["Nom_KPI_Complet"] = "Préparation_Taux d'estimation du travail (OT lancés)"
+    scope["Division"] = scope["Poste travail princ."].apply(get_division)
+    scope["Condition_ZCOR"] = "OUI"
+    scope["Condition_LANC"] = "OUI"
+    scope["Charge_estimee"] = budget
+    scope["Condition_Charge_Estimee"] = np.where(is_estime, "OUI", "NON")
+    scope["Résultat"] = np.where(is_estime, "OUI", "NON")
+    scope["Motif_NON"] = np.where(
+        is_estime,
+        "",
+        "Charge estimée non renseignée (Total coûts budgétés = 0 DH)"
     )
+    return scope
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 2. ÉVALUATION DÉDIÉE : Taux de Réalisation Correctif
+# ─────────────────────────────────────────────────────────────────────────────
+
+def eval_taux_realisation_correctif(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    KPI : TAUX_REALISATION_CORRECTIF/PT
+    Dénominateur : OT où Nº appel pl.entret. == 0 (ou vide) ET Statut utilisateur contient SOPL
+    Numérateur / OUI : Statut OT in ['CLOT', 'TCLO'] (ou Statut système contient CLOT/TCLO)
+    NON : OT correctif non clôturé
+    """
+    if df.empty:
+        return pd.DataFrame()
+
+    appel = pd.to_numeric(df.get("Nº appel pl.entret.", 0), errors="coerce").fillna(0)
+    sopl = df.get("Contient SOPL", pd.Series(0, index=df.index))
+    if "Contient SOPL" not in df.columns:
+        sopl = df.get("Statut utilisateur", pd.Series("", index=df.index)).fillna("").astype(str).str.contains("SOPL", na=False).astype(int)
+
+    filt_corr = (appel == 0) & (sopl == 1)
+    scope = df[filt_corr].copy()
+    if scope.empty:
+        return pd.DataFrame()
+
+    statut_ot = scope.get("Statut OT", pd.Series("", index=scope.index)).fillna("").astype(str)
+    statut_sys = scope.get("Statut système", pd.Series("", index=scope.index)).fillna("").astype(str)
+    is_clot = statut_ot.isin(["CLOT", "TCLO"]) | statut_sys.str.contains("CLOT|TCLO", na=False)
+
+    scope["KPI"] = "TAUX_REALISATION_CORRECTIF/PT"
+    scope["Nom_KPI_Complet"] = "Taux de réalisation correctif / PT"
+    scope["Division"] = scope["Poste travail princ."].apply(get_division)
+    scope["Résultat"] = np.where(is_clot, "OUI", "NON")
+    scope["Motif_NON"] = np.where(
+        is_clot,
+        "",
+        scope["Statut OT"].apply(lambda s: f"OT correctif non clôturé (Statut: {s})")
+    )
+    return scope
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 3. ÉVALUATION DÉDIÉE : Backlogs Préparation & Planification Caractérisés
+# ─────────────────────────────────────────────────────────────────────────────
+
+def eval_backlog_prep_caracterise(df_all: pd.DataFrame) -> pd.DataFrame:
+    """
+    KPI : Backlog préparation caractérisé
+    Dénominateur : Type d'ordre == 'ZCOR' ET Statut système commence par 'CRÉÉ' / 'CREE'
+    Numérateur / OUI : Statut utilisateur contient un token exact parmi ATPD, ATMR, ATER, ATRS, ATMO
+    NON : Aucun code de caractérisation préparation
+    """
+    if df_all.empty:
+        return pd.DataFrame()
+
+    type_ordre = df_all.get("Type d'ordre", pd.Series("", index=df_all.index)).fillna("").astype(str).str.strip().str.upper()
+    statut_sys = df_all.get("Statut système", pd.Series("", index=df_all.index)).fillna("").astype(str).str.strip().str.split().str[0]
+    scope = df_all[(type_ordre == "ZCOR") & statut_sys.isin(["CRÉÉ", "CREE"])].copy()
+
+    if scope.empty:
+        return pd.DataFrame()
+
+    statut_usr = scope.get("Statut utilisateur", pd.Series("", index=scope.index))
+    is_carac = statut_usr.apply(lambda x: match_exact_token(x, CODES_PREP_EXACT))
+
+    scope["KPI"] = "Backlog préparation caractérisé"
+    scope["Nom_KPI_Complet"] = "Backlog préparation caractérisé"
+    scope["Division"] = scope["Poste travail princ."].apply(get_division)
+    scope["Résultat"] = np.where(is_carac, "OUI", "NON")
+    scope["Motif_NON"] = np.where(
+        is_carac,
+        "",
+        scope.get("Statut utilisateur", "").fillna("").apply(
+            lambda s: f"Backlog préparation non caractérisé (Statut: {s if s else 'VIDE'})"
+        )
+    )
+    return scope
+
+
+def eval_backlog_plan_caracterise(df_all: pd.DataFrame) -> pd.DataFrame:
+    """
+    KPI : Backlog planification caractérisé
+    Dénominateur : Type d'ordre == 'ZCOR' ET Statut système commence par 'LANC' ET Contient SOPL == 0
+    Numérateur / OUI : Statut utilisateur contient un token exact parmi ATEI, ATAL, ATAS, AGAR, ATHS
+    NON : Aucun code de caractérisation planification
+    """
+    if df_all.empty:
+        return pd.DataFrame()
+
+    type_ordre = df_all.get("Type d'ordre", pd.Series("", index=df_all.index)).fillna("").astype(str).str.strip().str.upper()
+    statut_sys = df_all.get("Statut système", pd.Series("", index=df_all.index)).fillna("").astype(str).str.strip().str.split().str[0]
+    sopl = df_all.get("Contient SOPL", pd.Series(0, index=df_all.index))
+
+    scope = df_all[(type_ordre == "ZCOR") & (statut_sys == "LANC") & (sopl == 0)].copy()
+    if scope.empty:
+        return pd.DataFrame()
+
+    statut_usr = scope.get("Statut utilisateur", pd.Series("", index=scope.index))
+    is_carac = statut_usr.apply(lambda x: match_exact_token(x, CODES_PLAN_EXACT))
+
+    scope["KPI"] = "Backlog planification caractérisé"
+    scope["Nom_KPI_Complet"] = "Backlog planification caractérisé"
+    scope["Division"] = scope["Poste travail princ."].apply(get_division)
+    scope["Résultat"] = np.where(is_carac, "OUI", "NON")
+    scope["Motif_NON"] = np.where(
+        is_carac,
+        "",
+        scope.get("Statut utilisateur", "").fillna("").apply(
+            lambda s: f"Backlog planification non caractérisé (Statut: {s if s else 'VIDE'})"
+        )
+    )
+    return scope
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 4. ÉVALUATION DÉDIÉE : OT CONFIME et OT_COR_EGAL
+# ─────────────────────────────────────────────────────────────────────────────
+
+def eval_ot_confime(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    KPI : OT CONFIME
+    Dénominateur : Statut OT in ['CLOT', 'TCLO']
+    Numérateur / OUI : Statut système contient 'CONF'
+    NON : Heures réelles non confirmées
+    """
+    if df.empty:
+        return pd.DataFrame()
+
+    statut_ot = df.get("Statut OT", pd.Series("", index=df.index)).fillna("").astype(str)
+    statut_sys = df.get("Statut système", pd.Series("", index=df.index)).fillna("").astype(str)
+    scope = df[statut_ot.isin(["CLOT", "TCLO"]) | statut_sys.str.contains("CLOT|TCLO", na=False)].copy()
+
+    if scope.empty:
+        return pd.DataFrame()
+
+    is_conf = scope["Statut système"].fillna("").astype(str).str.contains("CONF", na=False)
+    scope["KPI"] = "OT CONFIME"
+    scope["Nom_KPI_Complet"] = "OT Confirmé (Heures réelles)"
+    scope["Division"] = scope["Poste travail princ."].apply(get_division)
+    scope["Résultat"] = np.where(is_conf, "OUI", "NON")
+    scope["Motif_NON"] = np.where(
+        is_conf,
+        "",
+        "Heures réelles non confirmées (statut CONF manquant dans Statut système)"
+    )
+    return scope
+
+
+def eval_ot_cor_egal(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    KPI : OT_COR_EGAL
+    Dénominateur : Type d'ordre == 'ZCOR' ET Statut OT in ['CLOT', 'TCLO']
+    Numérateur / OUI : Total coûts réels != 0 ET Total coûts réels != Total coûts budgétés
+    NON : Coûts réels = 0 OU Coûts réels = Coûts budgétés
+    """
+    if df.empty:
+        return pd.DataFrame()
+
+    statut_ot = df.get("Statut OT", pd.Series("", index=df.index)).fillna("").astype(str)
+    statut_sys = df.get("Statut système", pd.Series("", index=df.index)).fillna("").astype(str)
+    type_ordre = df.get("Type d'ordre", pd.Series("", index=df.index)).fillna("").astype(str).str.strip().str.upper()
+
+    is_clot = statut_ot.isin(["CLOT", "TCLO"]) | statut_sys.str.contains("CLOT|TCLO", na=False)
+    scope = df[is_clot & (type_ordre == "ZCOR")].copy()
+
+    if scope.empty:
+        return pd.DataFrame()
+
+    b = pd.to_numeric(scope.get("Total coûts budgétés", 0), errors="coerce").fillna(0)
+    r = pd.to_numeric(scope.get("Total coûts réels", 0), errors="coerce").fillna(0)
+    is_ok = (b != r) & (r != 0)
+
+    scope["KPI"] = "OT_COR_EGAL"
+    scope["Nom_KPI_Complet"] = "Cohérence Coûts Réels / Budgétés (OT_COR_EGAL)"
+    scope["Division"] = scope["Poste travail princ."].apply(get_division)
+    scope["Résultat"] = np.where(is_ok, "OUI", "NON")
+
+    motifs = []
+    for bi, ri in zip(b, r):
+        if ri == 0:
+            motifs.append("Coûts réels non saisis (= 0 DH)")
+        elif bi == ri:
+            motifs.append(f"Coûts réels identiques au budget (= {ri:,.0f} DH, non ajustés)")
+        else:
+            motifs.append("")
+    scope["Motif_NON"] = motifs
+    return scope
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 5. ÉVALUATION DÉDIÉE : Taux d'Approbation des Avis
+# ─────────────────────────────────────────────────────────────────────────────
+
+def eval_taux_approbation_avis(avf: pd.DataFrame) -> pd.DataFrame:
+    """
+    KPI : Taux d'approbation des Avis
+    Dénominateur : Avis sans ordre, type ZU, Z4, ZR, ZP, non ACLO
+    Numérateur / OUI : Statut utilisateur in ['APRV', 'APRV AVAU']
+    NON : En attente d'approbation
+    """
+    if avf.empty:
+        return pd.DataFrame()
+
+    scope = avf.copy()
+    _non_aclo = pd.Series(True, index=scope.index)
+    if "Statut système" in scope.columns:
+        _non_aclo = _non_aclo & ~scope["Statut système"].fillna("").astype(str).str.contains("ACLO", case=False, na=False)
+    if "Statut utilisateur" in scope.columns:
+        _non_aclo = _non_aclo & ~scope["Statut utilisateur"].fillna("").astype(str).str.contains("ACLO", case=False, na=False)
+    scope = scope[_non_aclo].copy()
+
+    if scope.empty:
+        return pd.DataFrame()
+
+    statut_usr = scope.get("Statut utilisateur", pd.Series("", index=scope.index)).fillna("").astype(str).str.strip()
+    is_aprv = statut_usr.isin(["APRV", "APRV AVAU"])
+
+    scope["KPI"] = "Taux d'approbation des Avis"
+    scope["Nom_KPI_Complet"] = "Taux d'approbation des Avis"
+    scope["Division"] = scope["Poste travail princ."].apply(get_division)
+    scope["Résultat"] = np.where(is_aprv, "OUI", "NON")
+    scope["Motif_NON"] = np.where(
+        is_aprv,
+        "",
+        scope["Statut utilisateur"].apply(lambda s: f"Avis en attente d'approbation (Statut: {s if s else 'NON RENSEIGNÉ'})")
+    )
+    return scope
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 6. ÉVALUATION DÉDIÉE : KPI Préventif (Graissage, Inspection, Systématiques)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def eval_performance_graissage(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame()
+    sopl = df.get("Contient SOPL", pd.Series(0, index=df.index))
+    tw = pd.to_numeric(df.get("Type de travail", 0), errors="coerce").fillna(0)
+    scope = df[(sopl == 1) & (tw == 350)].copy()
+    if scope.empty:
+        return pd.DataFrame()
+
+    statut_ot = scope.get("Statut OT", pd.Series("", index=scope.index)).fillna("").astype(str)
+    is_clot = statut_ot.isin(["CLOT", "TCLO"])
+    scope["KPI"] = "Performance Graissage"
+    scope["Nom_KPI_Complet"] = "Performance Graissage"
+    scope["Division"] = scope["Poste travail princ."].apply(get_division)
+    scope["Résultat"] = np.where(is_clot, "OUI", "NON")
+    scope["Motif_NON"] = np.where(is_clot, "", "OT de tournées de graissage non clôturé")
+    return scope
+
+
+def eval_performance_inspection(df: pd.DataFrame, now_ts) -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame()
+    sopl = df.get("Contient SOPL", pd.Series(0, index=df.index))
+    tw = pd.to_numeric(df.get("Type de travail", 0), errors="coerce").fillna(0)
+    dt_plan = pd.to_datetime(df.get("Date de début planifiée"), errors="coerce")
+    scope = df[(sopl == 1) & (tw.isin([290, 300, 310])) & dt_plan.notna() & (dt_plan <= now_ts)].copy()
+    if scope.empty:
+        return pd.DataFrame()
+
+    statut_ot = scope.get("Statut OT", pd.Series("", index=scope.index)).fillna("").astype(str)
+    is_clot = statut_ot.isin(["CLOT", "TCLO"])
+    scope["KPI"] = "Performance Inspection"
+    scope["Nom_KPI_Complet"] = "Performance Inspection"
+    scope["Division"] = scope["Poste travail princ."].apply(get_division)
+    scope["Résultat"] = np.where(is_clot, "OUI", "NON")
+    scope["Motif_NON"] = np.where(is_clot, "", "OT d'inspection échu non clôturé")
+    return scope
+
+
+def eval_performance_systematiques(df: pd.DataFrame, now_ts) -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame()
+    sopl = df.get("Contient SOPL", pd.Series(0, index=df.index))
+    tw = pd.to_numeric(df.get("Type de travail", 0), errors="coerce").fillna(0)
+    dt_plan = pd.to_datetime(df.get("Date de début planifiée"), errors="coerce")
+    scope = df[(sopl == 1) & (tw == 360) & dt_plan.notna() & (dt_plan <= now_ts)].copy()
+    if scope.empty:
+        return pd.DataFrame()
+
+    statut_ot = scope.get("Statut OT", pd.Series("", index=scope.index)).fillna("").astype(str)
+    is_clot = statut_ot.isin(["CLOT", "TCLO"])
+    scope["KPI"] = "Performance Systématiques"
+    scope["Nom_KPI_Complet"] = "Performance Systématiques"
+    scope["Division"] = scope["Poste travail princ."].apply(get_division)
+    scope["Résultat"] = np.where(is_clot, "OUI", "NON")
+    scope["Motif_NON"] = np.where(is_clot, "", "OT d'intervention systématique échu non clôturé")
+    return scope
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 7. ÉVALUATION DÉDIÉE : KPIs d'Âge (Préparation, Planification, Exécution)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def eval_ages_kpi(df_all: pd.DataFrame, phase: str, now_ts) -> tuple:
+    """
+    Évalue les 3 tranches d'âge pour une phase donnée ('prep', 'plan', 'exec').
+    Retourne (df_inf, df_1_3, df_sup) :
+      - df_inf : Tranche < 1 mois (NON = anomalie si non caractérisé dans < 1 mois)
+      - df_1_3 : Tranche 1-3 mois (NON = anomalie si non caractérisé dans 1-3 mois)
+      - df_sup : Tranche > 3 mois (NON = anomalie si non caractérisé dans > 3 mois)
+    """
+    if df_all.empty:
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
+    type_ordre = df_all.get("Type d'ordre", pd.Series("", index=df_all.index)).fillna("").astype(str).str.strip().str.upper()
+
+    if phase == "prep":
+        statut_sys = df_all.get("Statut système", pd.Series("", index=df_all.index)).fillna("").astype(str).str.strip().str.split().str[0]
+        scope = df_all[(type_ordre == "ZCOR") & statut_sys.isin(["CRÉÉ", "CREE"])].copy()
+        is_carac = scope.get("Statut utilisateur", pd.Series("", index=scope.index)).apply(lambda x: match_exact_token(x, CODES_PREP_EXACT))
+        age_col = "amp"
+        cat_col = "ap"
+        prefix = "OT préparation"
+    elif phase == "plan":
+        statut_sys = df_all.get("Statut système", pd.Series("", index=df_all.index)).fillna("").astype(str).str.strip().str.split().str[0]
+        sopl = df_all.get("Contient SOPL", pd.Series(0, index=df_all.index))
+        scope = df_all[(type_ordre == "ZCOR") & (statut_sys == "LANC") & (sopl == 0)].copy()
+        is_carac = scope.get("Statut utilisateur", pd.Series("", index=scope.index)).apply(lambda x: match_exact_token(x, CODES_PLAN_EXACT))
+        age_col = "amlp"
+        cat_col = "alp"
+        prefix = "OT planification"
+    elif phase == "exec":
+        statut_sys = df_all.get("Statut système", pd.Series("", index=df_all.index)).fillna("").astype(str)
+        statut_ot = df_all.get("Statut OT", pd.Series("", index=df_all.index)).fillna("").astype(str)
+        statut_usr = df_all.get("Statut utilisateur", pd.Series("", index=df_all.index)).fillna("").astype(str)
+        _statut_lanc_ex = (statut_sys.str.strip().str.split().str[0] == "LANC") | (statut_sys.str.contains("LANC", na=False) & ~statut_sys.str.contains("CLOT|TCLO", na=False))
+        _non_clot_ex = ~statut_ot.isin(["CLOT", "TCLO"])
+        _contient_sopl_ex = (df_all.get("Contient SOPL", pd.Series(0, index=df_all.index)) == 1) | statut_usr.str.contains("SOPL", case=False, na=False)
+        scope = df_all[(type_ordre == "ZCOR") & _statut_lanc_ex & _non_clot_ex & _contient_sopl_ex].copy()
+        is_carac = scope.get("Statut utilisateur", pd.Series("", index=scope.index)).apply(lambda x: match_exact_token(x, ALL_CARAC_EXACT))
+        age_col = "amex"
+        cat_col = "aex"
+        prefix = "OT exécution"
+    else:
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
+    if scope.empty:
+        return pd.DataFrame(), pd.DataFrame(), pd.DataFrame()
+
+    scope["Division"] = scope["Poste travail princ."].apply(get_division)
+    ages = pd.to_numeric(scope.get(age_col, 0), errors="coerce").fillna(0)
+    cats = scope.get(cat_col, pd.Series("<1 mois", index=scope.index)).fillna("<1 mois")
+
+    # ── KPI <1 mois (Anomalie = non caractérisé dans < 1 mois) ──
+    df_inf = scope.copy()
+    kpi_inf_name = f"{prefix} <1 mois"
+    df_inf["KPI"] = kpi_inf_name
+    df_inf["Nom_KPI_Complet"] = kpi_inf_name
+    is_ano_inf = (~is_carac) & (cats.isin(["<1 mois", "Inconnu"]) | (ages <= 30))
+    df_inf["Résultat"] = np.where(is_ano_inf, "NON", "OUI")
+    df_inf["Motif_NON"] = np.where(
+        is_ano_inf,
+        ages.apply(lambda a: f"OT {prefix.lower()} non caractérisé (< 1 mois : {int(a)} j.)"),
+        ""
+    )
+
+    # ── KPI 1mois< <3mois (Anomalie = non caractérisé dans 1-3 mois) ──
+    df_1_3 = scope.copy()
+    kpi_1_3_name = f"{prefix} 1mois< <3mois"
+    df_1_3["KPI"] = kpi_1_3_name
+    df_1_3["Nom_KPI_Complet"] = kpi_1_3_name
+    is_ano_1_3 = (~is_carac) & ((cats == "1 mois < <3 mois") | ((ages > 30) & (ages <= 90)))
+    df_1_3["Résultat"] = np.where(is_ano_1_3, "NON", "OUI")
+    df_1_3["Motif_NON"] = np.where(
+        is_ano_1_3,
+        ages.apply(lambda a: f"OT {prefix.lower()} non caractérisé (tranche 1 à 3 mois : {int(a)} j.)"),
+        ""
+    )
+
+    # ── KPI >3 mois (Anomalie = non caractérisé dans > 3 mois) ──
+    df_sup = scope.copy()
+    kpi_sup_name = f"{prefix} >3 mois"
+    df_sup["KPI"] = kpi_sup_name
+    df_sup["Nom_KPI_Complet"] = kpi_sup_name
+    is_ano_sup = (~is_carac) & ((cats == ">3 mois") | (ages > 90))
+    df_sup["Résultat"] = np.where(is_ano_sup, "NON", "OUI")
+    df_sup["Motif_NON"] = np.where(
+        is_ano_sup,
+        ages.apply(lambda a: f"OT {prefix.lower()} non caractérisé (> 3 mois : {int(a)} j.)"),
+        ""
+    )
+
+    return df_inf, df_1_3, df_sup
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 8. CONSOLIDATION GLOBALE : TABLE DE CONTRÔLE SOURCE UNIQUE
+# ─────────────────────────────────────────────────────────────────────────────
+
+def build_table_controle_complete(df_period: pd.DataFrame, avdf_period: pd.DataFrame,
+                                  now_ts, df_full: pd.DataFrame = None) -> pd.DataFrame:
+    """
+    Construit la table unique de contrôle pour tous les KPIs.
+    """
+    df_all = df_full if df_full is not None else df_period
+
+    evals = [
+        eval_ot_lanc_estime(df_period),
+        eval_taux_realisation_correctif(df_period),
+        eval_backlog_prep_caracterise(df_all),
+        eval_backlog_plan_caracterise(df_all),
+        eval_ot_confime(df_period),
+        eval_ot_cor_egal(df_period),
+        eval_taux_approbation_avis(avdf_period),
+        eval_performance_graissage(df_period),
+        eval_performance_inspection(df_period, now_ts),
+        eval_performance_systematiques(df_period, now_ts),
+    ]
+
+    for phase in ["prep", "plan", "exec"]:
+        d_inf, d_1_3, d_sup = eval_ages_kpi(df_all, phase, now_ts)
+        evals.extend([d_inf, d_1_3, d_sup])
+
+    valides = [d for d in evals if not d.empty]
+    if not valides:
+        return pd.DataFrame()
+
+    cols_standard = [
+        "Ordre", "Avis", "Poste travail princ.", "Division", "KPI",
+        "Résultat", "Motif_NON", "Statut système", "Statut utilisateur", "Statut OT",
+        "Créé le", "Date de début planifiée", "Total coûts budgétés", "Total coûts réels",
+        "Désignation", "Poste technique", "Type d'ordre", "Type de travail",
+    ]
+
+    chunks = []
+    for sub in valides:
+        c_sub = pd.DataFrame(index=sub.index)
+        for c in cols_standard:
+            c_sub[c] = sub[c] if c in sub.columns else ""
+        if "Age" in sub.columns:
+            c_sub["Age"] = sub["Age"]
+        elif "amp" in sub.columns and "préparation" in str(sub["KPI"].iloc[0]):
+            c_sub["Age"] = sub["amp"]
+        elif "amlp" in sub.columns and "planification" in str(sub["KPI"].iloc[0]):
+            c_sub["Age"] = sub["amlp"]
+        elif "amex" in sub.columns and "exécution" in str(sub["KPI"].iloc[0]):
+            c_sub["Age"] = sub["amex"]
+        else:
+            c_sub["Age"] = np.nan
+        chunks.append(c_sub)
+
+    table = pd.concat(chunks, ignore_index=True)
+    return table
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 9. CALCUL DE SYNTHÈSE PAR DIVISION ET POSTE
+# ─────────────────────────────────────────────────────────────────────────────
+
+def get_kpi_summary(table_controle: pd.DataFrame, kpi_name: str) -> dict:
+    """
+    Calcule le résumé Total, OUI, NON, KPI % pour un KPI donné :
+    par Poste, pour SF1, pour SF2, et Total Général.
+    """
+    if table_controle.empty:
+        return {"postes": pd.DataFrame(), "divisions": pd.DataFrame(), "total": {}}
+
+    sub = table_controle[table_controle["KPI"] == kpi_name].copy()
+    if sub.empty:
+        return {"postes": pd.DataFrame(), "divisions": pd.DataFrame(), "total": {}}
+
+    def _calc_grp(grp):
+        tot = len(grp)
+        oui = int((grp["Résultat"] == "OUI").sum())
+        non = int((grp["Résultat"] == "NON").sum())
+        if kpi_name in LOWER_BETTER:
+            tx = round((non / tot * 100), 2) if tot > 0 else 0.0
+        else:
+            tx = round((oui / tot * 100), 2) if tot > 0 else 100.0
+        return pd.Series({"Total": tot, "OUI": oui, "NON": non, "KPI %": tx})
+
+    p_summary = sub.groupby("Poste travail princ.").apply(_calc_grp).reset_index()
+    d_summary = sub.groupby("Division").apply(_calc_grp).reset_index()
+
+    tot = len(sub)
+    oui = int((sub["Résultat"] == "OUI").sum())
+    non = int((sub["Résultat"] == "NON").sum())
+    if kpi_name in LOWER_BETTER:
+        tx = round((non / tot * 100), 2) if tot > 0 else 0.0
+    else:
+        tx = round((oui / tot * 100), 2) if tot > 0 else 100.0
+    tot_summary = {"Total": tot, "OUI": oui, "NON": non, "KPI %": tx}
+
+    return {"postes": p_summary, "divisions": d_summary, "total": tot_summary}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 10. GÉNÉRATION DU FICHIER EXCEL MULTI-FEUILLES (NON_DETAIL, PAR POSTE, SYNTHÈSE)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def build_anomalies_excel_unified(table_controle: pd.DataFrame, kpi_filter=None) -> bytes:
+    """
+    Génère le fichier Excel d'audit et anomalies conforme aux exigences :
+      - Feuille 1 : NON_DETAIL (toutes les lignes NON)
+      - Feuille 2 : ANOMALIES_KPI_POSTE (Poste de travail | KPI | Nombre NON)
+      - Feuille 3 : SYNTHESE_KPI (KPI | Total | OUI | NON | KPI %)
+    """
+    tbl = table_controle.copy()
+    if kpi_filter:
+        tbl = tbl[tbl["KPI"] == kpi_filter]
+
+    wb = Workbook()
+    if "Sheet" in wb.sheetnames:
+        del wb["Sheet"]
+
+    hf = Font(bold=True, color="FFFFFF", size=10)
+    hfl = PatternFill(start_color="1E3A5F", end_color="1E3A5F", fill_type="solid")
+    tb = Border(left=Side(style="thin", color="CBD5E1"), right=Side(style="thin", color="CBD5E1"),
+                top=Side(style="thin", color="CBD5E1"), bottom=Side(style="thin", color="CBD5E1"))
+
+    # ── Feuille 1 : NON_DETAIL ──
+    ws1 = wb.create_sheet("NON_DETAIL")
+    non_df = tbl[tbl["Résultat"] == "NON"].copy()
+
+    cols_non = [
+        "Ordre", "Avis", "Poste travail princ.", "Division", "KPI",
+        "Résultat", "Motif_NON", "Age", "Statut OT", "Statut système", "Statut utilisateur",
+        "Total coûts budgétés", "Total coûts réels", "Date de début planifiée", "Créé le",
+        "Désignation", "Poste technique",
+    ]
+    cols_exist = [c for c in cols_non if c in non_df.columns]
+
+    for j, c in enumerate(cols_exist, 1):
+        cell = ws1.cell(row=1, column=j, value=c)
+        cell.font, cell.fill, cell.border = hf, hfl, tb
+        cell.alignment = Alignment(horizontal="center")
+
+    for i, row in enumerate(non_df[cols_exist].itertuples(index=False), 2):
+        for j, val in enumerate(row, 1):
+            cell = ws1.cell(row=i, column=j, value="" if pd.isna(val) else str(val))
+            cell.border = tb
+            if j in (1, 2, 4, 5, 6, 8):
+                cell.alignment = Alignment(horizontal="center")
+
+    # ── Feuille 2 : ANOMALIES_KPI_POSTE ──
+    ws2 = wb.create_sheet("ANOMALIES_KPI_POSTE")
+    if not non_df.empty:
+        piv = non_df.groupby(["Poste travail princ.", "KPI"]).size().reset_index(name="Nombre NON")
+    else:
+        piv = pd.DataFrame(columns=["Poste de travail", "KPI", "Nombre NON"])
+
+    cols_piv = ["Poste de travail", "KPI", "Nombre NON"]
+    for j, c in enumerate(cols_piv, 1):
+        cell = ws2.cell(row=1, column=j, value=c)
+        cell.font, cell.fill, cell.border = hf, hfl, tb
+        cell.alignment = Alignment(horizontal="center")
+
+    for i, row in enumerate(piv.itertuples(index=False), 2):
+        for j, val in enumerate(row, 1):
+            cell = ws2.cell(row=i, column=j, value=val)
+            cell.border = tb
+            cell.alignment = Alignment(horizontal="center" if j == 3 else "left")
+
+    # ── Feuille 3 : SYNTHESE_KPI ──
+    ws3 = wb.create_sheet("SYNTHESE_KPI")
+    synth_rows = []
+    for k in tbl["KPI"].unique():
+        sub_k = tbl[tbl["KPI"] == k]
+        tot = len(sub_k)
+        oui = int((sub_k["Résultat"] == "OUI").sum())
+        non = int((sub_k["Résultat"] == "NON").sum())
+        if k in LOWER_BETTER:
+            tx = round((non / tot * 100), 2) if tot > 0 else 0.0
+        else:
+            tx = round((oui / tot * 100), 2) if tot > 0 else 100.0
+        synth_rows.append({"KPI": k, "Total": tot, "OUI": oui, "NON": non, "KPI %": f"{tx:.1f} %"})
+
+    synth_df = pd.DataFrame(synth_rows)
+    cols_synth = ["KPI", "Total", "OUI", "NON", "KPI %"]
+    for j, c in enumerate(cols_synth, 1):
+        cell = ws3.cell(row=1, column=j, value=c)
+        cell.font, cell.fill, cell.border = hf, hfl, tb
+        cell.alignment = Alignment(horizontal="center")
+
+    for i, row in enumerate(synth_df.itertuples(index=False), 2):
+        for j, val in enumerate(row, 1):
+            cell = ws3.cell(row=i, column=j, value=val)
+            cell.border = tb
+            cell.alignment = Alignment(horizontal="center" if j > 1 else "left")
+
+    # Ajustement largeur des colonnes
+    for ws in [ws1, ws2, ws3]:
+        for col in ws.columns:
+            max_len = max(len(str(cell.value or "")) for cell in col)
+            col_letter = col[0].column_letter
+            ws.column_dimensions[col_letter].width = min(40, max(12, max_len + 3))
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
