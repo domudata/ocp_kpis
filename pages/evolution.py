@@ -5,12 +5,19 @@ import pandas as pd
 from core.constants import QK, PK
 from components.sparklines import get_sparkline_html, get_comparison_html
 from components.tables import html_synthese_table
+from components.charts import render_suivi_anomalies_semaine
 
 
 def render_evolution_tab(hist_df: pd.DataFrame, var_df: pd.DataFrame,
                           journal_df: pd.DataFrame, top5_df: pd.DataFrame,
                           bot5_df: pd.DataFrame, synth_perf: dict,
-                          synth_qual: dict, vp: list) -> None:
+                          synth_qual: dict, vp: list,
+                          now_ts: pd.Timestamp = None) -> None:
+    # ── NOUVEAU système de suivi hebdomadaire des anomalies (demande
+    # explicite, identique à celui du Dashboard) ──
+    render_suivi_anomalies_semaine(vp, hist_df, now_ts or pd.Timestamp.today(), "evol")
+    st.markdown("---")
+
     # NOTE : journal_df, top5_df, bot5_df restent acceptés en paramètres
     # (pour ne pas casser l'appel depuis app.py) mais ne sont plus
     # affichés — sections "Journal des variations" et "Dégradations /
