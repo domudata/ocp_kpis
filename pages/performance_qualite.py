@@ -118,11 +118,43 @@ def _detail_et_telechargement(poste, kpi, ano_map, anomaly_dfs, cle_prefix):
     )
 
 
+def _colorer_pct(colonne_pct, kpi, liste_kpi):
+    """AJOUTÉ (demande explicite, comme la version précédente) : couleur
+    de fond vert/jaune/rouge pour une colonne '{KPI} (%)', selon la
+    VRAIE cible et le sens (lower/higher-is-better) de ce KPI précis."""
+    cible = CIBLE.get(kpi, 100)
+    lower = is_lb(kpi)
+    styles = []
+    for v in colonne_pct:
+        if pd.isna(v):
+            styles.append("")
+            continue
+        if lower:
+            ok, mid = v <= cible, v <= cible * 1.3
+        else:
+            ok, mid = v >= cible, v >= cible * 0.7
+        if ok:
+            styles.append("background-color:#10b98133;color:#065f46;font-weight:600;")
+        elif mid:
+            styles.append("background-color:#f59e0b33;color:#92400e;font-weight:600;")
+        else:
+            styles.append("background-color:#ef444433;color:#991b1b;font-weight:600;")
+    return styles
+
+
 def _rendre_domaine(vp, ckdf, ano_map, anomaly_dfs, nd_full, liste_kpi, cle_prefix, style_stl):
     st.markdown(f'<div class="stl {style_stl}">Vue d\'ensemble (style export)</div>', unsafe_allow_html=True)
     tbl_large = _tableau_large(vp, ckdf, liste_kpi, nd_full, ano_map)
+
+    # Coloration conditionnelle des colonnes "(%)" (une par KPI)
+    styler = tbl_large.style
+    for kpi in liste_kpi:
+        col = f"{kpi} (%)"
+        if col in tbl_large.columns:
+            styler = styler.apply(lambda s, k=kpi: _colorer_pct(s, k, liste_kpi), subset=[col])
+
     event_large = st.dataframe(
-        tbl_large, use_container_width=True, hide_index=True,
+        styler, use_container_width=True, hide_index=True,
         on_select="rerun", selection_mode="single-row",
         height=min(500, 45 + 35 * len(tbl_large)),
         key=f"{cle_prefix}_tbl_large_select",
