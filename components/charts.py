@@ -401,7 +401,7 @@ def show_butterfly_comparison(postes: list,
     fig.add_trace(go.Bar(
         y=postes, x=[-v for v in perf_prec], orientation='h',
         name=f"Performance — {label_prec}", marker=dict(color="#93c5fd", line=dict(color='white', width=0.5)),
-        text=[f"{v:.0f}%" for v in perf_prec], textposition='outside',
+        text=[f"{v:.0f}%" for v in perf_prec], textposition='inside', insidetextanchor='start',
         textfont=dict(size=12, family='Inter', color='black'),
         hovertemplate="<b>%{y}</b><br>Performance " + label_prec + " : %{customdata:.1f}%<extra></extra>",
         customdata=perf_prec, offsetgroup="prec",
@@ -409,7 +409,7 @@ def show_butterfly_comparison(postes: list,
     fig.add_trace(go.Bar(
         y=postes, x=[-v for v in qual_prec], orientation='h',
         name=f"Qualité — {label_prec}", marker=dict(color="#86efac", line=dict(color='white', width=0.5)),
-        text=[f"{v:.0f}%" for v in qual_prec], textposition='outside',
+        text=[f"{v:.0f}%" for v in qual_prec], textposition='inside', insidetextanchor='start',
         textfont=dict(size=12, family='Inter', color='black'),
         hovertemplate="<b>%{y}</b><br>Qualité " + label_prec + " : %{customdata:.1f}%<extra></extra>",
         customdata=qual_prec, offsetgroup="prec",
@@ -461,10 +461,76 @@ def show_scores_hbar(vp, scores: dict, title, s1=S1_DEFAULT, s2=S2_DEFAULT):
     show_hbar_thresholds(postes, vals, title, s1, s2)
 
 
+def _dessiner_barre_horizontale_semaine_division(postes_div, par_poste, detail_par_poste,
+                                                   key_prefix) -> None:
+    """Dessine UN graphique bar HORIZONTAL (système hebdomadaire par
+    semaine calendaire, page Suivi Évolution) pour une division (SF1 ou
+    SF2), avec le nombre traité affiché à l'extérieur de la barre."""
+    sous = par_poste[par_poste["Poste"].isin(postes_div)] if not par_poste.empty else par_poste
+    if sous.empty:
+        st.markdown('<div style="padding:12px;color:#94a3b8;">Aucun poste.</div>', unsafe_allow_html=True)
+        return
+
+    sous = sous.sort_values("Anomalies semaine", ascending=False)
+    postes_tries = sous["Poste"].tolist()
+    anomalies = sous["Anomalies semaine"].tolist()
+    traitees = sous["Anomalies traitees"].tolist()
+    textes = [f"{a} ({t} traité)" if t > 0 else f"{a}" for a, t in zip(anomalies, traitees)]
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        y=postes_tries, x=anomalies, orientation='h', name="Anomalies de la semaine",
+        marker=dict(color="#f97316", line=dict(color='white', width=1)),
+        text=textes, textposition='outside', textfont=dict(size=12, family='Inter', color='black'),
+    ))
+    fig.update_layout(
+        height=max(320, 38 * len(postes_tries) + 100),
+        yaxis=dict(autorange="reversed", tickfont=dict(size=11, family='Inter'), fixedrange=True, automargin=True),
+        xaxis=dict(showgrid=True, gridcolor="#F1F5F9", fixedrange=True, title="Nombre d'anomalies"),
+        plot_bgcolor='white', paper_bgcolor='white',
+        margin=dict(t=20, b=40, l=20, r=60),
+    )
+    event = st.plotly_chart(
+        fig, use_container_width=True, config=PLOTLY_CONFIG,
+        on_select="rerun", selection_mode="points", key=f"{key_prefix}_chart",
+    )
+
+    points = event.selection.points if event and event.selection else []
+    if points:
+        poste_sel = points[0].get("y")
+        detail = detail_par_poste.get(poste_sel)
+        if detail is not None and not detail.empty:
+            st.markdown(f"**🔍 Détail par KPI — {poste_sel}**")
+            fig2 = go.Figure()
+            fig2.add_trace(go.Bar(
+                y=detail["KPI"], x=detail["Anomalies semaine"], orientation='h',
+                marker=dict(color="#f97316"),
+                text=detail["Anomalies semaine"].astype(str), textposition='outside',
+                textfont=dict(color='black'),
+            ))
+            fig2.update_layout(
+                height=max(280, 36 * len(detail) + 90),
+                yaxis=dict(autorange="reversed", fixedrange=True, automargin=True),
+                xaxis=dict(showgrid=True, gridcolor="#F1F5F9", fixedrange=True),
+                plot_bgcolor='white', paper_bgcolor='white',
+                margin=dict(t=20, b=40, l=20, r=40),
+            )
+            st.plotly_chart(fig2, use_container_width=True, config=PLOTLY_CONFIG,
+                             key=f"{key_prefix}_detail_{poste_sel}")
+        else:
+            st.info("Détail indisponible pour ce poste.")
+    else:
+        st.caption("👆 Cliquez sur une barre pour voir le détail par KPI.")
+
+
 def _dessiner_suivi_anomalies(res: dict, key_prefix: str) -> None:
-    """Dessine le graphique empilé + détail au clic, à partir d'un
-    résultat déjà calculé par calculate_suivi_anomalies_semaine (partagé
-    entre Dashboard et Suivi Évolution, avec ou sans filtre de semaine)."""
+    """
+    CORRIGÉ (demande explicite) : SÉPARÉ en 2 graphiques bar HORIZONTAUX
+    côte à côte — SF1 = « Maroc Chimie » à gauche, SF2 = « FEEDS » à
+    droite — au lieu d'un seul graphique vertical mélangeant les 2
+    divisions. Cycle hebdomadaire : compte les anomalies de la semaine
+    en cours ; au 1er jour de la semaine suivante, compare pour afficher
+    combien ont été traitées durant la semaine précédente."""
     par_poste = res["par_poste"]
     if par_poste.empty:
         st.markdown(
@@ -475,92 +541,27 @@ def _dessiner_suivi_anomalies(res: dict, key_prefix: str) -> None:
         return
 
     label_semaine = f"Semaine {res['num_semaine_actuelle']}"
-    mode_statique = res["date_prec"] is None
-    if mode_statique:
-        st.caption(f"📅 {label_semaine} — première extraction de cette semaine : total général affiché, "
-                    f"en attente de la prochaine extraction pour voir ce qui aura été traité.")
+    if res["date_prec"] is None:
+        st.caption(f"📅 {label_semaine} — première extraction de cette semaine : total affiché, "
+                    f"en attente de la semaine suivante pour voir ce qui aura été traité.")
     else:
         st.caption(f"📅 {label_semaine} (comparée à Semaine {res['num_semaine_precedente']})")
 
-    postes = par_poste["Poste"].tolist()
-    anomalies = par_poste["Anomalies semaine"].tolist()
-    traitees = par_poste["Anomalies traitees"].tolist()
+    tous_postes = par_poste["Poste"].tolist()
+    postes_sf1 = [p for p in tous_postes if str(p).startswith("SF1")]
+    postes_sf2 = [p for p in tous_postes if str(p).startswith("SF2")]
 
-    fig = go.Figure()
-    if not mode_statique:
-        fig.add_trace(go.Bar(
-            x=postes, y=traitees, name="Traitées depuis la semaine précédente",
-            marker=dict(color="#10b981", line=dict(color='white', width=1)),
-            text=[str(v) if v > 0 else "" for v in traitees], textposition='inside',
-        ))
-        fig.add_trace(go.Bar(
-            x=postes, y=anomalies, name=f"Restantes — {label_semaine}",
-            marker=dict(color="#f97316", line=dict(color='white', width=1)),
-            text=[str(v) for v in anomalies], textposition='inside',
-        ))
-        barmode = 'stack'
-    else:
-        fig.add_trace(go.Bar(
-            x=postes, y=anomalies, name=f"Total anomalies — {label_semaine}",
-            marker=dict(color="#f97316", line=dict(color='white', width=1)),
-            text=[str(v) for v in anomalies], textposition='outside',
-        ))
-        barmode = 'group'
-
-    fig.update_layout(
-        barmode=barmode, height=420,
-        xaxis=dict(tickangle=-45, fixedrange=True),
-        yaxis=dict(showgrid=True, gridcolor="#F1F5F9", fixedrange=True,
-                   title="Nombre d'anomalies (total semaine précédente)" if not mode_statique else "Nombre d'anomalies"),
-        plot_bgcolor='white', paper_bgcolor='white',
-        legend=dict(orientation="h", yanchor="bottom", y=-0.35, x=0.5, xanchor="center"),
-        margin=dict(t=20, b=100, l=20, r=20),
-    )
-    event = st.plotly_chart(
-        fig, use_container_width=True, config=PLOTLY_CONFIG,
-        on_select="rerun", selection_mode="points", key=f"{key_prefix}_suivi_anom_chart",
-    )
-
-    points = event.selection.points if event and event.selection else []
-    if points:
-        poste_sel = points[0].get("x")
-        detail = res["detail_par_poste"].get(poste_sel)
-        if detail is not None and not detail.empty:
-            st.markdown(f"**🔍 Détail par KPI — {poste_sel}**")
-            fig2 = go.Figure()
-            if not mode_statique:
-                fig2.add_trace(go.Bar(
-                    y=detail["KPI"], x=detail["Anomalies traitees"], orientation='h',
-                    name="Traitées", marker=dict(color="#10b981"),
-                    text=detail["Anomalies traitees"].astype(str), textposition='inside',
-                ))
-                fig2.add_trace(go.Bar(
-                    y=detail["KPI"], x=detail["Anomalies semaine"], orientation='h',
-                    name="Restantes", marker=dict(color="#f97316"),
-                    text=detail["Anomalies semaine"].astype(str), textposition='inside',
-                ))
-                barmode2 = 'stack'
-            else:
-                fig2.add_trace(go.Bar(
-                    y=detail["KPI"], x=detail["Anomalies semaine"], orientation='h',
-                    name="Total", marker=dict(color="#f97316"),
-                    text=detail["Anomalies semaine"].astype(str), textposition='outside',
-                ))
-                barmode2 = 'group'
-            fig2.update_layout(
-                barmode=barmode2, height=max(300, 45 * len(detail) + 100),
-                yaxis=dict(autorange="reversed", fixedrange=True, automargin=True),
-                xaxis=dict(showgrid=True, gridcolor="#F1F5F9", fixedrange=True),
-                plot_bgcolor='white', paper_bgcolor='white',
-                legend=dict(orientation="h", yanchor="bottom", y=-0.15, x=0.5, xanchor="center"),
-                margin=dict(t=20, b=50, l=20, r=20),
-            )
-            st.plotly_chart(fig2, use_container_width=True, config=PLOTLY_CONFIG,
-                             key=f"{key_prefix}_suivi_anom_detail_{poste_sel}")
-        else:
-            st.info("Détail indisponible pour ce poste.")
-    else:
-        st.caption("👆 Cliquez sur les barres d'un poste pour voir le détail par KPI.")
+    col_sf1, col_sf2 = st.columns(2)
+    with col_sf1:
+        st.markdown("**🏭 Maroc Chimie (SF1)**")
+        _dessiner_barre_horizontale_semaine_division(
+            postes_sf1, par_poste, res["detail_par_poste"], f"{key_prefix}_sf1",
+        )
+    with col_sf2:
+        st.markdown("**🏭 FEEDS (SF2)**")
+        _dessiner_barre_horizontale_semaine_division(
+            postes_sf2, par_poste, res["detail_par_poste"], f"{key_prefix}_sf2",
+        )
 
 
 def _dessiner_barre_horizontale_division(postes_div, total_actuel, total_reference,
