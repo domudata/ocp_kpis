@@ -220,3 +220,134 @@ def evaluate_trend_last_n(hist_df: pd.DataFrame, section: str, kpi_list: list, n
                 "Écart": round(diff, 1), "Écart %": round(pct, 1), "Tendance": tendance,
             })
     return pd.DataFrame(rows)
+
+# ──────────────────────────────────────────────────────────────────
+# NOUVEAU : Système de suivi hebdomadaire du taux de traitement des
+# anomalies (demande explicite). Repose sur les sections déjà
+# enregistrées "ano_perf" / "ano_qual" (comptes d'anomalies par poste
+# et par KPI, une feuille par date d'extraction) — aucune nouvelle
+# source de données requise.
+#
+# Semaine = LUNDI à DIMANCHE (demande explicite précédente, réutilisée
+# ici pour la cohérence). "Semaine précédente" = les 7 jours juste
+# avant la semaine actuelle.
+# ──────────────────────────────────────────────────────────────────
+
+def get_bornes_semaines(now_ts: pd.Timestamp):
+    """Retourne (lundi_actuel, dimanche_actuel, lundi_precedent,
+    dimanche_precedent) pour la semaine calendaire (lundi->dimanche)
+    contenant now_ts, et la semaine juste avant."""
+    _now = pd.Timestamp(now_ts).normalize()
+    lundi_actuel = _now - pd.Timedelta(days=_now.weekday())
+    dimanche_actuel = lundi_actuel + pd.Timedelta(days=6)
+    lundi_precedent = lundi_actuel - pd.Timedelta(days=7)
+    dimanche_precedent = lundi_actuel - pd.Timedelta(days=1)
+    return lundi_actuel, dimanche_actuel, lundi_precedent, dimanche_precedent
+
+
+def _derniere_date_dans(hist_df: pd.DataFrame, section: str, debut, fin):
+    """Dernière date d'extraction (Date_parsed) de la section donnée
+    tombant dans [debut, fin] ; None si aucune."""
+    sub = hist_df[hist_df["_section"] == section]
+    dates = sub["Date_parsed"].dropna()
+    dates = dates[(dates >= debut) & (dates <= fin)]
+    return dates.max() if not dates.empty else None
+
+
+def calculate_taux_traitement(hist_df: pd.DataFrame, now_ts: pd.Timestamp,
+                               kpi_list_perf: list, kpi_list_qual: list) -> dict:
+    """
+    Calcule le TAUX DE TRAITEMENT des anomalies entre la semaine
+    précédente et la semaine actuelle (lundi->dimanche), à partir des
+    sections déjà enregistrées "ano_perf" et "ano_qual".
+
+    Taux de traitement (%) pour un (poste, KPI) donné :
+        - si anomalies_semaine_precedente == 0 : 100 (rien à traiter)
+        - sinon : (anomalies_prec - anomalies_act) / anomalies_prec * 100
+          (peut être négatif si les anomalies ont AUGMENTÉ — dégradation,
+          pas seulement absence de progrès)
+
+    Retourne un dict :
+      {
+        "dates": {...bornes des 2 semaines...},
+        "general": {"taux_pct": float, "anomalies_prec": int, "anomalies_act": int} ou None,
+        "par_poste": DataFrame [Poste, Anomalies precedentes, Anomalies actuelles, Taux traitement %],
+        "detail": DataFrame [Poste, Type, KPI, Anomalies precedentes, Anomalies actuelles, Taux traitement %],
+      }
+    Si les 2 semaines n'ont pas chacune au moins une extraction
+    enregistrée, retourne {"dates": {...}, "general": None, "par_poste": pd.DataFrame(), "detail": pd.DataFrame()}.
+    """
+    lundi_act, dim_act, lundi_prec, dim_prec = get_bornes_semaines(now_ts)
+    dates_info = {
+        "lundi_actuel": lundi_act, "dimanche_actuel": dim_act,
+        "lundi_precedent": lundi_prec, "dimanche_precedent": dim_prec,
+    }
+
+    if hist_df is None or hist_df.empty or "_section" not in hist_df.columns:
+        return {"dates": dates_info, "general": None, "par_poste": pd.DataFrame(), "detail": pd.DataFrame()}
+
+    date_act = max(
+        (_derniere_date_dans(hist_df, "ano_perf", lundi_act, dim_act),
+         _derniere_date_dans(hist_df, "ano_qual", lundi_act, dim_act)),
+        default=None, key=lambda d: (d is not None, d),
+    )
+    date_prec = max(
+        (_derniere_date_dans(hist_df, "ano_perf", lundi_prec, dim_prec),
+         _derniere_date_dans(hist_df, "ano_qual", lundi_prec, dim_prec)),
+        default=None, key=lambda d: (d is not None, d),
+    )
+    if date_act is None or date_prec is None:
+        return {"dates": dates_info, "general": None, "par_poste": pd.DataFrame(), "detail": pd.DataFrame()}
+
+    lignes_detail = []
+    for type_nom, section, kpi_list in [("Performance", "ano_perf", kpi_list_perf),
+                                          ("Qualite", "ano_qual", kpi_list_qual)]:
+        sub = hist_df[hist_df["_section"] == section]
+        if sub.empty or "Poste de travail" not in sub.columns:
+            continue
+        row_prec = sub[sub["Date_parsed"] == date_prec].set_index("Poste de travail")
+        row_act = sub[sub["Date_parsed"] == date_act].set_index("Poste de travail")
+        postes_communs = set(row_prec.index) & set(row_act.index)
+        for poste in postes_communs:
+            for kpi in kpi_list:
+                if kpi not in row_prec.columns or kpi not in row_act.columns:
+                    continue
+                try:
+                    a_prec = float(row_prec.loc[poste, kpi])
+                    a_act = float(row_act.loc[poste, kpi])
+                except Exception:
+                    continue
+                if pd.isna(a_prec) or pd.isna(a_act):
+                    continue
+                taux = 100.0 if a_prec == 0 else round((a_prec - a_act) / a_prec * 100, 1)
+                lignes_detail.append({
+                    "Poste": poste, "Type": type_nom, "KPI": kpi,
+                    "Anomalies precedentes": int(a_prec), "Anomalies actuelles": int(a_act),
+                    "Taux traitement %": taux,
+                })
+
+    detail_df = pd.DataFrame(lignes_detail)
+    if detail_df.empty:
+        return {"dates": dates_info, "general": None, "par_poste": pd.DataFrame(), "detail": detail_df}
+
+    # Agrégation GÉNÉRALE : sur le volume total d'anomalies (pondéré),
+    # pas la moyenne simple des % — un poste à 2 anomalies ne doit pas
+    # peser autant qu'un poste à 200 anomalies.
+    total_prec = detail_df["Anomalies precedentes"].sum()
+    total_act = detail_df["Anomalies actuelles"].sum()
+    taux_general = 100.0 if total_prec == 0 else round((total_prec - total_act) / total_prec * 100, 1)
+    general = {"taux_pct": taux_general, "anomalies_prec": int(total_prec), "anomalies_act": int(total_act)}
+
+    # Agrégation PAR POSTE : même logique, pondérée par le volume du poste.
+    par_poste = (
+        detail_df.groupby("Poste")[["Anomalies precedentes", "Anomalies actuelles"]]
+        .sum().reset_index()
+    )
+    par_poste["Taux traitement %"] = par_poste.apply(
+        lambda r: 100.0 if r["Anomalies precedentes"] == 0
+        else round((r["Anomalies precedentes"] - r["Anomalies actuelles"]) / r["Anomalies precedentes"] * 100, 1),
+        axis=1,
+    )
+    par_poste = par_poste.sort_values("Taux traitement %")
+
+    return {"dates": dates_info, "general": general, "par_poste": par_poste, "detail": detail_df}
