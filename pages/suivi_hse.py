@@ -815,40 +815,38 @@ def _generer_rapport_pdf(buffers, sections_stats, libelle, date_str, nb_postes):
         titre, cle, stats, chart_keys, commentaire = item
         story.append(_entete(f"Section {i+1}/{n_sec} — {titre} · {nb_postes} poste(s) · "
                               f"Extraction du {date_str}"))
-        story.append(Spacer(1, 8))
+        story.append(Spacer(1, 5))
         if stats:
             story.append(_cartes(stats))
-            story.append(Spacer(1, 10))
+            story.append(Spacer(1, 6))
         # AJOUTÉ : commentaire/conclusion auto-généré, sous les cartes
         if commentaire:
             story.append(Paragraph(commentaire, ParagraphStyle(
                 name=f"comm{i}", fontSize=9, textColor=colors.HexColor("#334155"),
                 leading=12, spaceAfter=8, fontName="Helvetica-Oblique")))
-        # AJOUTÉ : chart_keys explicite (au lieu de bar_{cle} + 4 pies fixes)
-        # permet d'inclure TOUS les graphiques réellement présents pour la
-        # section, y compris "Analyse des avis fuites" qui a une structure
-        # de graphiques différente (4 clés propres, pas de bar_{cle}).
-        bars_a_afficher = [k for k in chart_keys if buffers.get(k) and k.startswith("bar_")]
-        if not bars_a_afficher and buffers.get(f"bar_{cle}"):
-            bars_a_afficher = [f"bar_{cle}"]
-        for bk in bars_a_afficher:
-            bar = buffers.get(bk)
-            if bar:
-                t = Table([[_img(bar, 14 * cm, hauteur_max_cm=7)]], colWidths=[LARGEUR])
-                t.setStyle(TableStyle([("ALIGN", (0, 0), (-1, -1), "CENTER")]))
-                story.append(t)
-                story.append(Spacer(1, 8))
-        pie_keys = [k for k in chart_keys if buffers.get(k) and not k.startswith("bar_")]
-        pies = [buffers[k] for k in pie_keys]
-        if pies:
-            # Sur 2 lignes de 2 si plus de 2 camemberts, pour rester lisible
-            for debut in range(0, len(pies), 2):
-                lot = pies[debut:debut + 2]
-                imgs = [_img(p, 9.5 * cm, hauteur_max_cm=6.0) for p in lot]
+        # CORRIGÉ (demande explicite) : grille compacte 2 colonnes pour
+        # TOUS les graphiques de la section (bars ET camemberts mélangés,
+        # même traitement), au lieu de l'ancien empilement (barre pleine
+        # largeur PUIS lignes de camemberts) qui pouvait déborder sur une
+        # 2e page dès qu'une section avait 3+ graphiques (ex. "Analyse
+        # des avis fuites"). Hauteur par image bornée à 5.3 cm : avec
+        # l'en-tête (~2.3 cm), les cartes (~2 cm) et le commentaire
+        # (~1 cm), 2 lignes de graphiques (2×5.3 + espacements ≈ 11.5 cm)
+        # tiennent dans les ~18.6 cm utiles d'une page A4 paysage — testé
+        # jusqu'à 4 graphiques (le maximum rencontré, section fuites).
+        graphiques_presents = [k for k in chart_keys if buffers.get(k)]
+        if not graphiques_presents and buffers.get(f"bar_{cle}"):
+            graphiques_presents = [f"bar_{cle}"]
+        if graphiques_presents:
+            HAUTEUR_IMG_CM = 5.3
+            for debut in range(0, len(graphiques_presents), 2):
+                lot = graphiques_presents[debut:debut + 2]
+                imgs = [_img(buffers[k], LARGEUR / 2 - 0.3 * cm, hauteur_max_cm=HAUTEUR_IMG_CM) for k in lot]
                 t = Table([imgs], colWidths=[LARGEUR / len(imgs)] * len(imgs))
-                t.setStyle(TableStyle([("ALIGN", (0, 0), (-1, -1), "CENTER")]))
+                t.setStyle(TableStyle([("ALIGN", (0, 0), (-1, -1), "CENTER"),
+                                        ("VALIGN", (0, 0), (-1, -1), "MIDDLE")]))
                 story.append(t)
-                story.append(Spacer(1, 6))
+                story.append(Spacer(1, 4))
         if i < n_sec - 1:
             story.append(PageBreak())
 
