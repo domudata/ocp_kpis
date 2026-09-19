@@ -601,6 +601,13 @@ def render_suivi_anomalies_semaine(vp: list, hist_df, now_ts, key_prefix: str,
             date_reference = pd.Timestamp(dates_dispo[-1])
             reference_disponible = True
             row_ref = sub[sub["Date_parsed"] == date_reference].set_index("Poste de travail")
+            # CORRIGÉ (bug reproduit et confirmé) : si un poste apparaît
+            # plusieurs fois pour la même date dans le fichier historique,
+            # row_ref.loc[poste, kpi] renvoie une Series au lieu d'un
+            # scalaire, ce qui casse pd.notna(...) utilisé dans un test
+            # booléen ("truth value of a Series is ambiguous"). On ne
+            # garde que la DERNIÈRE occurrence de chaque poste.
+            row_ref = row_ref[~row_ref.index.duplicated(keep="last")]
             for poste in vp:
                 if poste in row_ref.index:
                     total_reference[poste] = sum(
@@ -633,7 +640,7 @@ def render_suivi_anomalies_semaine(vp: list, hist_df, now_ts, key_prefix: str,
     fig.add_trace(go.Bar(
         x=postes_tries, y=valeurs_actuelles, name="Anomalies (période filtrée)",
         marker=dict(color="#ef4444", line=dict(color='white', width=1)),
-        text=textes, textposition='outside', textfont=dict(size=11, family='Inter'),
+        text=textes, textposition='outside', textfont=dict(size=12, family='Inter', color='black'),
     ))
     fig.update_layout(
         barmode='group', height=420,
