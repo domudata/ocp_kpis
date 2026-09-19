@@ -7,10 +7,13 @@ from core.constants import QK, PK, CIBLE, ACT_MAP
 from core.calcul_kpi import gscore, is_lb
 
 
-def _tableau_large(vp, ckdf, liste_kpi):
-    """Tableau LARGE (une ligne par poste, une colonne par KPI) — style
-    du fichier Excel de référence fourni : chaque KPI est une colonne
-    avec sa valeur en %."""
+def _tableau_large(vp, ckdf, liste_kpi, nd_full):
+    """Tableau LARGE (une ligne par poste) — style du fichier Excel de
+    référence : pour CHAQUE KPI, 3 colonnes (demande explicite) :
+      - {KPI} (%)        : la valeur du KPI
+      - {KPI} (Conforme) : OUI si conforme à la cible (gscore=1), NON sinon
+      - {KPI} (Total)    : le nombre total d'OT/Avis concernés (dénominateur)
+    """
     lignes = []
     for poste in vp:
         if poste not in ckdf.index:
@@ -18,14 +21,31 @@ def _tableau_large(vp, ckdf, liste_kpi):
         r = ckdf.loc[poste]
         ligne = {"Poste de travail": poste}
         for kpi in liste_kpi:
-            ligne[kpi] = round(float(r[kpi]), 1) if kpi in r.index and pd.notna(r[kpi]) else None
+            if kpi not in r.index or pd.isna(r[kpi]):
+                ligne[f"{kpi} (%)"] = None
+                ligne[f"{kpi} (Conforme)"] = None
+                ligne[f"{kpi} (Total)"] = None
+                continue
+            valeur = float(r[kpi])
+            ligne[f"{kpi} (%)"] = round(valeur, 1)
+            ligne[f"{kpi} (Conforme)"] = "OUI" if gscore(kpi, valeur, CIBLE.get(kpi, 100)) == 1 else "NON"
+            if kpi in nd_full:
+                _, den_series = nd_full[kpi]
+                ligne[f"{kpi} (Total)"] = int(den_series.get(poste, 0))
+            else:
+                ligne[f"{kpi} (Total)"] = None
         lignes.append(ligne)
     df = pd.DataFrame(lignes)
     if not df.empty:
         moyenne = {"Poste de travail": "TOTAL GÉNÉRAL"}
         for kpi in liste_kpi:
-            if kpi in df.columns:
-                moyenne[kpi] = round(df[kpi].mean(skipna=True), 1)
+            col_pct = f"{kpi} (%)"
+            col_tot = f"{kpi} (Total)"
+            if col_pct in df.columns:
+                moyenne[col_pct] = round(df[col_pct].mean(skipna=True), 1)
+            moyenne[f"{kpi} (Conforme)"] = ""
+            if col_tot in df.columns:
+                moyenne[col_tot] = int(df[col_tot].sum(skipna=True))
         df = pd.concat([df, pd.DataFrame([moyenne])], ignore_index=True)
     return df
 
@@ -95,11 +115,26 @@ def _detail_et_telechargement(poste, kpi, ano_map, anomaly_dfs, cle_prefix):
     )
 
 
-def _rendre_domaine(vp, ckdf, ano_map, anomaly_dfs, liste_kpi, cle_prefix, style_stl):
+def _rendre_domaine(vp, ckdf, ano_map, anomaly_dfs, nd_full, liste_kpi, cle_prefix, style_stl):
     st.markdown(f'<div class="stl {style_stl}">Vue d\'ensemble (style export)</div>', unsafe_allow_html=True)
-    tbl_large = _tableau_large(vp, ckdf, liste_kpi)
-    st.dataframe(tbl_large, use_container_width=True, hide_index=True,
-                 height=min(500, 45 + 35 * len(tbl_large)))
+    tbl_large = _tableau_large(vp, ckdf, liste_kpi, nd_full)
+    event_large = st.dataframe(
+        tbl_large, use_container_width=True, hide_index=True,
+        on_select="rerun", selection_mode="single-row",
+        height=min(500, 45 + 35 * len(tbl_large)),
+        key=f"{cle_prefix}_tbl_large_select",
+    )
+    lignes_large = event_large.selection.rows if event_large and event_large.selection else []
+    if lignes_large:
+        poste_sel = tbl_large.iloc[lignes_large[0]]["Poste de travail"]
+        if poste_sel != "TOTAL GÉNÉRAL":
+            kpi_sel = st.selectbox(
+                f"KPI à télécharger pour {poste_sel}", liste_kpi,
+                key=f"{cle_prefix}_kpi_large_sel",
+            )
+            _detail_et_telechargement(poste_sel, kpi_sel, ano_map, anomaly_dfs, f"{cle_prefix}_large")
+    else:
+        st.caption("👆 Cliquez sur une ligne pour choisir un KPI et télécharger son détail (OT/Avis).")
 
     st.markdown("---")
     st.markdown(f'<div class="stl a">KPI et anomalies — cliquez une ligne pour télécharger son détail</div>', unsafe_allow_html=True)
@@ -125,16 +160,14 @@ def _rendre_domaine(vp, ckdf, ano_map, anomaly_dfs, liste_kpi, cle_prefix, style
         st.caption("👆 Cliquez sur une ligne du tableau ci-dessus pour voir et télécharger son détail (OT/Avis).")
 
 
-def render_performance_qualite_tab(vp: list, ckdf, ano_map: dict, anomaly_dfs: dict) -> None:
+def render_performance_qualite_tab(vp: list, ckdf, ano_map: dict, anomaly_dfs: dict, nd_full: dict) -> None:
     """
     Page fusionnée Performance / Qualité :
-      - Performance affichée en PREMIER (demande explicite) ;
-      - pour chaque domaine : un tableau large façon export Excel
-        (Poste × KPI), puis un tableau KPI+Anomalies dont les LIGNES
-        sont sélectionnables nativement (st.dataframe on_select) —
-        cliquer une ligne déclenche l'affichage + le téléchargement
-        Excel du détail exact (OT/Avis) de ce couple Poste/KPI, sous
-        les mêmes filtres que le tableau.
+      - Performance affichée en PREMIER ;
+      - tableau large façon export Excel (Poste × KPI, avec pour chaque
+        KPI : %, Conforme OUI/NON, Total en nombre — demande explicite),
+        LUI AUSSI sélectionnable pour télécharger le détail exact ;
+      - puis un tableau KPI+Anomalies sélectionnable de la même façon.
     """
     section = st.radio(
         "Domaine",
@@ -145,6 +178,6 @@ def render_performance_qualite_tab(vp: list, ckdf, ano_map: dict, anomaly_dfs: d
     )
 
     if section == "📈 Performance":
-        _rendre_domaine(vp, ckdf, ano_map, anomaly_dfs, QK, "perf", "p")
+        _rendre_domaine(vp, ckdf, ano_map, anomaly_dfs, nd_full, QK, "perf", "p")
     else:
-        _rendre_domaine(vp, ckdf, ano_map, anomaly_dfs, PK, "qual", "q")
+        _rendre_domaine(vp, ckdf, ano_map, anomaly_dfs, nd_full, PK, "qual", "q")
