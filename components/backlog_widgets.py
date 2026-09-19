@@ -467,35 +467,6 @@ def render_backlog_tab(dfp: pd.DataFrame, vp: list, df_toutes_dates: pd.DataFram
 
     st.markdown('---')
 
-    # Section : Répartition de l'Âge des Backlogs (Préparation, Planification & Exécution)
-    st.markdown(
-        '<div class="stl c">⏱️ Répartition de l\'Âge des Backlogs (Préparation, Planification & Exécution)</div>',
-        unsafe_allow_html=True
-    )
-    st.caption("Base : répartition par âge du Backlog Préparation, Planification et Exécution (conforme aux indicateurs consolidés).")
-
-    sf1_p = [p for p in vp if str(p).startswith("SF1")]
-    sf2_p = [p for p in vp if str(p).startswith("SF2")]
-
-    tab_tous, tab_sf1, tab_sf2 = st.tabs(["🌐 Tous les postes sélectionnés", "🏭 Division SF1", "🏭 Division SF2"])
-    with tab_tous:
-        rows_all = build_age_table_rows(vp, df_prep, df_plan, df_exec=df_exec, label_total="TOTAL GÉNÉRAL")
-        st.markdown(html_age_dispatch_table(rows_all, include_exec=True), unsafe_allow_html=True)
-    with tab_sf1:
-        if sf1_p:
-            rows_sf1 = build_age_table_rows(sf1_p, df_prep, df_plan, df_exec=df_exec, label_total="TOTAL SF1")
-            st.markdown(html_age_dispatch_table(rows_sf1, include_exec=True), unsafe_allow_html=True)
-        else:
-            st.info("Aucun poste SF1 dans la sélection courante.")
-    with tab_sf2:
-        if sf2_p:
-            rows_sf2 = build_age_table_rows(sf2_p, df_prep, df_plan, df_exec=df_exec, label_total="TOTAL SF2")
-            st.markdown(html_age_dispatch_table(rows_sf2, include_exec=True), unsafe_allow_html=True)
-        else:
-            st.info("Aucun poste SF2 dans la sélection courante.")
-
-    st.markdown('---')
-
     # Section 3 : Statuts OT
     st.markdown('<div class="stl p">📊 Statuts OT par Poste de Travail</div>', unsafe_allow_html=True)
 
