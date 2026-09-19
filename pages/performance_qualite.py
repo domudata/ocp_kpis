@@ -10,12 +10,21 @@ from core.calcul_kpi import gscore, is_lb
 def _tableau_large(vp, ckdf, liste_kpi, nd_full, ano_map):
     """Tableau LARGE (une ligne par poste) — style du fichier Excel de
     référence : pour CHAQUE KPI, 3 colonnes (demande explicite) :
-      - {KPI} (%)         : la valeur du KPI
-      - {KPI} (Anomalies) : le NOMBRE d'anomalies (pas OUI/NON — corrigé
-        sur demande explicite), issu de ano_map (source unique)
+      - {KPI} (%)         : la valeur du KPI, EN NOMBRE ENTIER NATUREL
+        (80, 78... — pas de décimales, demande explicite)
+      - {KPI} (Anomalies) : le NOMBRE d'anomalies, issu de ano_map (source unique)
       - {KPI} (Total)     : le nombre total d'OT/Avis concernés (dénominateur)
+    Une ligne CIBLE est ajoutée en tête (demande explicite).
     """
     lignes = []
+
+    ligne_cible = {"Poste de travail": "CIBLE"}
+    for kpi in liste_kpi:
+        ligne_cible[f"{kpi} (%)"] = int(round(CIBLE.get(kpi, 100)))
+        ligne_cible[f"{kpi} (Anomalies)"] = None
+        ligne_cible[f"{kpi} (Total)"] = None
+    lignes.append(ligne_cible)
+
     for poste in vp:
         if poste not in ckdf.index:
             continue
@@ -28,7 +37,7 @@ def _tableau_large(vp, ckdf, liste_kpi, nd_full, ano_map):
                 ligne[f"{kpi} (Total)"] = None
                 continue
             valeur = float(r[kpi])
-            ligne[f"{kpi} (%)"] = round(valeur, 1)
+            ligne[f"{kpi} (%)"] = int(round(valeur))
             ligne[f"{kpi} (Anomalies)"] = int(ano_map.get(kpi, pd.Series(dtype=float)).get(poste, 0))
             if kpi in nd_full:
                 _, den_series = nd_full[kpi]
@@ -37,16 +46,17 @@ def _tableau_large(vp, ckdf, liste_kpi, nd_full, ano_map):
                 ligne[f"{kpi} (Total)"] = None
         lignes.append(ligne)
     df = pd.DataFrame(lignes)
-    if not df.empty:
+    if len(df) > 1:
         moyenne = {"Poste de travail": "TOTAL GÉNÉRAL"}
+        df_sans_cible = df[df["Poste de travail"] != "CIBLE"]
         for kpi in liste_kpi:
             col_pct = f"{kpi} (%)"
             col_anom = f"{kpi} (Anomalies)"
             col_tot = f"{kpi} (Total)"
             if col_pct in df.columns:
-                moyenne[col_pct] = round(df[col_pct].mean(skipna=True), 1)
+                moyenne[col_pct] = int(round(df_sans_cible[col_pct].mean(skipna=True)))
             if col_anom in df.columns:
-                moyenne[col_anom] = int(df[col_anom].sum(skipna=True))
+                moyenne[col_anom] = int(df_sans_cible[col_anom].sum(skipna=True))
             if col_tot in df.columns:
                 moyenne[col_tot] = int(df[col_tot].sum(skipna=True))
         df = pd.concat([df, pd.DataFrame([moyenne])], ignore_index=True)
@@ -153,8 +163,22 @@ def _rendre_domaine(vp, ckdf, ano_map, anomaly_dfs, nd_full, liste_kpi, cle_pref
         if col in tbl_large.columns:
             styler = styler.apply(lambda s, k=kpi: _colorer_pct(s, k, liste_kpi), subset=[col])
 
+    # AJOUTÉ (demande explicite) : colonnes étroites (au lieu de la
+    # largeur par défaut, trop large) pour réduire le défilement
+    # horizontal — "Poste de travail" reste plus large, les 3 colonnes
+    # par KPI sont fixées à une largeur compacte.
+    config_colonnes = {"Poste de travail": st.column_config.TextColumn(width="medium")}
+    for kpi in liste_kpi:
+        for suffixe in [" (%)", " (Anomalies)", " (Total)"]:
+            col = f"{kpi}{suffixe}"
+            if col in tbl_large.columns:
+                config_colonnes[col] = st.column_config.NumberColumn(
+                    label=f"{kpi}{suffixe}", width="small", format="%d",
+                )
+
     event_large = st.dataframe(
-        styler, use_container_width=True, hide_index=True,
+        styler, use_container_width=False, hide_index=True,
+        column_config=config_colonnes,
         on_select="rerun", selection_mode="single-row",
         height=min(500, 45 + 35 * len(tbl_large)),
         key=f"{cle_prefix}_tbl_large_select",
@@ -162,7 +186,7 @@ def _rendre_domaine(vp, ckdf, ano_map, anomaly_dfs, nd_full, liste_kpi, cle_pref
     lignes_large = event_large.selection.rows if event_large and event_large.selection else []
     if lignes_large:
         poste_sel = tbl_large.iloc[lignes_large[0]]["Poste de travail"]
-        if poste_sel != "TOTAL GÉNÉRAL":
+        if poste_sel not in ("TOTAL GÉNÉRAL", "CIBLE"):
             kpi_sel = st.selectbox(
                 f"KPI à télécharger pour {poste_sel}", liste_kpi,
                 key=f"{cle_prefix}_kpi_large_sel",
