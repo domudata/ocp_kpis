@@ -455,3 +455,106 @@ def show_scores_hbar(vp, scores: dict, title, s1=S1_DEFAULT, s2=S2_DEFAULT):
         return
     vals = [round(scores.get(p, 0), 1) for p in postes]
     show_hbar_thresholds(postes, vals, title, s1, s2)
+
+
+def render_suivi_anomalies_semaine(vp: list, hist_df, now_ts, key_prefix: str) -> None:
+    """
+    NOUVEAU système de suivi hebdomadaire des anomalies (demande
+    explicite, remplace l'ancien "taux de traitement") :
+      - Graphique bar GÉNÉRAL : pour chaque poste, 2 barres — nombre
+        d'anomalies de la semaine (ex. "Semaine 38") et nombre traité
+        depuis la semaine précédente.
+      - Cliquer sur un poste (sélection native du graphique) affiche
+        EN DESSOUS un second graphique bar : le détail par KPI pour ce
+        poste (combien traité par KPI).
+    Réutilisable à l'identique depuis Dashboard ET Suivi Évolution.
+    """
+    from core.historique import calculate_suivi_anomalies_semaine
+    from core.constants import QK, PK
+
+    st.markdown('<div class="stl a">🎯 Suivi hebdomadaire des anomalies</div>', unsafe_allow_html=True)
+
+    if hist_df is None or hist_df.empty:
+        st.markdown('<div style="padding:12px;color:#94a3b8;">Historique indisponible pour le moment.</div>',
+                     unsafe_allow_html=True)
+        return
+
+    res = calculate_suivi_anomalies_semaine(hist_df, now_ts, QK, PK)
+    par_poste = res["par_poste"]
+    par_poste = par_poste[par_poste["Poste"].isin(vp)] if not par_poste.empty else par_poste
+
+    if par_poste.empty:
+        st.markdown(
+            f'<div style="padding:12px;color:#94a3b8;">Aucune extraction enregistrée pour la '
+            f'Semaine {res["num_semaine_actuelle"]} pour le moment.</div>',
+            unsafe_allow_html=True,
+        )
+        return
+
+    label_semaine = f"Semaine {res['num_semaine_actuelle']}"
+    label_semaine_prec = f"Semaine {res['num_semaine_precedente']}"
+    if res["date_prec"] is None:
+        st.caption(f"📅 {label_semaine} — première extraction de cette semaine : "
+                    f"pas encore de comparaison possible avec {label_semaine_prec}.")
+    else:
+        st.caption(f"📅 {label_semaine} (comparée à {label_semaine_prec})")
+
+    postes = par_poste["Poste"].tolist()
+    anomalies = par_poste["Anomalies semaine"].tolist()
+    traitees = par_poste["Anomalies traitees"].tolist()
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=postes, y=anomalies, name=f"Anomalies {label_semaine}",
+        marker=dict(color="#ef4444", line=dict(color='white', width=1)),
+        text=[str(v) for v in anomalies], textposition='outside',
+    ))
+    fig.add_trace(go.Bar(
+        x=postes, y=traitees, name="Anomalies traitées",
+        marker=dict(color="#10b981", line=dict(color='white', width=1)),
+        text=[str(v) for v in traitees], textposition='outside',
+    ))
+    fig.update_layout(
+        barmode='group', height=420,
+        xaxis=dict(tickangle=-45, fixedrange=True),
+        yaxis=dict(showgrid=True, gridcolor="#F1F5F9", fixedrange=True),
+        plot_bgcolor='white', paper_bgcolor='white',
+        legend=dict(orientation="h", yanchor="bottom", y=-0.35, x=0.5, xanchor="center"),
+        margin=dict(t=20, b=100, l=20, r=20),
+    )
+    event = st.plotly_chart(
+        fig, use_container_width=True, config=PLOTLY_CONFIG,
+        on_select="rerun", selection_mode="points", key=f"{key_prefix}_suivi_anom_chart",
+    )
+
+    points = event.selection.points if event and event.selection else []
+    if points:
+        poste_sel = points[0].get("x")
+        detail = res["detail_par_poste"].get(poste_sel)
+        if detail is not None and not detail.empty:
+            st.markdown(f"**🔍 Détail par KPI — {poste_sel}**")
+            fig2 = go.Figure()
+            fig2.add_trace(go.Bar(
+                y=detail["KPI"], x=detail["Anomalies semaine"], orientation='h',
+                name=f"Anomalies {label_semaine}", marker=dict(color="#ef4444"),
+                text=detail["Anomalies semaine"].astype(str), textposition='outside',
+            ))
+            fig2.add_trace(go.Bar(
+                y=detail["KPI"], x=detail["Anomalies traitees"], orientation='h',
+                name="Anomalies traitées", marker=dict(color="#10b981"),
+                text=detail["Anomalies traitees"].astype(str), textposition='outside',
+            ))
+            fig2.update_layout(
+                barmode='group', height=max(300, 45 * len(detail) + 100),
+                yaxis=dict(autorange="reversed", fixedrange=True, automargin=True),
+                xaxis=dict(showgrid=True, gridcolor="#F1F5F9", fixedrange=True),
+                plot_bgcolor='white', paper_bgcolor='white',
+                legend=dict(orientation="h", yanchor="bottom", y=-0.15, x=0.5, xanchor="center"),
+                margin=dict(t=20, b=50, l=20, r=20),
+            )
+            st.plotly_chart(fig2, use_container_width=True, config=PLOTLY_CONFIG,
+                             key=f"{key_prefix}_suivi_anom_detail_{poste_sel}")
+        else:
+            st.info("Détail indisponible pour ce poste.")
+    else:
+        st.caption("👆 Cliquez sur les barres d'un poste pour voir le détail par KPI.")
