@@ -811,27 +811,44 @@ def _generer_rapport_pdf(buffers, sections_stats, libelle, date_str, nb_postes):
 
     story = []
     n_sec = len(sections_stats)
-    for i, (titre, cle, stats) in enumerate(sections_stats):
+    for i, item in enumerate(sections_stats):
+        titre, cle, stats, chart_keys, commentaire = item
         story.append(_entete(f"Section {i+1}/{n_sec} — {titre} · {nb_postes} poste(s) · "
                               f"Extraction du {date_str}"))
         story.append(Spacer(1, 8))
         if stats:
             story.append(_cartes(stats))
             story.append(Spacer(1, 10))
-        bar = buffers.get(f"bar_{cle}")
-        if bar:
-            t = Table([[_img(bar, 14 * cm, hauteur_max_cm=7)]], colWidths=[LARGEUR])
-            t.setStyle(TableStyle([("ALIGN", (0, 0), (-1, -1), "CENTER")]))
-            story.append(t)
-            story.append(Spacer(1, 8))
-        pies = [buffers[k] for k in
-                (f"pie_appr_{cle}", f"pie_ot_{cle}", f"pie_statut_{cle}", f"pie_cat_{cle}")
-                if buffers.get(k)]
+        # AJOUTÉ : commentaire/conclusion auto-généré, sous les cartes
+        if commentaire:
+            story.append(Paragraph(commentaire, ParagraphStyle(
+                name=f"comm{i}", fontSize=9, textColor=colors.HexColor("#334155"),
+                leading=12, spaceAfter=8, fontName="Helvetica-Oblique")))
+        # AJOUTÉ : chart_keys explicite (au lieu de bar_{cle} + 4 pies fixes)
+        # permet d'inclure TOUS les graphiques réellement présents pour la
+        # section, y compris "Analyse des avis fuites" qui a une structure
+        # de graphiques différente (4 clés propres, pas de bar_{cle}).
+        bars_a_afficher = [k for k in chart_keys if buffers.get(k) and k.startswith("bar_")]
+        if not bars_a_afficher and buffers.get(f"bar_{cle}"):
+            bars_a_afficher = [f"bar_{cle}"]
+        for bk in bars_a_afficher:
+            bar = buffers.get(bk)
+            if bar:
+                t = Table([[_img(bar, 14 * cm, hauteur_max_cm=7)]], colWidths=[LARGEUR])
+                t.setStyle(TableStyle([("ALIGN", (0, 0), (-1, -1), "CENTER")]))
+                story.append(t)
+                story.append(Spacer(1, 8))
+        pie_keys = [k for k in chart_keys if buffers.get(k) and not k.startswith("bar_")]
+        pies = [buffers[k] for k in pie_keys]
         if pies:
-            imgs = [_img(p, 6.8 * cm, hauteur_max_cm=4.6) for p in pies]
-            t = Table([imgs], colWidths=[LARGEUR / len(imgs)] * len(imgs))
-            t.setStyle(TableStyle([("ALIGN", (0, 0), (-1, -1), "CENTER")]))
-            story.append(t)
+            # Sur 2 lignes de 2 si plus de 2 camemberts, pour rester lisible
+            for debut in range(0, len(pies), 2):
+                lot = pies[debut:debut + 2]
+                imgs = [_img(p, 9.5 * cm, hauteur_max_cm=6.0) for p in lot]
+                t = Table([imgs], colWidths=[LARGEUR / len(imgs)] * len(imgs))
+                t.setStyle(TableStyle([("ALIGN", (0, 0), (-1, -1), "CENTER")]))
+                story.append(t)
+                story.append(Spacer(1, 6))
         if i < n_sec - 1:
             story.append(PageBreak())
 
@@ -950,44 +967,127 @@ def render_suivi_hse_tab(dfp, avf, vp, date_str=""):
     st.caption(f"Titre du rapport : « Suivi HSE{libelle} »" if libelle
                else "Aucun filtre de période actif — titre : « Suivi HSE ».")
 
+    def _stats_avis(df, couleur):
+        if df.empty:
+            return []
+        n = len(df)
+        ap = int((df["_Approbation"] == "Approuvé").sum())
+        rj = int((df["_Approbation"] == "Rejeté").sum())
+        eo = int(df["Ordre"].notna().sum()) if "Ordre" in df.columns else 0
+        return [("Total", n, couleur, "avis"),
+                ("Approuvés", ap, GREEN, f"{ap/n*100:.0f}%"),
+                ("Transformés en OT", eo, BLUE, f"{eo/n*100:.0f}%"),
+                ("Rejetés", rj, INDIGO, f"{rj/n*100:.0f}%")]
+
+    def _stats_ot(df, couleur):
+        if df.empty:
+            return []
+        n = len(df)
+        cl = int(df["_Statut"].isin(STATUTS_CLOTURE).sum())
+        av = int(df["Avis"].notna().sum()) if "Avis" in df.columns else 0
+        return [("Total OT", n, couleur, "ordres"),
+                ("Clôturés", cl, GREEN, f"{cl/n*100:.0f}%"),
+                ("En cours", n - cl, SKY, f"{(n-cl)/n*100:.0f}%"),
+                ("Avec avis", av, BLUE, f"{av/n*100:.0f}%")]
+
+    def _stats_fuites(df, couleur):
+        if df is None or df.empty:
+            return []
+        n = len(df)
+        cl = int((df["_StatutCat"] == "Clôturé").sum())
+        en = int((df["_StatutCat"] == "En cours").sum())
+        rj = int((df["_StatutCat"] == "Rejeté").sum())
+        return [("Total Avis Fuites", n, couleur, "avis"),
+                ("Clôturés", cl, GREEN, f"{cl/n*100:.0f}%"),
+                ("En cours", en, SKY, f"{en/n*100:.0f}%"),
+                ("Rejetés", rj, "#EF4444", f"{rj/n*100:.0f}%")]
+
+    def _commentaire_avis(titre, stats):
+        """AJOUTÉ (demande explicite) : commentaire/conclusion auto-généré
+        à partir des statistiques calculées — pas de texte fixe, le
+        contenu s'adapte aux vrais chiffres de la section."""
+        if not stats:
+            return ""
+        d = {lbl: val for lbl, val, *_ in stats}
+        total = d.get("Total") or d.get("Total OT") or d.get("Total Avis Fuites") or 0
+        if total == 0:
+            return f"Aucune donnée disponible pour « {titre} » sur le périmètre et la période sélectionnés."
+        if "Approuvés" in d:
+            pct_appr = d["Approuvés"] / total * 100
+            pct_rej = d.get("Rejetés", 0) / total * 100
+            appreciation = "un taux d'approbation satisfaisant" if pct_appr >= 80 else "un taux d'approbation à surveiller"
+            return (f"Sur {total} avis « {titre} », {appreciation} est observé ({pct_appr:.0f}% approuvés). "
+                    f"{pct_rej:.0f}% des avis ont été rejetés, à analyser si ce taux progresse.")
+        if "Clôturés" in d:
+            pct_clot = d["Clôturés"] / total * 100
+            appreciation = "un bon niveau de clôture" if pct_clot >= 70 else "un retard de clôture à surveiller"
+            return (f"Sur {total} ordres « {titre} », {appreciation} est constaté ({pct_clot:.0f}% clôturés, "
+                    f"{100 - pct_clot:.0f}% encore en cours).")
+        return f"{total} élément(s) enregistré(s) pour « {titre} »."
+
+    TOUTES_SECTIONS_RAPPORT = [
+        "Avis Inspection", "Analyse des avis fuites", "Avis HSE",
+        "OT Sécurité", "OMS Thermographie", "OMS Vibration", "Contrôle structure",
+    ]
+    sections_rapport_choisies = st.multiselect(
+        "📑 Sections à inclure dans le rapport PDF",
+        TOUTES_SECTIONS_RAPPORT,
+        default=TOUTES_SECTIONS_RAPPORT,
+        key="hse_sections_rapport",
+    )
+
     if st.button("🖨️ Générer le rapport PDF", type="primary", use_container_width=True):
         try:
-            def _stats_avis(df, couleur):
-                if df.empty:
-                    return []
-                n = len(df)
-                ap = int((df["_Approbation"] == "Approuvé").sum())
-                rj = int((df["_Approbation"] == "Rejeté").sum())
-                eo = int(df["Ordre"].notna().sum()) if "Ordre" in df.columns else 0
-                return [("Total", n, couleur, "avis"),
-                        ("Approuvés", ap, GREEN, f"{ap/n*100:.0f}%"),
-                        ("Transformés en OT", eo, BLUE, f"{eo/n*100:.0f}%"),
-                        ("Rejetés", rj, INDIGO, f"{rj/n*100:.0f}%")]
+            # AJOUTÉ : chaque section liste EXPLICITEMENT TOUS ses
+            # graphiques (chart_keys) — "Analyse des avis fuites" a sa
+            # propre structure de 4 graphiques (auparavant absente du
+            # PDF), et chaque section porte un commentaire auto-généré.
+            candidats = []
+            if "Avis Inspection" in sections_rapport_choisies:
+                st_ = _stats_avis(res["avis_zi"], BLUE)
+                candidats.append(("Avis Inspection", "zi", st_,
+                                   ["bar_zi", "pie_appr_zi", "pie_ot_zi"],
+                                   _commentaire_avis("Avis Inspection", st_)))
+            if "Analyse des avis fuites" in sections_rapport_choisies:
+                st_ = _stats_fuites(res["df_fuites"], NAVY)
+                candidats.append(("Analyse des avis fuites", "fuites", st_,
+                                   ["pie_fuites_statut", "bar_fuites_atelier",
+                                    "bar_fuites_type", "bar_statuts_fuites_atelier"],
+                                   _commentaire_avis("Analyse des avis fuites", st_)))
+            if "Avis HSE" in sections_rapport_choisies:
+                st_ = _stats_avis(res["avis_zh"], TEAL)
+                candidats.append(("Avis HSE", "zh", st_,
+                                   ["bar_zh", "pie_appr_zh", "pie_ot_zh"],
+                                   _commentaire_avis("Avis HSE", st_)))
+            if "OT Sécurité" in sections_rapport_choisies:
+                st_ = _stats_ot(res["ot_securite"], EMERAUDE)
+                candidats.append(("OT Sécurité (type 320)", "secu", st_,
+                                   ["bar_secu", "pie_statut_secu", "pie_cat_secu"],
+                                   _commentaire_avis("OT Sécurité", st_)))
+            if "OMS Thermographie" in sections_rapport_choisies:
+                st_ = _stats_ot(res["ot_oms_therm"], BLUE)
+                candidats.append(("OMS Thermographie", "therm", st_,
+                                   ["bar_therm", "pie_statut_therm", "pie_cat_therm"],
+                                   _commentaire_avis("OMS Thermographie", st_)))
+            if "OMS Vibration" in sections_rapport_choisies:
+                st_ = _stats_ot(res["ot_oms_vib"], TEAL)
+                candidats.append(("OMS Vibration", "vib", st_,
+                                   ["bar_vib", "pie_statut_vib", "pie_cat_vib"],
+                                   _commentaire_avis("OMS Vibration", st_)))
+            if "Contrôle structure" in sections_rapport_choisies:
+                st_ = _stats_ot(res["ot_structure"], CYAN)
+                candidats.append(("Contrôle structure", "struct", st_,
+                                   ["bar_struct", "pie_statut_struct", "pie_cat_struct"],
+                                   _commentaire_avis("Contrôle structure", st_)))
 
-            def _stats_ot(df, couleur):
-                if df.empty:
-                    return []
-                n = len(df)
-                cl = int(df["_Statut"].isin(STATUTS_CLOTURE).sum())
-                av = int(df["Avis"].notna().sum()) if "Avis" in df.columns else 0
-                return [("Total OT", n, couleur, "ordres"),
-                        ("Clôturés", cl, GREEN, f"{cl/n*100:.0f}%"),
-                        ("En cours", n - cl, SKY, f"{(n-cl)/n*100:.0f}%"),
-                        ("Avec avis", av, BLUE, f"{av/n*100:.0f}%")]
-
-            sections = [
-                ("Avis Inspection", "zi", _stats_avis(res["avis_zi"], BLUE)),
-                ("Avis HSE", "zh", _stats_avis(res["avis_zh"], TEAL)),
-                ("OT Sécurité (type 320)", "secu", _stats_ot(res["ot_securite"], EMERAUDE)),
-                ("OMS Thermographie", "therm", _stats_ot(res["ot_oms_therm"], BLUE)),
-                ("OMS Vibration", "vib", _stats_ot(res["ot_oms_vib"], TEAL)),
-                ("Contrôle structure", "struct", _stats_ot(res["ot_structure"], CYAN)),
-            ]
-            sections = [s for s in sections if s[2]]
-            pdf = _generer_rapport_pdf(buffers, sections, libelle, date_str, len(vp))
-            st.download_button("⬇️ Télécharger le rapport HSE (PDF)", data=pdf,
-                                file_name=f"rapport_HSE_{str(date_str).replace('/', '-')}.pdf",
-                                mime="application/pdf", use_container_width=True)
-            st.success("✅ Rapport généré — cliquez sur le bouton de téléchargement ci-dessus.")
+            sections = [c for c in candidats if c[2] or any(buffers.get(k) for k in c[3])]
+            if not sections:
+                st.warning("⚠️ Aucune section sélectionnée ne contient de données à inclure dans le rapport.")
+            else:
+                pdf = _generer_rapport_pdf(buffers, sections, libelle, date_str, len(vp))
+                st.download_button("⬇️ Télécharger le rapport HSE (PDF)", data=pdf,
+                                    file_name=f"rapport_HSE_{str(date_str).replace('/', '-')}.pdf",
+                                    mime="application/pdf", use_container_width=True)
+                st.success(f"✅ Rapport généré avec {len(sections)} section(s) — cliquez sur le bouton de téléchargement ci-dessus.")
         except Exception as e:
             st.error(f"❌ Erreur lors de la génération : {e}")
