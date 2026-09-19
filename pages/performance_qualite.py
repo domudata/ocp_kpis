@@ -207,20 +207,40 @@ def _rendre_domaine(vp, ckdf, ano_map, anomaly_dfs, nd_full, liste_kpi, cle_pref
         styler, use_container_width=True, hide_index=True,
         column_config=config_colonnes,
         on_select="rerun", selection_mode="single-row",
-        height=min(500, 45 + 35 * len(tbl_large)),
+        height=45 + 35 * len(tbl_large),  # pas de plafond : tous les postes visibles sans defilement vertical
         key=f"{cle_prefix}_tbl_large_select",
     )
     lignes_large = event_large.selection.rows if event_large and event_large.selection else []
     if lignes_large:
         poste_sel = tbl_large.iloc[lignes_large[0]]["Poste de travail"]
         if poste_sel not in ("TOTAL GÉNÉRAL", "CIBLE"):
+            st.markdown(f"**📊 Détail par KPI — {poste_sel}**")
+            lignes_resume = []
+            for kpi in liste_kpi:
+                nb_anom = int(ano_map.get(kpi, pd.Series(dtype=float)).get(poste_sel, 0))
+                total_kpi = None
+                if kpi in nd_full:
+                    _, den_series = nd_full[kpi]
+                    total_kpi = int(den_series.get(poste_sel, 0))
+                lignes_resume.append({"KPI": kpi, "Anomalies": nb_anom, "Total": total_kpi})
+            tbl_resume = pd.DataFrame(lignes_resume)
+            st.dataframe(
+                tbl_resume, use_container_width=True, hide_index=True,
+                column_config={
+                    "KPI": st.column_config.TextColumn(width="medium"),
+                    "Anomalies": st.column_config.NumberColumn(width="small", format="%d"),
+                    "Total": st.column_config.NumberColumn(width="small", format="%d"),
+                },
+                height=45 + 35 * len(tbl_resume),  # pas de plafond : tous les KPI visibles sans defilement vertical
+            )
+
             kpi_sel = st.selectbox(
-                f"KPI à télécharger pour {poste_sel}", liste_kpi,
+                f"Voir le détail OT/Avis (KPI) pour {poste_sel}", liste_kpi,
                 key=f"{cle_prefix}_kpi_large_sel",
             )
             _detail_et_telechargement(poste_sel, kpi_sel, ano_map, anomaly_dfs, f"{cle_prefix}_large")
     else:
-        st.caption("👆 Cliquez sur une ligne pour choisir un KPI et télécharger son détail (OT/Avis).")
+        st.caption("👆 Cliquez sur une ligne pour voir le détail par KPI de ce poste.")
 
     st.markdown("---")
     st.markdown(f'<div class="stl a">KPI et anomalies — cliquez une ligne pour télécharger son détail</div>', unsafe_allow_html=True)
@@ -241,7 +261,7 @@ def _rendre_domaine(vp, ckdf, ano_map, anomaly_dfs, nd_full, liste_kpi, cle_pref
         tbl_anom, use_container_width=True, hide_index=True,
         column_config=config_anom,
         on_select="rerun", selection_mode="single-row",
-        height=min(450, 45 + 35 * len(tbl_anom)),
+        height=45 + 35 * len(tbl_anom),  # pas de plafond : toutes les lignes Poste x KPI visibles sans defilement vertical
         key=f"{cle_prefix}_tbl_select",
     )
 
