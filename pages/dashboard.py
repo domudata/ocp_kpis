@@ -4,20 +4,23 @@ import streamlit as st
 
 from core.constants import QK, PK, CIBLE, LOWER_BETTER
 from components.tables import html_classement
-from components.charts import show_grouped_hbar, show_hbar_thresholds
+from components.charts import show_grouped_hbar, show_hbar_thresholds, show_butterfly_comparison
 from components.sparklines import get_comparison_html
 
 
 def render_dashboard_tab(vp: list, pscores: dict, qscores: dict,
                           pa: dict, qa: dict,
-                          hist_df: pd.DataFrame = None) -> None:
+                          hist_df: pd.DataFrame = None,
+                          now_ts: pd.Timestamp = None) -> None:
     # ── Scores globaux par poste : Performance ET Qualité SUR LE MÊME
-    # GRAPHIQUE, barres très fines (demande explicite) ──────────────────
+    # GRAPHIQUE (demande explicite) — barres épaisses, largeur maîtrisée ──
     st.markdown('<div class="stl p">Scores globaux par poste — Performance et Qualité</div>', unsafe_allow_html=True)
     show_grouped_hbar(vp, pscores, qscores, "Performance & Qualité par poste", thin=True)
 
     # ── Comparaison Semaine Actuelle vs Semaine Précédente par poste ────
-    # AJOUTÉ (demande explicite). Repose sur hist_df (historique KPI par
+    # CORRIGÉ (demande explicite, style "photo 2") : graphique "papillon"
+    # au lieu du tableau HTML — semaine précédente à gauche, semaine
+    # actuelle à droite, un axe central par poste.
     # date d'extraction) : "semaine actuelle" = dernière date enregistrée,
     # "semaine précédente" = avant-dernière. Réutilise get_comparison_html
     # (même logique que l'onglet Suivi & Évolution) pour une présentation
@@ -32,21 +35,44 @@ def render_dashboard_tab(vp: list, pscores: dict, qscores: dict,
             unsafe_allow_html=True,
         )
     else:
-        dates_dispo = sorted(hist_df["Date_parsed"].dropna().unique())
-        if len(dates_dispo) < 2:
+        # CORRIGÉ (demande explicite) : semaine calendaire ISO, du LUNDI
+        # au DIMANCHE — plus les 2 dernières dates d'extraction quelles
+        # qu'elles soient, mais la vraie "semaine actuelle" (contenant
+        # aujourd'hui) et la vraie "semaine précédente" (les 7 jours
+        # juste avant). Pour chaque semaine, on prend la DERNIÈRE date
+        # d'extraction disponible qui y tombe (une semaine peut avoir 0,
+        # 1 ou plusieurs extractions).
+        _now = pd.Timestamp(now_ts) if now_ts is not None else pd.Timestamp.today()
+        lundi_actuel = _now.normalize() - pd.Timedelta(days=_now.weekday())
+        dimanche_actuel = lundi_actuel + pd.Timedelta(days=6)
+        lundi_precedent = lundi_actuel - pd.Timedelta(days=7)
+        dimanche_precedent = lundi_actuel - pd.Timedelta(days=1)
+
+        dates_all = hist_df["Date_parsed"].dropna()
+        dates_semaine_act = dates_all[(dates_all >= lundi_actuel) & (dates_all <= dimanche_actuel)]
+        dates_semaine_prec = dates_all[(dates_all >= lundi_precedent) & (dates_all <= dimanche_precedent)]
+
+        if dates_semaine_act.empty or dates_semaine_prec.empty:
             st.markdown(
                 '<div style="padding:12px;color:#94a3b8;">'
-                'Une seule date d\'extraction disponible pour le moment — '
-                'la comparaison apparaîtra dès la 2ᵉ extraction enregistrée.</div>',
+                f'Semaine actuelle ({lundi_actuel:%d/%m}–{dimanche_actuel:%d/%m}) : '
+                f'{"aucune" if dates_semaine_act.empty else len(dates_semaine_act.unique())} extraction(s). '
+                f'Semaine précédente ({lundi_precedent:%d/%m}–{dimanche_precedent:%d/%m}) : '
+                f'{"aucune" if dates_semaine_prec.empty else len(dates_semaine_prec.unique())} extraction(s). '
+                'Il faut au moins une extraction dans chacune des deux semaines pour comparer.</div>',
                 unsafe_allow_html=True,
             )
         else:
-            date_prec = pd.Timestamp(dates_dispo[-2]).strftime("%d/%m/%Y")
-            date_act = pd.Timestamp(dates_dispo[-1]).strftime("%d/%m/%Y")
+            date_act_ts = dates_semaine_act.max()
+            date_prec_ts = dates_semaine_prec.max()
+            date_prec = date_prec_ts.strftime("%d/%m/%Y")
+            date_act = date_act_ts.strftime("%d/%m/%Y")
             st.markdown(
                 f'<div style="margin-bottom:8px;font-size:12px;color:#64748b;">'
-                f'📅 Semaine précédente : <b>{date_prec}</b> &nbsp;→&nbsp; '
-                f'Semaine actuelle : <b>{date_act}</b></div>',
+                f'📅 Semaine précédente ({lundi_precedent:%d/%m}–{dimanche_precedent:%d/%m}) : '
+                f'extraction du <b>{date_prec}</b> &nbsp;→&nbsp; '
+                f'Semaine actuelle ({lundi_actuel:%d/%m}–{dimanche_actuel:%d/%m}) : '
+                f'extraction du <b>{date_act}</b></div>',
                 unsafe_allow_html=True,
             )
 
@@ -61,36 +87,40 @@ def render_dashboard_tab(vp: list, pscores: dict, qscores: dict,
                     unsafe_allow_html=True,
                 )
             else:
-                h = '<table style="width:100%;border-collapse:collapse;font-size:13px;">'
-                h += (
-                    '<tr style="background:#f1f5f9;">'
-                    '<th style="padding:8px;text-align:left;">Poste de travail</th>'
-                    '<th style="padding:8px;text-align:center;">Performance — évolution</th>'
-                    '<th style="padding:8px;text-align:center;">Qualité — évolution</th>'
-                    '</tr>'
-                )
+                postes_valides, perf_prec, perf_act, qual_prec, qual_act = [], [], [], [], []
                 for poste in postes_dispo:
-                    p_scores = (
-                        perf_h[perf_h["Poste de travail"] == poste]
-                        .sort_values("Date_parsed")["Score Performance"]
-                        .astype(float).tolist()
-                        if "Score Performance" in perf_h.columns else []
+                    p_row_act = perf_h[(perf_h["Poste de travail"] == poste) & (perf_h["Date_parsed"] == date_act_ts)]
+                    p_row_prec = perf_h[(perf_h["Poste de travail"] == poste) & (perf_h["Date_parsed"] == date_prec_ts)]
+                    q_row_act = qual_h[(qual_h["Poste de travail"] == poste) & (qual_h["Date_parsed"] == date_act_ts)]
+                    q_row_prec = qual_h[(qual_h["Poste de travail"] == poste) & (qual_h["Date_parsed"] == date_prec_ts)]
+
+                    val_p_act = float(p_row_act["Score Performance"].iloc[0]) if not p_row_act.empty and "Score Performance" in p_row_act.columns else 0.0
+                    val_p_prec = float(p_row_prec["Score Performance"].iloc[0]) if not p_row_prec.empty and "Score Performance" in p_row_prec.columns else 0.0
+                    val_q_act = float(q_row_act["Score Qualite"].iloc[0]) if not q_row_act.empty and "Score Qualite" in q_row_act.columns else 0.0
+                    val_q_prec = float(q_row_prec["Score Qualite"].iloc[0]) if not q_row_prec.empty and "Score Qualite" in q_row_prec.columns else 0.0
+
+                    postes_valides.append(poste)
+                    perf_prec.append(val_p_prec); perf_act.append(val_p_act)
+                    qual_prec.append(val_q_prec); qual_act.append(val_q_act)
+                    val_p_prec = p_scores[-2] if len(p_scores) >= 2 else 0.0
+                    val_p_act = p_scores[-1] if len(p_scores) >= 1 else 0.0
+                    val_q_prec = q_scores[-2] if len(q_scores) >= 2 else 0.0
+                    val_q_act = q_scores[-1] if len(q_scores) >= 1 else 0.0
+                    postes_valides.append(poste)
+                    perf_prec.append(val_p_prec); perf_act.append(val_p_act)
+                    qual_prec.append(val_q_prec); qual_act.append(val_q_act)
+
+                cb1, cb2 = st.columns(2)
+                with cb1:
+                    show_butterfly_comparison(
+                        postes_valides, perf_prec, perf_act,
+                        "Performance", f"Préc. ({date_prec})", f"Actuelle ({date_act})",
                     )
-                    q_scores = (
-                        qual_h[qual_h["Poste de travail"] == poste]
-                        .sort_values("Date_parsed")["Score Qualite"]
-                        .astype(float).tolist()
-                        if "Score Qualite" in qual_h.columns else []
+                with cb2:
+                    show_butterfly_comparison(
+                        postes_valides, qual_prec, qual_act,
+                        "Qualité", f"Préc. ({date_prec})", f"Actuelle ({date_act})",
                     )
-                    h += (
-                        f'<tr style="border-bottom:1px solid #e2e8f0;">'
-                        f'<td style="padding:8px;font-weight:600;">{poste}</td>'
-                        f'<td style="padding:8px;text-align:center;">{get_comparison_html(p_scores)}</td>'
-                        f'<td style="padding:8px;text-align:center;">{get_comparison_html(q_scores)}</td>'
-                        f'</tr>'
-                    )
-                h += '</table>'
-                st.markdown(h, unsafe_allow_html=True)
 
     # ── Taux moyens par KPI (couleur = respect de la VRAIE cible de chaque KPI) ──
     col1, col2 = st.columns(2)
