@@ -208,7 +208,12 @@ def main() -> None:
         # planification l'utiliseront exclusivement ; tous les autres KPI
         # continuent de recevoir df_period, filtre par periode comme avant.
         # ═══════════════════════════════════════════════════════════════
-        res = calc_kpis_cached(df_period, avdf_period, now_ts, tuple(apm), fichier_date, sdt, edt, df_full)
+        # ANNULÉ (demande explicite) : Backlog/Age ne sont plus exemptés
+        # du filtre période — le filtre s'applique désormais AVANT toute
+        # opération, de façon uniforme. On transmet df_period (déjà
+        # filtré) au lieu de df_full : calc_kpis() retombe alors sur le
+        # même comportement que pour tous les autres KPI.
+        res = calc_kpis_cached(df_period, avdf_period, now_ts, tuple(apm), fichier_date, sdt, edt, df_period)
 
         ckdf_full = res['ckdf']
         nd_full = res.get('nd', {})
@@ -285,7 +290,7 @@ def main() -> None:
         # des deux Backlogs restent cohérentes avec leurs nouvelles
         # populations (calculées sur toutes les dates dans calc_kpis).
         # ═══════════════════════════════════════════════════════════════
-        ano_map = build_ano_map(dfp, avf, now_ts, dfp_toutes_dates=df_full)
+        ano_map = build_ano_map(dfp, avf, now_ts, dfp_toutes_dates=df_period)
 
         # ── Score des CARTES SF1/SF2 — IDENTIQUE À TOTAL GÉNÉRAL (demande
         # explicite) : réutilise EXACTEMENT calc_score_cellules(), la même
@@ -305,7 +310,7 @@ def main() -> None:
         ano_q_rows = build_ano_rows(vp, ano_map, PK, fixed_zero=["OT Fiabilité","Total Avis de Panne"])
         ano_p_cols = ["Poste de travail"] + QK + ["Total Anomalies"]
         ano_q_cols = ["Poste de travail"] + PK + ["Total Anomalies"]
-        anomaly_dfs = build_anomaly_dfs(dfp, avf, now_ts, dfp_toutes_dates=df_full)
+        anomaly_dfs = build_anomaly_dfs(dfp, avf, now_ts, dfp_toutes_dates=df_period)
 
         with st.sidebar:
             with st.expander("📥 Export anomalies (OT + Avis)", expanded=False):
