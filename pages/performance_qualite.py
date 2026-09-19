@@ -128,6 +128,15 @@ def _detail_et_telechargement(poste, kpi, ano_map, anomaly_dfs, cle_prefix):
     )
 
 
+def _colorer_ligne_cible(row):
+    """AJOUTÉ (demande explicite) : toute la ligne CIBLE reçoit une
+    couleur de fond distincte (bleu marine), pour la distinguer
+    clairement des lignes de données."""
+    if row.get("Poste de travail") == "CIBLE":
+        return ["background-color:#1e3a5f;color:white;font-weight:700;"] * len(row)
+    return [""] * len(row)
+
+
 def _colorer_pct(colonne_pct, kpi, liste_kpi):
     """AJOUTÉ (demande explicite, comme la version précédente) : couleur
     de fond vert/jaune/rouge pour une colonne '{KPI} (%)', selon la
@@ -156,17 +165,20 @@ def _rendre_domaine(vp, ckdf, ano_map, anomaly_dfs, nd_full, liste_kpi, cle_pref
     st.markdown(f'<div class="stl {style_stl}">Vue d\'ensemble (style export)</div>', unsafe_allow_html=True)
     tbl_large = _tableau_large(vp, ckdf, liste_kpi, nd_full, ano_map)
 
-    # Coloration conditionnelle des colonnes "(%)" (une par KPI)
+    # Coloration : (%) par KPI selon la cible, PUIS toute la ligne CIBLE
+    # en dernier pour qu'elle prenne le dessus visuellement.
     styler = tbl_large.style
     for kpi in liste_kpi:
         col = f"{kpi} (%)"
         if col in tbl_large.columns:
             styler = styler.apply(lambda s, k=kpi: _colorer_pct(s, k, liste_kpi), subset=[col])
+    styler = styler.apply(_colorer_ligne_cible, axis=1)
 
-    # AJOUTÉ (demande explicite) : colonnes étroites (au lieu de la
-    # largeur par défaut, trop large) pour réduire le défilement
-    # horizontal — "Poste de travail" reste plus large, les 3 colonnes
-    # par KPI sont fixées à une largeur compacte.
+    # CORRIGÉ (demande explicite) : use_container_width=True (au lieu de
+    # False) pour que le tableau utilise toute la largeur disponible et
+    # n'ait PAS besoin de défilement horizontal/vertical — les colonnes
+    # column_config "small" ci-dessous garantissent qu'elles restent
+    # compactes même en pleine largeur.
     config_colonnes = {"Poste de travail": st.column_config.TextColumn(width="medium")}
     for kpi in liste_kpi:
         for suffixe in [" (%)", " (Anomalies)", " (Total)"]:
@@ -177,7 +189,7 @@ def _rendre_domaine(vp, ckdf, ano_map, anomaly_dfs, nd_full, liste_kpi, cle_pref
                 )
 
     event_large = st.dataframe(
-        styler, use_container_width=False, hide_index=True,
+        styler, use_container_width=True, hide_index=True,
         column_config=config_colonnes,
         on_select="rerun", selection_mode="single-row",
         height=min(500, 45 + 35 * len(tbl_large)),
