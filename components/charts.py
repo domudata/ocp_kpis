@@ -379,14 +379,15 @@ def show_grouped_hbar(vp, pscores: dict, qscores: dict, title: str,
     )
     st.plotly_chart(fig, use_container_width=not thin, config=PLOTLY_CONFIG)
 
-def show_butterfly_comparison(postes: list, valeurs_precedentes: list, valeurs_actuelles: list,
+def show_butterfly_comparison(postes: list,
+                               perf_prec: list, perf_act: list,
+                               qual_prec: list, qual_act: list,
                                titre: str, label_prec: str, label_act: str) -> None:
     """
-    AJOUTÉ (demande explicite, style "photo 2") : graphique "papillon"
-    (tornado chart) — un axe vertical central, la semaine précédente
-    s'étend vers la GAUCHE, la semaine actuelle vers la DROITE, une
-    ligne par poste. Permet de comparer visuellement, poste par poste,
-    l'évolution entre les deux semaines en un coup d'œil.
+    CORRIGÉ (demande explicite) : Performance ET Qualité FUSIONNÉES sur
+    UN SEUL graphique papillon — 2 barres par poste de chaque côté
+    (Performance et Qualité), au lieu de 2 graphiques séparés. Barres
+    plus fines (bargap réduit) pour que les 4 séries restent lisibles.
     """
     if not postes:
         st.markdown('<div style="padding:20px;color:#94a3b8;">Aucune donnée</div>', unsafe_allow_html=True)
@@ -394,33 +395,50 @@ def show_butterfly_comparison(postes: list, valeurs_precedentes: list, valeurs_a
 
     fig = go.Figure()
     fig.add_trace(go.Bar(
-        y=postes, x=[-v for v in valeurs_precedentes], orientation='h',
-        name=label_prec, marker=dict(color="#94a3b8", line=dict(color='white', width=1)),
-        text=[f"{v:.0f}%" for v in valeurs_precedentes], textposition='outside',
-        textfont=dict(size=10, family='Inter'),
-        hovertemplate="<b>%{y}</b><br>" + label_prec + " : %{customdata:.1f}%<extra></extra>",
-        customdata=valeurs_precedentes,
+        y=postes, x=[-v for v in perf_prec], orientation='h',
+        name=f"Performance — {label_prec}", marker=dict(color="#94a3b8", line=dict(color='white', width=0.5)),
+        text=[f"{v:.0f}%" for v in perf_prec], textposition='outside',
+        textfont=dict(size=8, family='Inter'),
+        hovertemplate="<b>%{y}</b><br>Performance " + label_prec + " : %{customdata:.1f}%<extra></extra>",
+        customdata=perf_prec, offsetgroup="prec",
     ))
     fig.add_trace(go.Bar(
-        y=postes, x=valeurs_actuelles, orientation='h',
-        name=label_act, marker=dict(color="#2563eb", line=dict(color='white', width=1)),
-        text=[f"{v:.0f}%" for v in valeurs_actuelles], textposition='outside',
-        textfont=dict(size=10, family='Inter'),
-        hovertemplate="<b>%{y}</b><br>" + label_act + " : %{x:.1f}%<extra></extra>",
+        y=postes, x=[-v for v in qual_prec], orientation='h',
+        name=f"Qualité — {label_prec}", marker=dict(color="#cbd5e1", line=dict(color='white', width=0.5)),
+        text=[f"{v:.0f}%" for v in qual_prec], textposition='outside',
+        textfont=dict(size=8, family='Inter'),
+        hovertemplate="<b>%{y}</b><br>Qualité " + label_prec + " : %{customdata:.1f}%<extra></extra>",
+        customdata=qual_prec, offsetgroup="prec",
+    ))
+    fig.add_trace(go.Bar(
+        y=postes, x=perf_act, orientation='h',
+        name=f"Performance — {label_act}", marker=dict(color="#2563eb", line=dict(color='white', width=0.5)),
+        text=[f"{v:.0f}%" for v in perf_act], textposition='outside',
+        textfont=dict(size=8, family='Inter'),
+        hovertemplate="<b>%{y}</b><br>Performance " + label_act + " : %{x:.1f}%<extra></extra>",
+        offsetgroup="act",
+    ))
+    fig.add_trace(go.Bar(
+        y=postes, x=qual_act, orientation='h',
+        name=f"Qualité — {label_act}", marker=dict(color="#60a5fa", line=dict(color='white', width=0.5)),
+        text=[f"{v:.0f}%" for v in qual_act], textposition='outside',
+        textfont=dict(size=8, family='Inter'),
+        hovertemplate="<b>%{y}</b><br>Qualité " + label_act + " : %{x:.1f}%<extra></extra>",
+        offsetgroup="act",
     ))
     fig.add_vline(x=0, line_color="#1e293b", line_width=1.5)
 
     fig.update_layout(
-        title=dict(text=titre, x=0.5, xanchor='center', font=dict(size=16, color='#1e293b')),
-        barmode='overlay', bargap=0.15,
-        height=max(350, 40 * len(postes) + 130),
+        title=dict(text=titre, x=0.5, xanchor='center', font=dict(size=15, color='#1e293b')),
+        barmode='group', bargap=0.35, bargroupgap=0.06,
+        height=max(320, 34 * len(postes) + 140),
         xaxis=dict(showgrid=False, showticklabels=False, zeroline=False, fixedrange=True,
-                   range=[-110, 110]),
-        yaxis=dict(autorange="reversed", tickfont=dict(size=12, family='Inter', color='#1e293b'),
+                   range=[-115, 115]),
+        yaxis=dict(autorange="reversed", tickfont=dict(size=11, family='Inter', color='#1e293b'),
                    fixedrange=True, automargin=True),
         plot_bgcolor='white', paper_bgcolor='white',
-        legend=dict(orientation="h", yanchor="bottom", y=-0.06, x=0.5, xanchor="center"),
-        margin=dict(t=70, b=50, l=20, r=20),
+        legend=dict(orientation="h", yanchor="bottom", y=-0.10, x=0.5, xanchor="center", font=dict(size=9)),
+        margin=dict(t=60, b=60, l=20, r=20),
     )
     st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
 
