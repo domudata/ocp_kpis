@@ -102,13 +102,6 @@ def render_dashboard_tab(vp: list, pscores: dict, qscores: dict,
                     postes_valides.append(poste)
                     perf_prec.append(val_p_prec); perf_act.append(val_p_act)
                     qual_prec.append(val_q_prec); qual_act.append(val_q_act)
-                    val_p_prec = p_scores[-2] if len(p_scores) >= 2 else 0.0
-                    val_p_act = p_scores[-1] if len(p_scores) >= 1 else 0.0
-                    val_q_prec = q_scores[-2] if len(q_scores) >= 2 else 0.0
-                    val_q_act = q_scores[-1] if len(q_scores) >= 1 else 0.0
-                    postes_valides.append(poste)
-                    perf_prec.append(val_p_prec); perf_act.append(val_p_act)
-                    qual_prec.append(val_q_prec); qual_act.append(val_q_act)
 
                 cb1, cb2 = st.columns(2)
                 with cb1:
