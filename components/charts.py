@@ -396,7 +396,7 @@ def show_butterfly_comparison(postes: list,
     fig = go.Figure()
     fig.add_trace(go.Bar(
         y=postes, x=[-v for v in perf_prec], orientation='h',
-        name=f"Performance — {label_prec}", marker=dict(color="#94a3b8", line=dict(color='white', width=0.5)),
+        name=f"Performance — {label_prec}", marker=dict(color="#f59e0b", line=dict(color='white', width=0.5)),
         text=[f"{v:.0f}%" for v in perf_prec], textposition='outside',
         textfont=dict(size=8, family='Inter'),
         hovertemplate="<b>%{y}</b><br>Performance " + label_prec + " : %{customdata:.1f}%<extra></extra>",
@@ -404,7 +404,7 @@ def show_butterfly_comparison(postes: list,
     ))
     fig.add_trace(go.Bar(
         y=postes, x=[-v for v in qual_prec], orientation='h',
-        name=f"Qualité — {label_prec}", marker=dict(color="#cbd5e1", line=dict(color='white', width=0.5)),
+        name=f"Qualité — {label_prec}", marker=dict(color="#fbbf24", line=dict(color='white', width=0.5)),
         text=[f"{v:.0f}%" for v in qual_prec], textposition='outside',
         textfont=dict(size=8, family='Inter'),
         hovertemplate="<b>%{y}</b><br>Qualité " + label_prec + " : %{customdata:.1f}%<extra></extra>",
@@ -457,32 +457,11 @@ def show_scores_hbar(vp, scores: dict, title, s1=S1_DEFAULT, s2=S2_DEFAULT):
     show_hbar_thresholds(postes, vals, title, s1, s2)
 
 
-def render_suivi_anomalies_semaine(vp: list, hist_df, now_ts, key_prefix: str) -> None:
-    """
-    NOUVEAU système de suivi hebdomadaire des anomalies (demande
-    explicite, remplace l'ancien "taux de traitement") :
-      - Graphique bar GÉNÉRAL : pour chaque poste, 2 barres — nombre
-        d'anomalies de la semaine (ex. "Semaine 38") et nombre traité
-        depuis la semaine précédente.
-      - Cliquer sur un poste (sélection native du graphique) affiche
-        EN DESSOUS un second graphique bar : le détail par KPI pour ce
-        poste (combien traité par KPI).
-    Réutilisable à l'identique depuis Dashboard ET Suivi Évolution.
-    """
-    from core.historique import calculate_suivi_anomalies_semaine
-    from core.constants import QK, PK
-
-    st.markdown('<div class="stl a">🎯 Suivi hebdomadaire des anomalies</div>', unsafe_allow_html=True)
-
-    if hist_df is None or hist_df.empty:
-        st.markdown('<div style="padding:12px;color:#94a3b8;">Historique indisponible pour le moment.</div>',
-                     unsafe_allow_html=True)
-        return
-
-    res = calculate_suivi_anomalies_semaine(hist_df, now_ts, QK, PK)
+def _dessiner_suivi_anomalies(res: dict, key_prefix: str) -> None:
+    """Dessine le graphique empilé + détail au clic, à partir d'un
+    résultat déjà calculé par calculate_suivi_anomalies_semaine (partagé
+    entre Dashboard et Suivi Évolution, avec ou sans filtre de semaine)."""
     par_poste = res["par_poste"]
-    par_poste = par_poste[par_poste["Poste"].isin(vp)] if not par_poste.empty else par_poste
-
     if par_poste.empty:
         st.markdown(
             f'<div style="padding:12px;color:#94a3b8;">Aucune extraction enregistrée pour la '
@@ -492,32 +471,43 @@ def render_suivi_anomalies_semaine(vp: list, hist_df, now_ts, key_prefix: str) -
         return
 
     label_semaine = f"Semaine {res['num_semaine_actuelle']}"
-    label_semaine_prec = f"Semaine {res['num_semaine_precedente']}"
-    if res["date_prec"] is None:
-        st.caption(f"📅 {label_semaine} — première extraction de cette semaine : "
-                    f"pas encore de comparaison possible avec {label_semaine_prec}.")
+    mode_statique = res["date_prec"] is None
+    if mode_statique:
+        st.caption(f"📅 {label_semaine} — première extraction de cette semaine : total général affiché, "
+                    f"en attente de la prochaine extraction pour voir ce qui aura été traité.")
     else:
-        st.caption(f"📅 {label_semaine} (comparée à {label_semaine_prec})")
+        st.caption(f"📅 {label_semaine} (comparée à Semaine {res['num_semaine_precedente']})")
 
     postes = par_poste["Poste"].tolist()
     anomalies = par_poste["Anomalies semaine"].tolist()
     traitees = par_poste["Anomalies traitees"].tolist()
 
     fig = go.Figure()
-    fig.add_trace(go.Bar(
-        x=postes, y=anomalies, name=f"Anomalies {label_semaine}",
-        marker=dict(color="#ef4444", line=dict(color='white', width=1)),
-        text=[str(v) for v in anomalies], textposition='outside',
-    ))
-    fig.add_trace(go.Bar(
-        x=postes, y=traitees, name="Anomalies traitées",
-        marker=dict(color="#10b981", line=dict(color='white', width=1)),
-        text=[str(v) for v in traitees], textposition='outside',
-    ))
+    if not mode_statique:
+        fig.add_trace(go.Bar(
+            x=postes, y=traitees, name="Traitées depuis la semaine précédente",
+            marker=dict(color="#10b981", line=dict(color='white', width=1)),
+            text=[str(v) if v > 0 else "" for v in traitees], textposition='inside',
+        ))
+        fig.add_trace(go.Bar(
+            x=postes, y=anomalies, name=f"Restantes — {label_semaine}",
+            marker=dict(color="#ef4444", line=dict(color='white', width=1)),
+            text=[str(v) for v in anomalies], textposition='inside',
+        ))
+        barmode = 'stack'
+    else:
+        fig.add_trace(go.Bar(
+            x=postes, y=anomalies, name=f"Total anomalies — {label_semaine}",
+            marker=dict(color="#ef4444", line=dict(color='white', width=1)),
+            text=[str(v) for v in anomalies], textposition='outside',
+        ))
+        barmode = 'group'
+
     fig.update_layout(
-        barmode='group', height=420,
+        barmode=barmode, height=420,
         xaxis=dict(tickangle=-45, fixedrange=True),
-        yaxis=dict(showgrid=True, gridcolor="#F1F5F9", fixedrange=True),
+        yaxis=dict(showgrid=True, gridcolor="#F1F5F9", fixedrange=True,
+                   title="Nombre d'anomalies (total semaine précédente)" if not mode_statique else "Nombre d'anomalies"),
         plot_bgcolor='white', paper_bgcolor='white',
         legend=dict(orientation="h", yanchor="bottom", y=-0.35, x=0.5, xanchor="center"),
         margin=dict(t=20, b=100, l=20, r=20),
@@ -534,18 +524,27 @@ def render_suivi_anomalies_semaine(vp: list, hist_df, now_ts, key_prefix: str) -
         if detail is not None and not detail.empty:
             st.markdown(f"**🔍 Détail par KPI — {poste_sel}**")
             fig2 = go.Figure()
-            fig2.add_trace(go.Bar(
-                y=detail["KPI"], x=detail["Anomalies semaine"], orientation='h',
-                name=f"Anomalies {label_semaine}", marker=dict(color="#ef4444"),
-                text=detail["Anomalies semaine"].astype(str), textposition='outside',
-            ))
-            fig2.add_trace(go.Bar(
-                y=detail["KPI"], x=detail["Anomalies traitees"], orientation='h',
-                name="Anomalies traitées", marker=dict(color="#10b981"),
-                text=detail["Anomalies traitees"].astype(str), textposition='outside',
-            ))
+            if not mode_statique:
+                fig2.add_trace(go.Bar(
+                    y=detail["KPI"], x=detail["Anomalies traitees"], orientation='h',
+                    name="Traitées", marker=dict(color="#10b981"),
+                    text=detail["Anomalies traitees"].astype(str), textposition='inside',
+                ))
+                fig2.add_trace(go.Bar(
+                    y=detail["KPI"], x=detail["Anomalies semaine"], orientation='h',
+                    name="Restantes", marker=dict(color="#ef4444"),
+                    text=detail["Anomalies semaine"].astype(str), textposition='inside',
+                ))
+                barmode2 = 'stack'
+            else:
+                fig2.add_trace(go.Bar(
+                    y=detail["KPI"], x=detail["Anomalies semaine"], orientation='h',
+                    name="Total", marker=dict(color="#ef4444"),
+                    text=detail["Anomalies semaine"].astype(str), textposition='outside',
+                ))
+                barmode2 = 'group'
             fig2.update_layout(
-                barmode='group', height=max(300, 45 * len(detail) + 100),
+                barmode=barmode2, height=max(300, 45 * len(detail) + 100),
                 yaxis=dict(autorange="reversed", fixedrange=True, automargin=True),
                 xaxis=dict(showgrid=True, gridcolor="#F1F5F9", fixedrange=True),
                 plot_bgcolor='white', paper_bgcolor='white',
@@ -558,3 +557,69 @@ def render_suivi_anomalies_semaine(vp: list, hist_df, now_ts, key_prefix: str) -
             st.info("Détail indisponible pour ce poste.")
     else:
         st.caption("👆 Cliquez sur les barres d'un poste pour voir le détail par KPI.")
+
+
+def render_suivi_anomalies_semaine(vp: list, hist_df, now_ts, key_prefix: str) -> None:
+    """
+    Suivi hebdomadaire des anomalies — utilise TOUJOURS la semaine
+    calendaire actuelle (now_ts). Voir _dessiner_suivi_anomalies pour le
+    détail du rendu (barre empilée, état statique 1ère semaine, clic
+    pour le détail par KPI).
+    """
+    from core.historique import calculate_suivi_anomalies_semaine
+    from core.constants import QK, PK
+
+    st.markdown('<div class="stl a">🎯 Suivi hebdomadaire des anomalies</div>', unsafe_allow_html=True)
+
+    if hist_df is None or hist_df.empty:
+        st.markdown('<div style="padding:12px;color:#94a3b8;">Historique indisponible pour le moment.</div>',
+                     unsafe_allow_html=True)
+        return
+
+    res = calculate_suivi_anomalies_semaine(hist_df, now_ts, QK, PK)
+    _dessiner_suivi_anomalies(res, key_prefix)
+
+
+def render_suivi_anomalies_semaine_filtrable(vp: list, hist_df, now_ts, key_prefix: str) -> None:
+    """
+    AJOUTÉ (demande explicite, page Suivi Évolution) : même système que
+    render_suivi_anomalies_semaine, MAIS avec un filtre par NUMÉRO DE
+    SEMAINE (ex. "Semaine 38") qui ne s'applique QU'À CE GRAPHIQUE — les
+    autres sections de la page ne sont pas affectées par ce filtre.
+    Permet de consulter n'importe quelle semaine passée enregistrée,
+    pas seulement la semaine calendaire en cours.
+    """
+    from core.historique import calculate_suivi_anomalies_semaine
+    from core.constants import QK, PK
+
+    st.markdown('<div class="stl a">🎯 Suivi hebdomadaire des anomalies</div>', unsafe_allow_html=True)
+
+    if hist_df is None or hist_df.empty or "_section" not in hist_df.columns:
+        st.markdown('<div style="padding:12px;color:#94a3b8;">Historique indisponible pour le moment.</div>',
+                     unsafe_allow_html=True)
+        return
+
+    sub = hist_df[hist_df["_section"].isin(["ano_perf", "ano_qual"])]
+    dates_dispo = sub["Date_parsed"].dropna().sort_values().unique()
+    if len(dates_dispo) == 0:
+        st.markdown('<div style="padding:12px;color:#94a3b8;">Aucune extraction d\'anomalies enregistrée pour le moment.</div>',
+                     unsafe_allow_html=True)
+        return
+
+    semaines_vues = sorted({
+        (pd.Timestamp(d).isocalendar().year, pd.Timestamp(d).isocalendar().week)
+        for d in dates_dispo
+    }, reverse=True)
+    labels_semaines = [f"Semaine {num} ({annee})" for annee, num in semaines_vues]
+
+    choix = st.selectbox(
+        "🔎 Filtrer ce graphique par semaine (n'affecte que ce graphique)",
+        labels_semaines, index=0, key=f"{key_prefix}_filtre_semaine",
+    )
+    idx_choisi = labels_semaines.index(choix)
+    annee_choisie, num_choisi = semaines_vues[idx_choisi]
+
+    lundi_choisi = pd.Timestamp.fromisocalendar(int(annee_choisie), int(num_choisi), 1)
+
+    res = calculate_suivi_anomalies_semaine(hist_df, lundi_choisi, QK, PK)
+    _dessiner_suivi_anomalies(res, f"{key_prefix}_{annee_choisie}_{num_choisi}")
