@@ -10,7 +10,8 @@ from components.charts import show_grouped_hbar, show_hbar_thresholds, show_butt
 def render_dashboard_tab(vp: list, pscores: dict, qscores: dict,
                           pa: dict, qa: dict,
                           hist_df: pd.DataFrame = None,
-                          now_ts: pd.Timestamp = None) -> None:
+                          now_ts: pd.Timestamp = None,
+                          ano_map: dict = None) -> None:
     # ── 1) Taux moyens par KPI — EN PREMIER (demande explicite) ─────────
     col1, col2 = st.columns(2)
     with col1:
@@ -114,7 +115,7 @@ def render_dashboard_tab(vp: list, pscores: dict, qscores: dict,
 
     # ── 3) Suivi hebdomadaire des anomalies (bar empilée 2 couleurs,
     # gère l'état "1ère semaine" statique — voir components/charts.py) ──
-    render_suivi_anomalies_semaine(vp, hist_df, now_ts, "dash")
+    render_suivi_anomalies_semaine(vp, hist_df, now_ts, "dash", ano_map_actuel=ano_map)
 
     st.markdown("---")
 
