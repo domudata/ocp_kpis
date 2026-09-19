@@ -516,7 +516,7 @@ def main() -> None:
         ])
 
         with tabs[0]:
-            render_dashboard_tab(vp, pscores, qscores, pa, qa, hist_df)
+            render_dashboard_tab(vp, pscores, qscores, pa, qa, hist_df, now_ts)
         with tabs[1]:
             render_performance_qualite_tab(vp, ckdf, ano_map, anomaly_dfs)
         with tabs[2]:
