@@ -6,23 +6,56 @@ import streamlit as st
 from core.constants import QK, PK, CIBLE, ACT_MAP
 from core.calcul_kpi import gscore, is_lb
 
+# AJOUTÉ (demande explicite) : abréviations courtes des noms de KPI pour
+# les en-têtes de colonnes — st.dataframe ne permet pas de faire pivoter
+# le texte des en-têtes (limitation confirmée de Glide Data Grid), donc
+# on raccourcit les libellés à la place. Le nom complet reste visible en
+# infobulle (help) au survol.
+ABREV_KPI = {
+    "TAUX_REALISATION_CORRECTIF/PT": "Taux Réal. Correctif",
+    "OT préparation <1 mois": "Prép. <1m",
+    "OT préparation 1mois< <3mois": "Prép. 1-3m",
+    "OT préparation >3 mois": "Prép. >3m",
+    "OT planification <1 mois": "Planif. <1m",
+    "OT planification 1mois< <3mois": "Planif. 1-3m",
+    "OT planification >3 mois": "Planif. >3m",
+    "OT exécution <1 mois": "Exéc. <1m",
+    "OT exécution 1mois< <3mois": "Exéc. 1-3m",
+    "OT exécution >3 mois": "Exéc. >3m",
+    "Performance Graissage": "Perf. Graissage",
+    "Performance Inspection": "Perf. Inspection",
+    "Performance Systématiques": "Perf. Systémat.",
+    "Taux d'approbation des Avis": "Approb. Avis",
+    "OT LANC ESTIME": "LANC Estimé",
+    "Backlog préparation caractérisé": "Backlog Prép.",
+    "Backlog planification caractérisé": "Backlog Planif.",
+    "OT CONFIME": "OT Confirmé",
+    "OT_COR_EGAL": "Coûts Égaux",
+    "OT Fiabilité": "Fiabilité",
+    "Total Avis de Panne": "Avis Panne",
+}
+
+
+def _abrev(kpi):
+    return ABREV_KPI.get(kpi, kpi)
+
 
 def _tableau_large(vp, ckdf, liste_kpi, nd_full, ano_map):
-    """Tableau LARGE (une ligne par poste) — style du fichier Excel de
-    référence : pour CHAQUE KPI, 3 colonnes (demande explicite) :
-      - {KPI} (%)         : la valeur du KPI, EN NOMBRE ENTIER NATUREL
-        (80, 78... — pas de décimales, demande explicite)
-      - {KPI} (Anomalies) : le NOMBRE d'anomalies, issu de ano_map (source unique)
-      - {KPI} (Total)     : le nombre total d'OT/Avis concernés (dénominateur)
-    Une ligne CIBLE est ajoutée en tête (demande explicite).
+    """Tableau LARGE (une ligne par poste) — SIMPLIFIÉ (demande explicite,
+    contrainte mathématique confirmée) : UNE seule colonne (%) par KPI,
+    au lieu de 3 (%/Anomalies/Total). Avec 13-21 KPI, 3 colonnes chacun
+    donnait 40+ colonnes au total — le défilement horizontal devient
+    alors incontournable quelle que soit la largeur des colonnes
+    individuelles (limite du composant Glide Data Grid de Streamlit).
+    Les détails Anomalies/Total restent pleinement accessibles via le
+    tableau interactif ci-dessous (sélection d'une ligne + choix du KPI).
+    Une ligne CIBLE est ajoutée en tête.
     """
     lignes = []
 
     ligne_cible = {"Poste de travail": "CIBLE"}
     for kpi in liste_kpi:
-        ligne_cible[f"{kpi} (%)"] = int(round(CIBLE.get(kpi, 100)))
-        ligne_cible[f"{kpi} (Anomalies)"] = None
-        ligne_cible[f"{kpi} (Total)"] = None
+        ligne_cible[kpi] = int(round(CIBLE.get(kpi, 100)))
     lignes.append(ligne_cible)
 
     for poste in vp:
@@ -31,42 +64,26 @@ def _tableau_large(vp, ckdf, liste_kpi, nd_full, ano_map):
         r = ckdf.loc[poste]
         ligne = {"Poste de travail": poste}
         for kpi in liste_kpi:
-            if kpi not in r.index or pd.isna(r[kpi]):
-                ligne[f"{kpi} (%)"] = None
-                ligne[f"{kpi} (Anomalies)"] = None
-                ligne[f"{kpi} (Total)"] = None
-                continue
-            valeur = float(r[kpi])
-            ligne[f"{kpi} (%)"] = int(round(valeur))
-            ligne[f"{kpi} (Anomalies)"] = int(ano_map.get(kpi, pd.Series(dtype=float)).get(poste, 0))
-            if kpi in nd_full:
-                _, den_series = nd_full[kpi]
-                ligne[f"{kpi} (Total)"] = int(den_series.get(poste, 0))
-            else:
-                ligne[f"{kpi} (Total)"] = None
+            ligne[kpi] = int(round(float(r[kpi]))) if kpi in r.index and pd.notna(r[kpi]) else None
         lignes.append(ligne)
     df = pd.DataFrame(lignes)
     if len(df) > 1:
         moyenne = {"Poste de travail": "TOTAL GÉNÉRAL"}
         df_sans_cible = df[df["Poste de travail"] != "CIBLE"]
         for kpi in liste_kpi:
-            col_pct = f"{kpi} (%)"
-            col_anom = f"{kpi} (Anomalies)"
-            col_tot = f"{kpi} (Total)"
-            if col_pct in df.columns:
-                moyenne[col_pct] = int(round(df_sans_cible[col_pct].mean(skipna=True)))
-            if col_anom in df.columns:
-                moyenne[col_anom] = int(df_sans_cible[col_anom].sum(skipna=True))
-            if col_tot in df.columns:
-                moyenne[col_tot] = int(df[col_tot].sum(skipna=True))
+            if kpi in df.columns:
+                moyenne[kpi] = int(round(df_sans_cible[kpi].mean(skipna=True)))
         df = pd.concat([df, pd.DataFrame([moyenne])], ignore_index=True)
     return df
 
 
 def _tableau_anomalies_selectionnable(vp, ckdf, ano_map, liste_kpi):
-    """Tableau LONG (une ligne par Poste × KPI) : Valeur, Cible, Anomalies,
-    Statut — chaque ligne sélectionnable nativement (st.dataframe on_select),
-    ce qui permet un vrai clic pour télécharger le détail correspondant."""
+    """Tableau LONG (une ligne par Poste × KPI) : Valeur, Cible, Statut —
+    chaque ligne sélectionnable nativement (st.dataframe on_select).
+    CORRIGÉ (demande explicite) : la colonne "Anomalies" n'est PLUS
+    affichée ici — elle apparaît uniquement APRÈS sélection, dans le
+    détail (_detail_et_telechargement, qui la recalcule indépendamment
+    depuis ano_map)."""
     lignes = []
     for poste in vp:
         if poste not in ckdf.index:
@@ -83,7 +100,7 @@ def _tableau_anomalies_selectionnable(vp, ckdf, ano_map, liste_kpi):
             lignes.append({
                 "Poste de travail": poste, "KPI": kpi,
                 "Valeur (%)": round(valeur, 1), "Cible (%)": cible,
-                "Anomalies": nb_anom, "Statut": statut,
+                "Statut": statut,
             })
     return pd.DataFrame(lignes)
 
@@ -169,9 +186,8 @@ def _rendre_domaine(vp, ckdf, ano_map, anomaly_dfs, nd_full, liste_kpi, cle_pref
     # en dernier pour qu'elle prenne le dessus visuellement.
     styler = tbl_large.style
     for kpi in liste_kpi:
-        col = f"{kpi} (%)"
-        if col in tbl_large.columns:
-            styler = styler.apply(lambda s, k=kpi: _colorer_pct(s, k, liste_kpi), subset=[col])
+        if kpi in tbl_large.columns:
+            styler = styler.apply(lambda s, k=kpi: _colorer_pct(s, k, liste_kpi), subset=[kpi])
     styler = styler.apply(_colorer_ligne_cible, axis=1)
 
     # CORRIGÉ (demande explicite) : use_container_width=True (au lieu de
@@ -181,12 +197,11 @@ def _rendre_domaine(vp, ckdf, ano_map, anomaly_dfs, nd_full, liste_kpi, cle_pref
     # compactes même en pleine largeur.
     config_colonnes = {"Poste de travail": st.column_config.TextColumn(width="medium")}
     for kpi in liste_kpi:
-        for suffixe in [" (%)", " (Anomalies)", " (Total)"]:
-            col = f"{kpi}{suffixe}"
-            if col in tbl_large.columns:
-                config_colonnes[col] = st.column_config.NumberColumn(
-                    label=f"{kpi}{suffixe}", width="small", format="%d",
-                )
+        if kpi in tbl_large.columns:
+            config_colonnes[kpi] = st.column_config.NumberColumn(
+                label=f"{_abrev(kpi)} %", width="small", format="%d",
+                help=kpi,
+            )
 
     event_large = st.dataframe(
         styler, use_container_width=True, hide_index=True,
@@ -215,8 +230,16 @@ def _rendre_domaine(vp, ckdf, ano_map, anomaly_dfs, nd_full, liste_kpi, cle_pref
         st.info("Aucune donnée pour la sélection actuelle.")
         return
 
+    config_anom = {
+        "Poste de travail": st.column_config.TextColumn(width="medium"),
+        "KPI": st.column_config.TextColumn(width="medium"),
+        "Valeur (%)": st.column_config.NumberColumn(width="small", format="%d"),
+        "Cible (%)": st.column_config.NumberColumn(width="small", format="%d"),
+        "Statut": st.column_config.TextColumn(width="small"),
+    }
     event = st.dataframe(
         tbl_anom, use_container_width=True, hide_index=True,
+        column_config=config_anom,
         on_select="rerun", selection_mode="single-row",
         height=min(450, 45 + 35 * len(tbl_anom)),
         key=f"{cle_prefix}_tbl_select",
