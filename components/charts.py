@@ -398,15 +398,15 @@ def show_butterfly_comparison(postes: list,
         y=postes, x=[-v for v in perf_prec], orientation='h',
         name=f"Performance — {label_prec}", marker=dict(color="#f59e0b", line=dict(color='white', width=0.5)),
         text=[f"{v:.0f}%" for v in perf_prec], textposition='outside',
-        textfont=dict(size=8, family='Inter'),
+        textfont=dict(size=11, family='Inter', color='#1e293b'),
         hovertemplate="<b>%{y}</b><br>Performance " + label_prec + " : %{customdata:.1f}%<extra></extra>",
         customdata=perf_prec, offsetgroup="prec",
     ))
     fig.add_trace(go.Bar(
         y=postes, x=[-v for v in qual_prec], orientation='h',
-        name=f"Qualité — {label_prec}", marker=dict(color="#fbbf24", line=dict(color='white', width=0.5)),
+        name=f"Qualité — {label_prec}", marker=dict(color="#8b5cf6", line=dict(color='white', width=0.5)),
         text=[f"{v:.0f}%" for v in qual_prec], textposition='outside',
-        textfont=dict(size=8, family='Inter'),
+        textfont=dict(size=11, family='Inter', color='#1e293b'),
         hovertemplate="<b>%{y}</b><br>Qualité " + label_prec + " : %{customdata:.1f}%<extra></extra>",
         customdata=qual_prec, offsetgroup="prec",
     ))
@@ -414,15 +414,15 @@ def show_butterfly_comparison(postes: list,
         y=postes, x=perf_act, orientation='h',
         name=f"Performance — {label_act}", marker=dict(color="#2563eb", line=dict(color='white', width=0.5)),
         text=[f"{v:.0f}%" for v in perf_act], textposition='outside',
-        textfont=dict(size=8, family='Inter'),
+        textfont=dict(size=11, family='Inter', color='#1e293b'),
         hovertemplate="<b>%{y}</b><br>Performance " + label_act + " : %{x:.1f}%<extra></extra>",
         offsetgroup="act",
     ))
     fig.add_trace(go.Bar(
         y=postes, x=qual_act, orientation='h',
-        name=f"Qualité — {label_act}", marker=dict(color="#60a5fa", line=dict(color='white', width=0.5)),
+        name=f"Qualité — {label_act}", marker=dict(color="#14b8a6", line=dict(color='white', width=0.5)),
         text=[f"{v:.0f}%" for v in qual_act], textposition='outside',
-        textfont=dict(size=8, family='Inter'),
+        textfont=dict(size=11, family='Inter', color='#1e293b'),
         hovertemplate="<b>%{y}</b><br>Qualité " + label_act + " : %{x:.1f}%<extra></extra>",
         offsetgroup="act",
     ))
@@ -431,13 +431,13 @@ def show_butterfly_comparison(postes: list,
     fig.update_layout(
         title=dict(text=titre, x=0.5, xanchor='center', font=dict(size=15, color='#1e293b')),
         barmode='group', bargap=0.35, bargroupgap=0.06,
-        height=max(320, 34 * len(postes) + 140),
+        height=max(350, 46 * len(postes) + 130),
         xaxis=dict(showgrid=False, showticklabels=False, zeroline=False, fixedrange=True,
-                   range=[-115, 115]),
+                   range=[-130, 130]),
         yaxis=dict(autorange="reversed", tickfont=dict(size=11, family='Inter', color='#1e293b'),
                    fixedrange=True, automargin=True),
         plot_bgcolor='white', paper_bgcolor='white',
-        legend=dict(orientation="h", yanchor="bottom", y=-0.10, x=0.5, xanchor="center", font=dict(size=9)),
+        legend=dict(orientation="h", yanchor="bottom", y=-0.10, x=0.5, xanchor="center", font=dict(size=10)),
         margin=dict(t=60, b=60, l=20, r=20),
     )
     st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
@@ -559,12 +559,20 @@ def _dessiner_suivi_anomalies(res: dict, key_prefix: str) -> None:
         st.caption("👆 Cliquez sur les barres d'un poste pour voir le détail par KPI.")
 
 
-def render_suivi_anomalies_semaine(vp: list, hist_df, now_ts, key_prefix: str) -> None:
+def render_suivi_anomalies_semaine(vp: list, hist_df, now_ts, key_prefix: str,
+                                    ano_map_actuel: dict = None) -> None:
     """
-    Suivi hebdomadaire des anomalies — utilise TOUJOURS la semaine
-    calendaire actuelle (now_ts). Voir _dessiner_suivi_anomalies pour le
-    détail du rendu (barre empilée, état statique 1ère semaine, clic
-    pour le détail par KPI).
+    Suivi hebdomadaire des anomalies.
+
+    ano_map_actuel (AJOUTÉ, demande explicite) : si fourni, c'est le
+    total "actuel" par poste/KPI qui est utilisé pour la barre "actuelle"
+    — calculé EN DIRECT sous le filtre période de la sidebar (celui du
+    tableau de bord), au lieu du dernier instantané historique enregistré
+    (qui peut dater d'une extraction précédente). La comparaison
+    ("traitées") reste basée sur le dernier instantané historique
+    disponible pour la semaine précédente. Sans ano_map_actuel, le
+    comportement est identique à avant (comparaison entre les 2 derniers
+    instantanés historiques).
     """
     from core.historique import calculate_suivi_anomalies_semaine
     from core.constants import QK, PK
@@ -577,6 +585,50 @@ def render_suivi_anomalies_semaine(vp: list, hist_df, now_ts, key_prefix: str) -
         return
 
     res = calculate_suivi_anomalies_semaine(hist_df, now_ts, QK, PK)
+
+    if ano_map_actuel is not None:
+        # Remplace le total "actuel" par le calcul LIVE sous le filtre
+        # période de la sidebar, poste par poste et KPI par KPI.
+        st.caption("📌 Le total « actuel » reflète le filtre période sélectionné dans le panneau latéral.")
+        tous_kpi = list(QK) + list(PK)
+        nouveaux_totaux = {}
+        nouveau_detail = {}
+        for poste in vp:
+            total_poste = 0
+            lignes_detail = []
+            for kpi in tous_kpi:
+                nb = int(ano_map_actuel.get(kpi, {}).get(poste, 0)) if hasattr(ano_map_actuel.get(kpi, {}), "get") else 0
+                total_poste += nb
+                # "traitées" pour ce KPI : on réutilise, si dispo, la
+                # valeur déjà calculée par l'historique (comparaison à la
+                # semaine précédente) ; sinon 0 (pas de comparaison possible).
+                ancien = None
+                if not res["par_poste"].empty and poste in res["detail_par_poste"]:
+                    d = res["detail_par_poste"][poste]
+                    ligne_kpi = d[d["KPI"] == kpi]
+                    if not ligne_kpi.empty:
+                        ancien_traite = int(ligne_kpi["Anomalies traitees"].iloc[0])
+                        ancien_semaine = int(ligne_kpi["Anomalies semaine"].iloc[0])
+                        # "traité" recalculé par rapport au NOUVEAU total actuel
+                        ancien = max(0, (ancien_semaine + ancien_traite) - nb)
+                lignes_detail.append({"Type": "", "KPI": kpi, "Anomalies semaine": nb,
+                                       "Anomalies traitees": ancien or 0})
+            nouveaux_totaux[poste] = total_poste
+            nouveau_detail[poste] = pd.DataFrame(lignes_detail)
+
+        par_poste_live = pd.DataFrame([
+            {"Poste": p, "Anomalies semaine": nouveaux_totaux.get(p, 0),
+             "Anomalies traitees": int(nouveau_detail[p]["Anomalies traitees"].sum()) if p in nouveau_detail and not nouveau_detail[p].empty else 0}
+            for p in vp
+        ]).sort_values("Anomalies semaine", ascending=False)
+
+        res = {
+            "num_semaine_actuelle": res["num_semaine_actuelle"],
+            "num_semaine_precedente": res["num_semaine_precedente"],
+            "date_act": res["date_act"], "date_prec": res["date_prec"],
+            "par_poste": par_poste_live, "detail_par_poste": nouveau_detail,
+        }
+
     _dessiner_suivi_anomalies(res, key_prefix)
 
 
