@@ -317,10 +317,13 @@ def show_grouped_hbar(vp, pscores: dict, qscores: dict, title: str,
     Comparaison Performance / Qualite PAR POSTE en barres horizontales
     groupees, avec lignes de seuil s1/s2 (style rapport OCP).
 
-    thin=True (AJOUTÉ, demande explicite) : barres très fines — augmente
-    les écarts inter-barres/inter-groupes et réduit la hauteur par poste,
-    pour un rendu plus compact quand Performance et Qualité sont
-    regroupées sur un même graphique.
+    CORRIGÉ (retour utilisateur) : les barres précédentes, une fois
+    étirées sur toute la largeur du conteneur, paraissaient trop longues
+    et trop fines. Deux changements :
+      - bargap/bargroupgap réduits (barres plus ÉPAISSES) ;
+      - le graphique n'est plus étiré sur toute la largeur de l'écran
+        (use_container_width=False, largeur fixe raisonnable), pour que
+        des barres courtes restent visuellement courtes.
     """
     postes = [p for p in vp if p in pscores or p in qscores]
     if not postes:
@@ -333,10 +336,11 @@ def show_grouped_hbar(vp, pscores: dict, qscores: dict, title: str,
     def _score_colors(vals):
         return [C_HIGH if v >= s2 else (C_MID if v >= s1 else C_LOW) for v in vals]
 
-    bargap = 0.45 if thin else 0.25
-    bargroupgap = 0.25 if thin else 0.08
-    par_poste = 34 if thin else 52
-    bar_line_w = 0.5 if thin else 1
+    bargap = 0.10 if thin else 0.25
+    bargroupgap = 0.04 if thin else 0.08
+    largeur_fixe = 780
+    par_poste = 46 if thin else 52
+    bar_line_w = 1
 
     fig = go.Figure()
     fig.add_trace(go.Bar(
@@ -371,8 +375,55 @@ def show_grouped_hbar(vp, pscores: dict, qscores: dict, title: str,
         plot_bgcolor='white', paper_bgcolor='white',
         legend=dict(orientation="h", yanchor="bottom", y=-0.08, x=0.5, xanchor="center"),
         margin=dict(t=90, b=60, l=20, r=50),
+        width=largeur_fixe if thin else None,
+    )
+    st.plotly_chart(fig, use_container_width=not thin, config=PLOTLY_CONFIG)
+
+def show_butterfly_comparison(postes: list, valeurs_precedentes: list, valeurs_actuelles: list,
+                               titre: str, label_prec: str, label_act: str) -> None:
+    """
+    AJOUTÉ (demande explicite, style "photo 2") : graphique "papillon"
+    (tornado chart) — un axe vertical central, la semaine précédente
+    s'étend vers la GAUCHE, la semaine actuelle vers la DROITE, une
+    ligne par poste. Permet de comparer visuellement, poste par poste,
+    l'évolution entre les deux semaines en un coup d'œil.
+    """
+    if not postes:
+        st.markdown('<div style="padding:20px;color:#94a3b8;">Aucune donnée</div>', unsafe_allow_html=True)
+        return
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        y=postes, x=[-v for v in valeurs_precedentes], orientation='h',
+        name=label_prec, marker=dict(color=GREY, line=dict(color='white', width=1)),
+        text=[f"{v:.0f}%" for v in valeurs_precedentes], textposition='outside',
+        textfont=dict(size=10, family='Inter'),
+        hovertemplate="<b>%{y}</b><br>" + label_prec + " : %{customdata:.1f}%<extra></extra>",
+        customdata=valeurs_precedentes,
+    ))
+    fig.add_trace(go.Bar(
+        y=postes, x=valeurs_actuelles, orientation='h',
+        name=label_act, marker=dict(color=BLUE, line=dict(color='white', width=1)),
+        text=[f"{v:.0f}%" for v in valeurs_actuelles], textposition='outside',
+        textfont=dict(size=10, family='Inter'),
+        hovertemplate="<b>%{y}</b><br>" + label_act + " : %{x:.1f}%<extra></extra>",
+    ))
+    fig.add_vline(x=0, line_color=DARK, line_width=1.5)
+
+    fig.update_layout(
+        title=dict(text=titre, x=0.5, xanchor='center', font=dict(size=16, color='#1e293b')),
+        barmode='overlay', bargap=0.15,
+        height=max(350, 40 * len(postes) + 130),
+        xaxis=dict(showgrid=False, showticklabels=False, zeroline=False, fixedrange=True,
+                   range=[-110, 110]),
+        yaxis=dict(autorange="reversed", tickfont=dict(size=12, family='Inter', color='#1e293b'),
+                   fixedrange=True, automargin=True),
+        plot_bgcolor='white', paper_bgcolor='white',
+        legend=dict(orientation="h", yanchor="bottom", y=-0.06, x=0.5, xanchor="center"),
+        margin=dict(t=70, b=50, l=20, r=20),
     )
     st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
+
 
 def show_scores_hbar(vp, scores: dict, title, s1=S1_DEFAULT, s2=S2_DEFAULT):
     """
