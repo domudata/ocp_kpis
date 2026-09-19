@@ -6,6 +6,7 @@ from core.constants import QK, PK, CIBLE, LOWER_BETTER
 from components.tables import html_classement
 from components.charts import show_grouped_hbar, show_hbar_thresholds, show_butterfly_comparison
 from components.sparklines import get_comparison_html
+from core.historique import calculate_taux_traitement
 
 
 def render_dashboard_tab(vp: list, pscores: dict, qscores: dict,
@@ -107,6 +108,61 @@ def render_dashboard_tab(vp: list, pscores: dict, qscores: dict,
                     postes_valides, perf_prec, perf_act, qual_prec, qual_act,
                     "Performance & Qualité", f"Préc. ({date_prec})", f"Actuelle ({date_act})",
                 )
+
+    # ── Système de suivi hebdomadaire : taux de traitement des anomalies
+    # (demande explicite) — semaine actuelle vs semaine précédente,
+    # lundi->dimanche, au niveau général ET par poste de travail.
+    st.markdown('<div class="stl a">🎯 Taux de traitement des anomalies (semaine vs semaine précédente)</div>', unsafe_allow_html=True)
+    if hist_df is None or hist_df.empty:
+        st.markdown(
+            '<div style="padding:12px;color:#94a3b8;">Historique indisponible pour le moment.</div>',
+            unsafe_allow_html=True,
+        )
+    else:
+        res_traitement = calculate_taux_traitement(hist_df, now_ts or pd.Timestamp.today(), QK, PK)
+        d = res_traitement["dates"]
+        if res_traitement["general"] is None:
+            st.markdown(
+                f'<div style="padding:12px;color:#94a3b8;">'
+                f'Il faut au moins une extraction dans la semaine actuelle '
+                f'({d["lundi_actuel"]:%d/%m}–{d["dimanche_actuel"]:%d/%m}) ET dans la semaine '
+                f'précédente ({d["lundi_precedent"]:%d/%m}–{d["dimanche_precedent"]:%d/%m}) '
+                f'pour calculer le taux de traitement.</div>',
+                unsafe_allow_html=True,
+            )
+        else:
+            g = res_traitement["general"]
+            couleur = "#10b981" if g["taux_pct"] >= 0 else "#ef4444"
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                st.markdown(
+                    f'<div style="text-align:center;padding:14px;background:{couleur}12;border-radius:10px;">'
+                    f'<div style="font-size:11px;color:#64748b;font-weight:700;">TAUX DE TRAITEMENT GÉNÉRAL</div>'
+                    f'<div style="font-size:32px;font-weight:800;color:{couleur};">{g["taux_pct"]:.1f}%</div></div>',
+                    unsafe_allow_html=True,
+                )
+            with c2:
+                st.markdown(
+                    f'<div style="text-align:center;padding:14px;background:#f1f5f9;border-radius:10px;">'
+                    f'<div style="font-size:11px;color:#64748b;font-weight:700;">ANOMALIES SEMAINE PRÉCÉDENTE</div>'
+                    f'<div style="font-size:32px;font-weight:800;color:#1e293b;">{g["anomalies_prec"]}</div></div>',
+                    unsafe_allow_html=True,
+                )
+            with c3:
+                st.markdown(
+                    f'<div style="text-align:center;padding:14px;background:#f1f5f9;border-radius:10px;">'
+                    f'<div style="font-size:11px;color:#64748b;font-weight:700;">ANOMALIES SEMAINE ACTUELLE</div>'
+                    f'<div style="font-size:32px;font-weight:800;color:#1e293b;">{g["anomalies_act"]}</div></div>',
+                    unsafe_allow_html=True,
+                )
+
+            st.markdown("<div style='height:10px;'></div>", unsafe_allow_html=True)
+            st.markdown("**Détail par poste de travail :**")
+            par_poste_aff = res_traitement["par_poste"][res_traitement["par_poste"]["Poste"].isin(vp)]
+            st.dataframe(par_poste_aff, use_container_width=True, hide_index=True,
+                         height=min(400, 45 + 35 * len(par_poste_aff)))
+
+    st.markdown("---")
 
     # ── Taux moyens par KPI (couleur = respect de la VRAIE cible de chaque KPI) ──
     col1, col2 = st.columns(2)
