@@ -563,20 +563,94 @@ def _dessiner_suivi_anomalies(res: dict, key_prefix: str) -> None:
         st.caption("👆 Cliquez sur les barres d'un poste pour voir le détail par KPI.")
 
 
+def _dessiner_barre_horizontale_division(postes_div, total_actuel, total_reference,
+                                          reference_disponible, tous_kpi, ano_map_actuel,
+                                          key_prefix) -> None:
+    """Dessine UN graphique bar HORIZONTAL pour une division (SF1 ou SF2),
+    avec le pourcentage traité affiché À L'EXTÉRIEUR de la barre — sauf
+    si la valeur est 100% ET qu'il s'agit du mode référence (rien à
+    afficher de significatif dans ce cas précis)."""
+    if not postes_div:
+        st.markdown('<div style="padding:12px;color:#94a3b8;">Aucun poste.</div>', unsafe_allow_html=True)
+        return
+
+    postes_tries = sorted(postes_div, key=lambda p: total_actuel.get(p, 0), reverse=True)
+    valeurs = [total_actuel.get(p, 0) for p in postes_tries]
+
+    textes = []
+    for p, act in zip(postes_tries, valeurs):
+        if reference_disponible:
+            ref = total_reference.get(p, 0)
+            if ref > 0:
+                pct_traite = max(0, round((ref - act) / ref * 100))
+                textes.append(f"{act} ({pct_traite}% traité)")
+            else:
+                textes.append(f"{act}")
+        else:
+            textes.append(f"{act}")
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        y=postes_tries, x=valeurs, orientation='h', name="Anomalies (période filtrée)",
+        marker=dict(color="#f97316", line=dict(color='white', width=1)),
+        text=textes, textposition='outside', textfont=dict(size=12, family='Inter', color='black'),
+    ))
+    fig.update_layout(
+        height=max(320, 38 * len(postes_tries) + 100),
+        yaxis=dict(autorange="reversed", tickfont=dict(size=11, family='Inter'), fixedrange=True, automargin=True),
+        xaxis=dict(showgrid=True, gridcolor="#F1F5F9", fixedrange=True, title="Nombre d'anomalies"),
+        plot_bgcolor='white', paper_bgcolor='white',
+        margin=dict(t=20, b=40, l=20, r=60),
+    )
+    event = st.plotly_chart(
+        fig, use_container_width=True, config=PLOTLY_CONFIG,
+        on_select="rerun", selection_mode="points", key=f"{key_prefix}_chart",
+    )
+
+    points = event.selection.points if event and event.selection else []
+    if points:
+        poste_sel = points[0].get("y")
+        st.markdown(f"**🔍 Détail par KPI — {poste_sel}**")
+        detail_kpis, detail_act = [], []
+        for kpi in tous_kpi:
+            d = ano_map_actuel.get(kpi, {})
+            nb = int(d.get(poste_sel, 0)) if hasattr(d, "get") else 0
+            if nb == 0:
+                continue
+            detail_kpis.append(kpi)
+            detail_act.append(nb)
+        if detail_kpis:
+            fig2 = go.Figure()
+            fig2.add_trace(go.Bar(
+                y=detail_kpis, x=detail_act, orientation='h',
+                marker=dict(color="#f97316"),
+                text=[str(v) for v in detail_act], textposition='outside',
+                textfont=dict(color='black'),
+            ))
+            fig2.update_layout(
+                height=max(280, 36 * len(detail_kpis) + 90),
+                yaxis=dict(autorange="reversed", fixedrange=True, automargin=True),
+                xaxis=dict(showgrid=True, gridcolor="#F1F5F9", fixedrange=True),
+                plot_bgcolor='white', paper_bgcolor='white',
+                margin=dict(t=20, b=40, l=20, r=40),
+            )
+            st.plotly_chart(fig2, use_container_width=True, config=PLOTLY_CONFIG,
+                             key=f"{key_prefix}_detail_{poste_sel}")
+        else:
+            st.info("Aucune anomalie pour ce poste sur la période sélectionnée.")
+    else:
+        st.caption("👆 Cliquez sur une barre pour voir le détail par KPI.")
+
+
 def render_suivi_anomalies_semaine(vp: list, hist_df, now_ts, key_prefix: str,
                                     ano_map_actuel: dict = None) -> None:
     """
-    REFAIT ENTIÈREMENT (demande explicite) :
-      - Le total « actuel » reflète maintenant le FILTRE PÉRIODE ACTIF de
-        la sidebar (via ano_map_actuel, déjà calculé sous ce filtre) —
-        PAS une semaine calendaire fixe.
-      - La comparaison se fait contre le DERNIER instantané historique
-        enregistré (n'importe quelle date), pas « la semaine précédente ».
-      - Le résultat « traité » est affiché en POURCENTAGE, pas en nombre
-        brut.
-      - Tant qu'aucun instantané antérieur n'existe pour comparer, le
-        total actuel sert de RÉFÉRENCE statique, en attendant la
-        prochaine extraction (aucun pourcentage affiché dans ce cas).
+    Suivi des anomalies sous le filtre période actif (sidebar).
+    CORRIGÉ (demande explicite) : SÉPARÉ en 2 graphiques bar HORIZONTAUX
+    côte à côte — SF1 = « Maroc Chimie » à gauche, SF2 = « FEEDS » à
+    droite — au lieu d'un seul graphique vertical mélangeant les 2
+    divisions. Comparaison contre le dernier instantané historique
+    enregistré ; pourcentage traité affiché à l'extérieur de la barre.
     """
     from core.constants import QK, PK
 
@@ -605,12 +679,6 @@ def render_suivi_anomalies_semaine(vp: list, hist_df, now_ts, key_prefix: str,
             date_reference = pd.Timestamp(dates_dispo[-1])
             reference_disponible = True
             row_ref = sub[sub["Date_parsed"] == date_reference].set_index("Poste de travail")
-            # CORRIGÉ (bug reproduit et confirmé) : si un poste apparaît
-            # plusieurs fois pour la même date dans le fichier historique,
-            # row_ref.loc[poste, kpi] renvoie une Series au lieu d'un
-            # scalaire, ce qui casse pd.notna(...) utilisé dans un test
-            # booléen ("truth value of a Series is ambiguous"). On ne
-            # garde que la DERNIÈRE occurrence de chaque poste.
             row_ref = row_ref[~row_ref.index.duplicated(keep="last")]
             for poste in vp:
                 if poste in row_ref.index:
@@ -621,74 +689,31 @@ def render_suivi_anomalies_semaine(vp: list, hist_df, now_ts, key_prefix: str,
                 else:
                     total_reference[poste] = 0
 
-    postes_tries = sorted(vp, key=lambda p: total_actuel.get(p, 0), reverse=True)
-    valeurs_actuelles = [total_actuel.get(p, 0) for p in postes_tries]
-
     if reference_disponible and date_reference is not None:
         st.caption(f"📅 Référence : dernier instantané enregistré du {date_reference:%d/%m/%Y}. "
                     f"Le pourcentage indique la part déjà traitée depuis cette référence.")
-        textes = []
-        for p, act in zip(postes_tries, valeurs_actuelles):
-            ref = total_reference.get(p, 0)
-            if ref > 0:
-                pct_traite = max(0, round((ref - act) / ref * 100))
-                textes.append(f"{act} ({pct_traite}% traité)")
-            else:
-                textes.append(f"{act}")
     else:
         st.caption("📌 Aucune extraction antérieure enregistrée — ce total sert de RÉFÉRENCE. "
                     "Le pourcentage traité apparaîtra dès la prochaine extraction.")
-        textes = [str(v) for v in valeurs_actuelles]
 
-    fig = go.Figure()
-    fig.add_trace(go.Bar(
-        x=postes_tries, y=valeurs_actuelles, name="Anomalies (période filtrée)",
-        marker=dict(color="#f97316", line=dict(color='white', width=1)),
-        text=textes, textposition='outside', textfont=dict(size=12, family='Inter', color='black'),
-    ))
-    fig.update_layout(
-        barmode='group', height=420,
-        xaxis=dict(tickangle=-45, fixedrange=True),
-        yaxis=dict(showgrid=True, gridcolor="#F1F5F9", fixedrange=True, title="Nombre d'anomalies"),
-        plot_bgcolor='white', paper_bgcolor='white',
-        margin=dict(t=20, b=100, l=20, r=20),
-    )
-    event = st.plotly_chart(
-        fig, use_container_width=True, config=PLOTLY_CONFIG,
-        on_select="rerun", selection_mode="points", key=f"{key_prefix}_suivi_anom_chart",
-    )
+    postes_sf1 = [p for p in vp if str(p).startswith("SF1")]
+    postes_sf2 = [p for p in vp if str(p).startswith("SF2")]
 
-    points = event.selection.points if event and event.selection else []
-    if points:
-        poste_sel = points[0].get("x")
-        st.markdown(f"**🔍 Détail par KPI — {poste_sel}**")
-        detail_kpis, detail_act = [], []
-        for kpi in tous_kpi:
-            nb = _get(ano_map_actuel, kpi, poste_sel)
-            if nb == 0:
-                continue
-            detail_kpis.append(kpi)
-            detail_act.append(nb)
-        if detail_kpis:
-            fig2 = go.Figure()
-            fig2.add_trace(go.Bar(
-                y=detail_kpis, x=detail_act, orientation='h',
-                marker=dict(color="#f97316"),
-                text=[str(v) for v in detail_act], textposition='outside',
-            ))
-            fig2.update_layout(
-                height=max(300, 40 * len(detail_kpis) + 100),
-                yaxis=dict(autorange="reversed", fixedrange=True, automargin=True),
-                xaxis=dict(showgrid=True, gridcolor="#F1F5F9", fixedrange=True),
-                plot_bgcolor='white', paper_bgcolor='white',
-                margin=dict(t=20, b=50, l=20, r=20),
-            )
-            st.plotly_chart(fig2, use_container_width=True, config=PLOTLY_CONFIG,
-                             key=f"{key_prefix}_suivi_anom_detail_{poste_sel}")
-        else:
-            st.info("Aucune anomalie pour ce poste sur la période sélectionnée.")
-    else:
-        st.caption("👆 Cliquez sur la barre d'un poste pour voir le détail par KPI.")
+    col_sf1, col_sf2 = st.columns(2)
+    with col_sf1:
+        st.markdown("**🏭 Maroc Chimie (SF1)**")
+        _dessiner_barre_horizontale_division(
+            postes_sf1, total_actuel, total_reference, reference_disponible,
+            tous_kpi, ano_map_actuel, f"{key_prefix}_sf1",
+        )
+    with col_sf2:
+        st.markdown("**🏭 FEEDS (SF2)**")
+        _dessiner_barre_horizontale_division(
+            postes_sf2, total_actuel, total_reference, reference_disponible,
+            tous_kpi, ano_map_actuel, f"{key_prefix}_sf2",
+        )
+
+
 
 
 def render_suivi_anomalies_semaine_filtrable(vp: list, hist_df, now_ts, key_prefix: str) -> None:
