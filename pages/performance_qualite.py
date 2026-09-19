@@ -7,12 +7,13 @@ from core.constants import QK, PK, CIBLE, ACT_MAP
 from core.calcul_kpi import gscore, is_lb
 
 
-def _tableau_large(vp, ckdf, liste_kpi, nd_full):
+def _tableau_large(vp, ckdf, liste_kpi, nd_full, ano_map):
     """Tableau LARGE (une ligne par poste) — style du fichier Excel de
     référence : pour CHAQUE KPI, 3 colonnes (demande explicite) :
-      - {KPI} (%)        : la valeur du KPI
-      - {KPI} (Conforme) : OUI si conforme à la cible (gscore=1), NON sinon
-      - {KPI} (Total)    : le nombre total d'OT/Avis concernés (dénominateur)
+      - {KPI} (%)         : la valeur du KPI
+      - {KPI} (Anomalies) : le NOMBRE d'anomalies (pas OUI/NON — corrigé
+        sur demande explicite), issu de ano_map (source unique)
+      - {KPI} (Total)     : le nombre total d'OT/Avis concernés (dénominateur)
     """
     lignes = []
     for poste in vp:
@@ -23,12 +24,12 @@ def _tableau_large(vp, ckdf, liste_kpi, nd_full):
         for kpi in liste_kpi:
             if kpi not in r.index or pd.isna(r[kpi]):
                 ligne[f"{kpi} (%)"] = None
-                ligne[f"{kpi} (Conforme)"] = None
+                ligne[f"{kpi} (Anomalies)"] = None
                 ligne[f"{kpi} (Total)"] = None
                 continue
             valeur = float(r[kpi])
             ligne[f"{kpi} (%)"] = round(valeur, 1)
-            ligne[f"{kpi} (Conforme)"] = "OUI" if gscore(kpi, valeur, CIBLE.get(kpi, 100)) == 1 else "NON"
+            ligne[f"{kpi} (Anomalies)"] = int(ano_map.get(kpi, pd.Series(dtype=float)).get(poste, 0))
             if kpi in nd_full:
                 _, den_series = nd_full[kpi]
                 ligne[f"{kpi} (Total)"] = int(den_series.get(poste, 0))
@@ -40,10 +41,12 @@ def _tableau_large(vp, ckdf, liste_kpi, nd_full):
         moyenne = {"Poste de travail": "TOTAL GÉNÉRAL"}
         for kpi in liste_kpi:
             col_pct = f"{kpi} (%)"
+            col_anom = f"{kpi} (Anomalies)"
             col_tot = f"{kpi} (Total)"
             if col_pct in df.columns:
                 moyenne[col_pct] = round(df[col_pct].mean(skipna=True), 1)
-            moyenne[f"{kpi} (Conforme)"] = ""
+            if col_anom in df.columns:
+                moyenne[col_anom] = int(df[col_anom].sum(skipna=True))
             if col_tot in df.columns:
                 moyenne[col_tot] = int(df[col_tot].sum(skipna=True))
         df = pd.concat([df, pd.DataFrame([moyenne])], ignore_index=True)
@@ -117,7 +120,7 @@ def _detail_et_telechargement(poste, kpi, ano_map, anomaly_dfs, cle_prefix):
 
 def _rendre_domaine(vp, ckdf, ano_map, anomaly_dfs, nd_full, liste_kpi, cle_prefix, style_stl):
     st.markdown(f'<div class="stl {style_stl}">Vue d\'ensemble (style export)</div>', unsafe_allow_html=True)
-    tbl_large = _tableau_large(vp, ckdf, liste_kpi, nd_full)
+    tbl_large = _tableau_large(vp, ckdf, liste_kpi, nd_full, ano_map)
     event_large = st.dataframe(
         tbl_large, use_container_width=True, hide_index=True,
         on_select="rerun", selection_mode="single-row",
