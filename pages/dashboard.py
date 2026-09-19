@@ -103,17 +103,10 @@ def render_dashboard_tab(vp: list, pscores: dict, qscores: dict,
                     perf_prec.append(val_p_prec); perf_act.append(val_p_act)
                     qual_prec.append(val_q_prec); qual_act.append(val_q_act)
 
-                cb1, cb2 = st.columns(2)
-                with cb1:
-                    show_butterfly_comparison(
-                        postes_valides, perf_prec, perf_act,
-                        "Performance", f"Préc. ({date_prec})", f"Actuelle ({date_act})",
-                    )
-                with cb2:
-                    show_butterfly_comparison(
-                        postes_valides, qual_prec, qual_act,
-                        "Qualité", f"Préc. ({date_prec})", f"Actuelle ({date_act})",
-                    )
+                show_butterfly_comparison(
+                    postes_valides, perf_prec, perf_act, qual_prec, qual_act,
+                    "Performance & Qualité", f"Préc. ({date_prec})", f"Actuelle ({date_act})",
+                )
 
     # ── Taux moyens par KPI (couleur = respect de la VRAIE cible de chaque KPI) ──
     col1, col2 = st.columns(2)
