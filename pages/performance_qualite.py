@@ -242,37 +242,6 @@ def _rendre_domaine(vp, ckdf, ano_map, anomaly_dfs, nd_full, liste_kpi, cle_pref
     else:
         st.caption("👆 Cliquez sur une ligne pour voir le détail par KPI de ce poste.")
 
-    st.markdown("---")
-    st.markdown(f'<div class="stl a">KPI et anomalies — cliquez une ligne pour télécharger son détail</div>', unsafe_allow_html=True)
-    tbl_anom = _tableau_anomalies_selectionnable(vp, ckdf, ano_map, liste_kpi)
-
-    if tbl_anom.empty:
-        st.info("Aucune donnée pour la sélection actuelle.")
-        return
-
-    config_anom = {
-        "Poste de travail": st.column_config.TextColumn(width="medium"),
-        "KPI": st.column_config.TextColumn(width="medium"),
-        "Valeur (%)": st.column_config.NumberColumn(width="small", format="%d"),
-        "Cible (%)": st.column_config.NumberColumn(width="small", format="%d"),
-        "Statut": st.column_config.TextColumn(width="small"),
-    }
-    event = st.dataframe(
-        tbl_anom, use_container_width=True, hide_index=True,
-        column_config=config_anom,
-        on_select="rerun", selection_mode="single-row",
-        height=45 + 35 * len(tbl_anom),  # pas de plafond : toutes les lignes Poste x KPI visibles sans defilement vertical
-        key=f"{cle_prefix}_tbl_select",
-    )
-
-    st.markdown("---")
-    lignes_selectionnees = event.selection.rows if event and event.selection else []
-    if lignes_selectionnees:
-        ligne = tbl_anom.iloc[lignes_selectionnees[0]]
-        _detail_et_telechargement(ligne["Poste de travail"], ligne["KPI"], ano_map, anomaly_dfs, cle_prefix)
-    else:
-        st.caption("👆 Cliquez sur une ligne du tableau ci-dessus pour voir et télécharger son détail (OT/Avis).")
-
 
 def render_performance_qualite_tab(vp: list, ckdf, ano_map: dict, anomaly_dfs: dict, nd_full: dict) -> None:
     """
