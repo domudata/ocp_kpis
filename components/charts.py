@@ -397,32 +397,32 @@ def show_butterfly_comparison(postes: list,
     fig.add_trace(go.Bar(
         y=postes, x=[-v for v in perf_prec], orientation='h',
         name=f"Performance — {label_prec}", marker=dict(color="#f59e0b", line=dict(color='white', width=0.5)),
-        text=[f"{v:.0f}%" for v in perf_prec], textposition='outside',
-        textfont=dict(size=11, family='Inter', color='#1e293b'),
+        text=[f"{v:.0f}%" for v in perf_prec], textposition='inside', insidetextanchor='middle',
+        textfont=dict(size=14, family='Inter', color='white'),
         hovertemplate="<b>%{y}</b><br>Performance " + label_prec + " : %{customdata:.1f}%<extra></extra>",
         customdata=perf_prec, offsetgroup="prec",
     ))
     fig.add_trace(go.Bar(
         y=postes, x=[-v for v in qual_prec], orientation='h',
         name=f"Qualité — {label_prec}", marker=dict(color="#8b5cf6", line=dict(color='white', width=0.5)),
-        text=[f"{v:.0f}%" for v in qual_prec], textposition='outside',
-        textfont=dict(size=11, family='Inter', color='#1e293b'),
+        text=[f"{v:.0f}%" for v in qual_prec], textposition='inside', insidetextanchor='middle',
+        textfont=dict(size=14, family='Inter', color='white'),
         hovertemplate="<b>%{y}</b><br>Qualité " + label_prec + " : %{customdata:.1f}%<extra></extra>",
         customdata=qual_prec, offsetgroup="prec",
     ))
     fig.add_trace(go.Bar(
         y=postes, x=perf_act, orientation='h',
         name=f"Performance — {label_act}", marker=dict(color="#2563eb", line=dict(color='white', width=0.5)),
-        text=[f"{v:.0f}%" for v in perf_act], textposition='outside',
-        textfont=dict(size=11, family='Inter', color='#1e293b'),
+        text=[f"{v:.0f}%" for v in perf_act], textposition='inside', insidetextanchor='middle',
+        textfont=dict(size=14, family='Inter', color='white'),
         hovertemplate="<b>%{y}</b><br>Performance " + label_act + " : %{x:.1f}%<extra></extra>",
         offsetgroup="act",
     ))
     fig.add_trace(go.Bar(
         y=postes, x=qual_act, orientation='h',
         name=f"Qualité — {label_act}", marker=dict(color="#14b8a6", line=dict(color='white', width=0.5)),
-        text=[f"{v:.0f}%" for v in qual_act], textposition='outside',
-        textfont=dict(size=11, family='Inter', color='#1e293b'),
+        text=[f"{v:.0f}%" for v in qual_act], textposition='inside', insidetextanchor='middle',
+        textfont=dict(size=14, family='Inter', color='white'),
         hovertemplate="<b>%{y}</b><br>Qualité " + label_act + " : %{x:.1f}%<extra></extra>",
         offsetgroup="act",
     ))
@@ -562,74 +562,122 @@ def _dessiner_suivi_anomalies(res: dict, key_prefix: str) -> None:
 def render_suivi_anomalies_semaine(vp: list, hist_df, now_ts, key_prefix: str,
                                     ano_map_actuel: dict = None) -> None:
     """
-    Suivi hebdomadaire des anomalies.
-
-    ano_map_actuel (AJOUTÉ, demande explicite) : si fourni, c'est le
-    total "actuel" par poste/KPI qui est utilisé pour la barre "actuelle"
-    — calculé EN DIRECT sous le filtre période de la sidebar (celui du
-    tableau de bord), au lieu du dernier instantané historique enregistré
-    (qui peut dater d'une extraction précédente). La comparaison
-    ("traitées") reste basée sur le dernier instantané historique
-    disponible pour la semaine précédente. Sans ano_map_actuel, le
-    comportement est identique à avant (comparaison entre les 2 derniers
-    instantanés historiques).
+    REFAIT ENTIÈREMENT (demande explicite) :
+      - Le total « actuel » reflète maintenant le FILTRE PÉRIODE ACTIF de
+        la sidebar (via ano_map_actuel, déjà calculé sous ce filtre) —
+        PAS une semaine calendaire fixe.
+      - La comparaison se fait contre le DERNIER instantané historique
+        enregistré (n'importe quelle date), pas « la semaine précédente ».
+      - Le résultat « traité » est affiché en POURCENTAGE, pas en nombre
+        brut.
+      - Tant qu'aucun instantané antérieur n'existe pour comparer, le
+        total actuel sert de RÉFÉRENCE statique, en attendant la
+        prochaine extraction (aucun pourcentage affiché dans ce cas).
     """
-    from core.historique import calculate_suivi_anomalies_semaine
     from core.constants import QK, PK
 
-    st.markdown('<div class="stl a">🎯 Suivi hebdomadaire des anomalies</div>', unsafe_allow_html=True)
+    st.markdown('<div class="stl a">🎯 Suivi des anomalies (période sélectionnée)</div>', unsafe_allow_html=True)
 
-    if hist_df is None or hist_df.empty:
-        st.markdown('<div style="padding:12px;color:#94a3b8;">Historique indisponible pour le moment.</div>',
+    if ano_map_actuel is None:
+        st.markdown('<div style="padding:12px;color:#94a3b8;">Données live indisponibles.</div>',
                      unsafe_allow_html=True)
         return
 
-    res = calculate_suivi_anomalies_semaine(hist_df, now_ts, QK, PK)
+    tous_kpi = list(QK) + list(PK)
 
-    if ano_map_actuel is not None:
-        # Remplace le total "actuel" par le calcul LIVE sous le filtre
-        # période de la sidebar, poste par poste et KPI par KPI.
-        st.caption("📌 Le total « actuel » reflète le filtre période sélectionné dans le panneau latéral.")
-        tous_kpi = list(QK) + list(PK)
-        nouveaux_totaux = {}
-        nouveau_detail = {}
-        for poste in vp:
-            total_poste = 0
-            lignes_detail = []
-            for kpi in tous_kpi:
-                nb = int(ano_map_actuel.get(kpi, {}).get(poste, 0)) if hasattr(ano_map_actuel.get(kpi, {}), "get") else 0
-                total_poste += nb
-                # "traitées" pour ce KPI : on réutilise, si dispo, la
-                # valeur déjà calculée par l'historique (comparaison à la
-                # semaine précédente) ; sinon 0 (pas de comparaison possible).
-                ancien = None
-                if not res["par_poste"].empty and poste in res["detail_par_poste"]:
-                    d = res["detail_par_poste"][poste]
-                    ligne_kpi = d[d["KPI"] == kpi]
-                    if not ligne_kpi.empty:
-                        ancien_traite = int(ligne_kpi["Anomalies traitees"].iloc[0])
-                        ancien_semaine = int(ligne_kpi["Anomalies semaine"].iloc[0])
-                        # "traité" recalculé par rapport au NOUVEAU total actuel
-                        ancien = max(0, (ancien_semaine + ancien_traite) - nb)
-                lignes_detail.append({"Type": "", "KPI": kpi, "Anomalies semaine": nb,
-                                       "Anomalies traitees": ancien or 0})
-            nouveaux_totaux[poste] = total_poste
-            nouveau_detail[poste] = pd.DataFrame(lignes_detail)
+    def _get(ano_map, kpi, poste):
+        d = ano_map.get(kpi, {})
+        return int(d.get(poste, 0)) if hasattr(d, "get") else 0
 
-        par_poste_live = pd.DataFrame([
-            {"Poste": p, "Anomalies semaine": nouveaux_totaux.get(p, 0),
-             "Anomalies traitees": int(nouveau_detail[p]["Anomalies traitees"].sum()) if p in nouveau_detail and not nouveau_detail[p].empty else 0}
-            for p in vp
-        ]).sort_values("Anomalies semaine", ascending=False)
+    total_actuel = {p: sum(_get(ano_map_actuel, k, p) for k in tous_kpi) for p in vp}
 
-        res = {
-            "num_semaine_actuelle": res["num_semaine_actuelle"],
-            "num_semaine_precedente": res["num_semaine_precedente"],
-            "date_act": res["date_act"], "date_prec": res["date_prec"],
-            "par_poste": par_poste_live, "detail_par_poste": nouveau_detail,
-        }
+    reference_disponible = False
+    total_reference = {}
+    date_reference = None
+    if hist_df is not None and not hist_df.empty and "_section" in hist_df.columns:
+        sub = hist_df[hist_df["_section"].isin(["ano_perf", "ano_qual"])]
+        dates_dispo = sub["Date_parsed"].dropna().sort_values().unique()
+        if len(dates_dispo) >= 1:
+            date_reference = pd.Timestamp(dates_dispo[-1])
+            reference_disponible = True
+            row_ref = sub[sub["Date_parsed"] == date_reference].set_index("Poste de travail")
+            for poste in vp:
+                if poste in row_ref.index:
+                    total_reference[poste] = sum(
+                        int(row_ref.loc[poste, kpi]) for kpi in tous_kpi
+                        if kpi in row_ref.columns and pd.notna(row_ref.loc[poste, kpi])
+                    )
+                else:
+                    total_reference[poste] = 0
 
-    _dessiner_suivi_anomalies(res, key_prefix)
+    postes_tries = sorted(vp, key=lambda p: total_actuel.get(p, 0), reverse=True)
+    valeurs_actuelles = [total_actuel.get(p, 0) for p in postes_tries]
+
+    if reference_disponible and date_reference is not None:
+        st.caption(f"📅 Référence : dernier instantané enregistré du {date_reference:%d/%m/%Y}. "
+                    f"Le pourcentage indique la part déjà traitée depuis cette référence.")
+        textes = []
+        for p, act in zip(postes_tries, valeurs_actuelles):
+            ref = total_reference.get(p, 0)
+            if ref > 0:
+                pct_traite = max(0, round((ref - act) / ref * 100))
+                textes.append(f"{act} ({pct_traite}% traité)")
+            else:
+                textes.append(f"{act}")
+    else:
+        st.caption("📌 Aucune extraction antérieure enregistrée — ce total sert de RÉFÉRENCE. "
+                    "Le pourcentage traité apparaîtra dès la prochaine extraction.")
+        textes = [str(v) for v in valeurs_actuelles]
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=postes_tries, y=valeurs_actuelles, name="Anomalies (période filtrée)",
+        marker=dict(color="#ef4444", line=dict(color='white', width=1)),
+        text=textes, textposition='outside', textfont=dict(size=11, family='Inter'),
+    ))
+    fig.update_layout(
+        barmode='group', height=420,
+        xaxis=dict(tickangle=-45, fixedrange=True),
+        yaxis=dict(showgrid=True, gridcolor="#F1F5F9", fixedrange=True, title="Nombre d'anomalies"),
+        plot_bgcolor='white', paper_bgcolor='white',
+        margin=dict(t=20, b=100, l=20, r=20),
+    )
+    event = st.plotly_chart(
+        fig, use_container_width=True, config=PLOTLY_CONFIG,
+        on_select="rerun", selection_mode="points", key=f"{key_prefix}_suivi_anom_chart",
+    )
+
+    points = event.selection.points if event and event.selection else []
+    if points:
+        poste_sel = points[0].get("x")
+        st.markdown(f"**🔍 Détail par KPI — {poste_sel}**")
+        detail_kpis, detail_act = [], []
+        for kpi in tous_kpi:
+            nb = _get(ano_map_actuel, kpi, poste_sel)
+            if nb == 0:
+                continue
+            detail_kpis.append(kpi)
+            detail_act.append(nb)
+        if detail_kpis:
+            fig2 = go.Figure()
+            fig2.add_trace(go.Bar(
+                y=detail_kpis, x=detail_act, orientation='h',
+                marker=dict(color="#ef4444"),
+                text=[str(v) for v in detail_act], textposition='outside',
+            ))
+            fig2.update_layout(
+                height=max(300, 40 * len(detail_kpis) + 100),
+                yaxis=dict(autorange="reversed", fixedrange=True, automargin=True),
+                xaxis=dict(showgrid=True, gridcolor="#F1F5F9", fixedrange=True),
+                plot_bgcolor='white', paper_bgcolor='white',
+                margin=dict(t=20, b=50, l=20, r=20),
+            )
+            st.plotly_chart(fig2, use_container_width=True, config=PLOTLY_CONFIG,
+                             key=f"{key_prefix}_suivi_anom_detail_{poste_sel}")
+        else:
+            st.info("Aucune anomalie pour ce poste sur la période sélectionnée.")
+    else:
+        st.caption("👆 Cliquez sur la barre d'un poste pour voir le détail par KPI.")
 
 
 def render_suivi_anomalies_semaine_filtrable(vp: list, hist_df, now_ts, key_prefix: str) -> None:
