@@ -384,10 +384,14 @@ def show_butterfly_comparison(postes: list,
                                qual_prec: list, qual_act: list,
                                titre: str, label_prec: str, label_act: str) -> None:
     """
-    CORRIGÉ (demande explicite) : Performance ET Qualité FUSIONNÉES sur
-    UN SEUL graphique papillon — 2 barres par poste de chaque côté
-    (Performance et Qualité), au lieu de 2 graphiques séparés. Barres
-    plus fines (bargap réduit) pour que les 4 séries restent lisibles.
+    Graphique papillon Performance/Qualité fusionnées.
+    CORRIGÉ (demande explicite) :
+      - texte des pourcentages À L'EXTÉRIEUR des barres, en NOIR (retour
+        en arrière sur le "inside/blanc" précédent) ;
+      - barres plus ÉPAISSES (bargap réduit) ;
+      - palette harmonisée par PAIRES de teintes (clair=précédente,
+        foncé=actuelle) au lieu de couleurs disparates : bleu pour
+        Performance, vert pour Qualité.
     """
     if not postes:
         st.markdown('<div style="padding:20px;color:#94a3b8;">Aucune donnée</div>', unsafe_allow_html=True)
@@ -396,33 +400,33 @@ def show_butterfly_comparison(postes: list,
     fig = go.Figure()
     fig.add_trace(go.Bar(
         y=postes, x=[-v for v in perf_prec], orientation='h',
-        name=f"Performance — {label_prec}", marker=dict(color="#f59e0b", line=dict(color='white', width=0.5)),
-        text=[f"{v:.0f}%" for v in perf_prec], textposition='inside', insidetextanchor='middle',
-        textfont=dict(size=14, family='Inter', color='white'),
+        name=f"Performance — {label_prec}", marker=dict(color="#93c5fd", line=dict(color='white', width=0.5)),
+        text=[f"{v:.0f}%" for v in perf_prec], textposition='outside',
+        textfont=dict(size=12, family='Inter', color='black'),
         hovertemplate="<b>%{y}</b><br>Performance " + label_prec + " : %{customdata:.1f}%<extra></extra>",
         customdata=perf_prec, offsetgroup="prec",
     ))
     fig.add_trace(go.Bar(
         y=postes, x=[-v for v in qual_prec], orientation='h',
-        name=f"Qualité — {label_prec}", marker=dict(color="#8b5cf6", line=dict(color='white', width=0.5)),
-        text=[f"{v:.0f}%" for v in qual_prec], textposition='inside', insidetextanchor='middle',
-        textfont=dict(size=14, family='Inter', color='white'),
+        name=f"Qualité — {label_prec}", marker=dict(color="#86efac", line=dict(color='white', width=0.5)),
+        text=[f"{v:.0f}%" for v in qual_prec], textposition='outside',
+        textfont=dict(size=12, family='Inter', color='black'),
         hovertemplate="<b>%{y}</b><br>Qualité " + label_prec + " : %{customdata:.1f}%<extra></extra>",
         customdata=qual_prec, offsetgroup="prec",
     ))
     fig.add_trace(go.Bar(
         y=postes, x=perf_act, orientation='h',
-        name=f"Performance — {label_act}", marker=dict(color="#2563eb", line=dict(color='white', width=0.5)),
-        text=[f"{v:.0f}%" for v in perf_act], textposition='inside', insidetextanchor='middle',
-        textfont=dict(size=14, family='Inter', color='white'),
+        name=f"Performance — {label_act}", marker=dict(color="#1d4ed8", line=dict(color='white', width=0.5)),
+        text=[f"{v:.0f}%" for v in perf_act], textposition='outside',
+        textfont=dict(size=12, family='Inter', color='black'),
         hovertemplate="<b>%{y}</b><br>Performance " + label_act + " : %{x:.1f}%<extra></extra>",
         offsetgroup="act",
     ))
     fig.add_trace(go.Bar(
         y=postes, x=qual_act, orientation='h',
-        name=f"Qualité — {label_act}", marker=dict(color="#14b8a6", line=dict(color='white', width=0.5)),
-        text=[f"{v:.0f}%" for v in qual_act], textposition='inside', insidetextanchor='middle',
-        textfont=dict(size=14, family='Inter', color='white'),
+        name=f"Qualité — {label_act}", marker=dict(color="#15803d", line=dict(color='white', width=0.5)),
+        text=[f"{v:.0f}%" for v in qual_act], textposition='outside',
+        textfont=dict(size=12, family='Inter', color='black'),
         hovertemplate="<b>%{y}</b><br>Qualité " + label_act + " : %{x:.1f}%<extra></extra>",
         offsetgroup="act",
     ))
@@ -430,10 +434,10 @@ def show_butterfly_comparison(postes: list,
 
     fig.update_layout(
         title=dict(text=titre, x=0.5, xanchor='center', font=dict(size=15, color='#1e293b')),
-        barmode='group', bargap=0.35, bargroupgap=0.06,
-        height=max(350, 46 * len(postes) + 130),
+        barmode='group', bargap=0.18, bargroupgap=0.04,
+        height=max(380, 56 * len(postes) + 130),
         xaxis=dict(showgrid=False, showticklabels=False, zeroline=False, fixedrange=True,
-                   range=[-130, 130]),
+                   range=[-140, 140]),
         yaxis=dict(autorange="reversed", tickfont=dict(size=11, family='Inter', color='#1e293b'),
                    fixedrange=True, automargin=True),
         plot_bgcolor='white', paper_bgcolor='white',
@@ -491,14 +495,14 @@ def _dessiner_suivi_anomalies(res: dict, key_prefix: str) -> None:
         ))
         fig.add_trace(go.Bar(
             x=postes, y=anomalies, name=f"Restantes — {label_semaine}",
-            marker=dict(color="#ef4444", line=dict(color='white', width=1)),
+            marker=dict(color="#f97316", line=dict(color='white', width=1)),
             text=[str(v) for v in anomalies], textposition='inside',
         ))
         barmode = 'stack'
     else:
         fig.add_trace(go.Bar(
             x=postes, y=anomalies, name=f"Total anomalies — {label_semaine}",
-            marker=dict(color="#ef4444", line=dict(color='white', width=1)),
+            marker=dict(color="#f97316", line=dict(color='white', width=1)),
             text=[str(v) for v in anomalies], textposition='outside',
         ))
         barmode = 'group'
@@ -532,14 +536,14 @@ def _dessiner_suivi_anomalies(res: dict, key_prefix: str) -> None:
                 ))
                 fig2.add_trace(go.Bar(
                     y=detail["KPI"], x=detail["Anomalies semaine"], orientation='h',
-                    name="Restantes", marker=dict(color="#ef4444"),
+                    name="Restantes", marker=dict(color="#f97316"),
                     text=detail["Anomalies semaine"].astype(str), textposition='inside',
                 ))
                 barmode2 = 'stack'
             else:
                 fig2.add_trace(go.Bar(
                     y=detail["KPI"], x=detail["Anomalies semaine"], orientation='h',
-                    name="Total", marker=dict(color="#ef4444"),
+                    name="Total", marker=dict(color="#f97316"),
                     text=detail["Anomalies semaine"].astype(str), textposition='outside',
                 ))
                 barmode2 = 'group'
@@ -639,7 +643,7 @@ def render_suivi_anomalies_semaine(vp: list, hist_df, now_ts, key_prefix: str,
     fig = go.Figure()
     fig.add_trace(go.Bar(
         x=postes_tries, y=valeurs_actuelles, name="Anomalies (période filtrée)",
-        marker=dict(color="#ef4444", line=dict(color='white', width=1)),
+        marker=dict(color="#f97316", line=dict(color='white', width=1)),
         text=textes, textposition='outside', textfont=dict(size=12, family='Inter', color='black'),
     ))
     fig.update_layout(
@@ -669,7 +673,7 @@ def render_suivi_anomalies_semaine(vp: list, hist_df, now_ts, key_prefix: str,
             fig2 = go.Figure()
             fig2.add_trace(go.Bar(
                 y=detail_kpis, x=detail_act, orientation='h',
-                marker=dict(color="#ef4444"),
+                marker=dict(color="#f97316"),
                 text=[str(v) for v in detail_act], textposition='outside',
             ))
             fig2.update_layout(
