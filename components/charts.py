@@ -395,7 +395,7 @@ def show_butterfly_comparison(postes: list, valeurs_precedentes: list, valeurs_a
     fig = go.Figure()
     fig.add_trace(go.Bar(
         y=postes, x=[-v for v in valeurs_precedentes], orientation='h',
-        name=label_prec, marker=dict(color=GREY, line=dict(color='white', width=1)),
+        name=label_prec, marker=dict(color="#94a3b8", line=dict(color='white', width=1)),
         text=[f"{v:.0f}%" for v in valeurs_precedentes], textposition='outside',
         textfont=dict(size=10, family='Inter'),
         hovertemplate="<b>%{y}</b><br>" + label_prec + " : %{customdata:.1f}%<extra></extra>",
@@ -403,12 +403,12 @@ def show_butterfly_comparison(postes: list, valeurs_precedentes: list, valeurs_a
     ))
     fig.add_trace(go.Bar(
         y=postes, x=valeurs_actuelles, orientation='h',
-        name=label_act, marker=dict(color=BLUE, line=dict(color='white', width=1)),
+        name=label_act, marker=dict(color="#2563eb", line=dict(color='white', width=1)),
         text=[f"{v:.0f}%" for v in valeurs_actuelles], textposition='outside',
         textfont=dict(size=10, family='Inter'),
         hovertemplate="<b>%{y}</b><br>" + label_act + " : %{x:.1f}%<extra></extra>",
     ))
-    fig.add_vline(x=0, line_color=DARK, line_width=1.5)
+    fig.add_vline(x=0, line_color="#1e293b", line_width=1.5)
 
     fig.update_layout(
         title=dict(text=titre, x=0.5, xanchor='center', font=dict(size=16, color='#1e293b')),
