@@ -179,7 +179,21 @@ def _colorer_pct(colonne_pct, kpi, liste_kpi):
 
 
 def _rendre_domaine(vp, ckdf, ano_map, anomaly_dfs, nd_full, liste_kpi, cle_prefix, style_stl):
-    st.markdown(f'<div class="stl {style_stl}">Vue d\'ensemble (style export)</div>', unsafe_allow_html=True)
+    # AJOUTÉ (demande explicite) : bouton bascule Maroc Chimie/FEEDS —
+    # le tableau ne montre que la division choisie. Poste PAR DÉFAUT
+    # (comme si déjà cliqué) : SF1-ECU pour Maroc Chimie, SF2-MTSP pour FEEDS.
+    division = st.radio(
+        "Division", ["🏭 Maroc Chimie", "🏭 FEEDS"],
+        horizontal=True, label_visibility="collapsed", key=f"{cle_prefix}_division_toggle",
+    )
+    if division == "🏭 Maroc Chimie":
+        vp = [p for p in vp if str(p).startswith("SF1")]
+        poste_par_defaut = "SF1-ECU"
+    else:
+        vp = [p for p in vp if str(p).startswith("SF2")]
+        poste_par_defaut = "SF2-MTSP"
+
+    st.markdown(f'<div class="stl {style_stl}">Vue d\'ensemble (style export) — {division}</div>', unsafe_allow_html=True)
     tbl_large = _tableau_large(vp, ckdf, liste_kpi, nd_full, ano_map)
 
     # Coloration : (%) par KPI selon la cible, PUIS toute la ligne CIBLE
@@ -213,7 +227,15 @@ def _rendre_domaine(vp, ckdf, ano_map, anomaly_dfs, nd_full, liste_kpi, cle_pref
     lignes_large = event_large.selection.rows if event_large and event_large.selection else []
     if lignes_large:
         poste_sel = tbl_large.iloc[lignes_large[0]]["Poste de travail"]
-        if poste_sel not in ("TOTAL GÉNÉRAL", "CIBLE"):
+        if poste_sel in ("TOTAL GÉNÉRAL", "CIBLE"):
+            poste_sel = poste_par_defaut if poste_par_defaut in vp else None
+    else:
+        # AJOUTÉ (demande explicite) : « comme si on avait déjà cliqué »
+        # sur le poste par défaut de cette division, sans attendre une
+        # action de l'utilisateur.
+        poste_sel = poste_par_defaut if poste_par_defaut in vp else (vp[0] if vp else None)
+
+    if poste_sel:
             st.markdown(f"**📊 Détail par KPI — {poste_sel}**")
             lignes_resume = []
             for kpi in liste_kpi:
