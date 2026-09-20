@@ -5,17 +5,22 @@ import pandas as pd
 from core.constants import QK, PK
 from components.sparklines import get_sparkline_html, get_comparison_html
 from components.tables import html_synthese_table
-from components.charts import render_suivi_anomalies_semaine_filtrable
+from components.charts import render_suivi_anomalies_semaine_live
 
 
 def render_evolution_tab(hist_df: pd.DataFrame, var_df: pd.DataFrame,
                           journal_df: pd.DataFrame, top5_df: pd.DataFrame,
                           bot5_df: pd.DataFrame, synth_perf: dict,
                           synth_qual: dict, vp: list,
-                          now_ts: pd.Timestamp = None) -> None:
-    # ── Suivi hebdomadaire des anomalies AVEC filtre par numéro de
-    # semaine (demande explicite) — ce filtre n'affecte QUE ce graphique.
-    render_suivi_anomalies_semaine_filtrable(vp, hist_df, now_ts or pd.Timestamp.today(), "evol")
+                          now_ts: pd.Timestamp = None,
+                          df_full: pd.DataFrame = None,
+                          av_full: pd.DataFrame = None,
+                          apm: list = None) -> None:
+    # ── Anomalies par semaine — CORRIGÉ (demande explicite, simplifié) :
+    # utilise le MÊME mécanisme que le filtre période (bornes début/fin
+    # de semaine appliquées aux données brutes), au lieu du fichier
+    # historique. Le filtre semaine n'affecte QUE ce graphique.
+    render_suivi_anomalies_semaine_live(vp, df_full, av_full, now_ts, apm or vp, "evol")
     st.markdown("---")
 
     # NOTE : journal_df, top5_df, bot5_df restent acceptés en paramètres
