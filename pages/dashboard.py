@@ -6,7 +6,7 @@ from core.constants import QK, PK, CIBLE, LOWER_BETTER
 from components.tables import html_classement
 from components.charts import (
     show_grouped_hbar, show_hbar_thresholds, show_butterfly_single_domain,
-    render_suivi_anomalies_semaine,
+    render_suivi_anomalies_periode,
 )
 
 
@@ -15,7 +15,9 @@ def render_dashboard_tab(vp: list, pscores: dict, qscores: dict,
                           hist_df: pd.DataFrame = None,
                           now_ts: pd.Timestamp = None,
                           ano_map: dict = None,
-                          ckdf: pd.DataFrame = None) -> None:
+                          ckdf: pd.DataFrame = None,
+                          sdt: pd.Timestamp = None,
+                          edt: pd.Timestamp = None) -> None:
     # ── Bouton bascule Maroc Chimie / FEEDS — EN TOUT PREMIER, CONTRÔLE
     # TOUTE LA PAGE (demande explicite) ─────────────────────────────────
     # CORRIGÉ (demande explicite) : st.segmented_control au lieu de
@@ -89,7 +91,7 @@ def render_dashboard_tab(vp: list, pscores: dict, qscores: dict,
         st.markdown(f'<div class="stl p">Scores globaux par poste — {division_dash}</div>', unsafe_allow_html=True)
         show_grouped_hbar(vp_div, pscores, qscores, f"Performance & Qualité — {division_dash}", thin=True)
     with col_anom:
-        render_suivi_anomalies_semaine(vp, hist_df, now_ts, "dash", ano_map_actuel=ano_map, division=prefixe_div)
+        render_suivi_anomalies_periode(vp_div, hist_df, sdt, edt, "dash")
 
     st.markdown("---")
 
