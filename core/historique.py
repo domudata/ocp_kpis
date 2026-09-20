@@ -460,3 +460,91 @@ def calculate_suivi_semaine_intra(hist_df: pd.DataFrame, annee: int, numero_sema
         "date_act": date_fin, "date_prec": date_debut if date_debut != date_fin else None,
         "par_poste": par_poste, "detail_par_poste": detail_par_poste,
     }
+
+
+def calculate_suivi_periode_intra(hist_df: pd.DataFrame, date_debut: pd.Timestamp, date_fin: pd.Timestamp,
+                                   kpi_list_perf: list, kpi_list_qual: list) -> dict:
+    """
+    NOUVEAU (demande explicite, page Tableau de Bord) : généralisation
+    de calculate_suivi_semaine_intra à un intervalle [date_debut, date_fin]
+    QUELCONQUE — celui du filtre PÉRIODE de la sidebar, au lieu d'une
+    semaine ISO fixe. Même principe : la PREMIÈRE extraction connue
+    dans cet intervalle sert de RÉFÉRENCE (fixe tant que l'intervalle
+    ne change pas), la DERNIÈRE extraction connue dans ce même
+    intervalle donne l'état actuel. "Traité" = référence - actuel.
+
+    Retourne le même format que calculate_suivi_semaine_intra :
+      {"date_prec" (référence), "date_act" (dernière connue),
+       "par_poste", "detail_par_poste"}.
+    """
+    resultat_vide = {
+        "date_act": None, "date_prec": None,
+        "par_poste": pd.DataFrame(columns=["Poste", "Anomalies semaine", "Anomalies traitees"]),
+        "detail_par_poste": {},
+    }
+    if hist_df is None or hist_df.empty or "_section" not in hist_df.columns:
+        return resultat_vide
+
+    sub_toutes = hist_df[hist_df["_section"].isin(["ano_perf", "ano_qual"])]
+    dates_periode = sub_toutes["Date_parsed"].dropna()
+    dates_periode = dates_periode[
+        (dates_periode >= pd.Timestamp(date_debut)) & (dates_periode <= pd.Timestamp(date_fin))
+    ].sort_values().unique()
+
+    if len(dates_periode) == 0:
+        return resultat_vide
+
+    date_ref = pd.Timestamp(dates_periode[0])
+    date_act = pd.Timestamp(dates_periode[-1])
+
+    lignes_detail = []
+    for type_nom, section, kpi_list in [("Performance", "ano_perf", kpi_list_perf),
+                                          ("Qualite", "ano_qual", kpi_list_qual)]:
+        sub = hist_df[hist_df["_section"] == section]
+        if sub.empty or "Poste de travail" not in sub.columns:
+            continue
+        row_act = sub[sub["Date_parsed"] == date_act].set_index("Poste de travail")
+        row_act = row_act[~row_act.index.duplicated(keep="last")]
+        row_ref = sub[sub["Date_parsed"] == date_ref].set_index("Poste de travail")
+        row_ref = row_ref[~row_ref.index.duplicated(keep="last")]
+
+        for poste in row_act.index:
+            for kpi in kpi_list:
+                if kpi not in row_act.columns:
+                    continue
+                try:
+                    a_act = float(row_act.loc[poste, kpi])
+                except Exception:
+                    continue
+                if pd.isna(a_act):
+                    continue
+                a_ref = None
+                if poste in row_ref.index and kpi in row_ref.columns:
+                    try:
+                        a_ref = float(row_ref.loc[poste, kpi])
+                    except Exception:
+                        a_ref = None
+                traite = max(0, int(a_ref) - int(a_act)) if a_ref is not None and not pd.isna(a_ref) else 0
+                lignes_detail.append({
+                    "Poste": poste, "Type": type_nom, "KPI": kpi,
+                    "Anomalies semaine": int(a_act), "Anomalies traitees": traite,
+                })
+
+    detail_df = pd.DataFrame(lignes_detail)
+    if detail_df.empty:
+        return resultat_vide
+
+    par_poste = (
+        detail_df.groupby("Poste")[["Anomalies semaine", "Anomalies traitees"]]
+        .sum().reset_index().sort_values("Anomalies semaine", ascending=False)
+    )
+    detail_par_poste = {
+        poste: grp[["Type", "KPI", "Anomalies semaine", "Anomalies traitees"]]
+                .sort_values("Anomalies semaine", ascending=False).reset_index(drop=True)
+        for poste, grp in detail_df.groupby("Poste")
+    }
+
+    return {
+        "date_act": date_act, "date_prec": date_ref if date_ref != date_act else None,
+        "par_poste": par_poste, "detail_par_poste": detail_par_poste,
+    }
