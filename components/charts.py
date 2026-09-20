@@ -818,59 +818,31 @@ def render_suivi_anomalies_semaine_filtrable(vp: list, hist_df, now_ts, key_pref
     _dessiner_suivi_anomalies(res, f"{key_prefix}_{annee_choisie}_{num_choisi}")
 
 
-def render_suivi_anomalies_semaine_live(vp: list, hist_df, now_ts, key_prefix: str) -> None:
-    """
-    REFAIT (demande explicite, clarification finale) :
-      - PAS de comparaison entre semaines différentes.
-      - Pour LA semaine ISO en cours (celle de now_ts) : la RÉFÉRENCE
-        (baseline) = la PREMIÈRE extraction connue de cette semaine —
-        elle reste FIXE tant qu'on est dans cette même semaine.
-      - À chaque NOUVELLE extraction reçue DANS LA MÊME semaine, on
-        recalcule combien ont été TRAITÉES depuis cette référence fixe.
-      - Affichage : UNE SEULE barre empilée par poste, 2 couleurs (vert
-        = traité, orange = restant), % de traitement affiché au-dessus.
-      - Tous les postes sont affichés, y compris ceux à 0.
-      - Quand une nouvelle semaine ISO commence, une NOUVELLE référence
-        est prise automatiquement (cycle recommence).
-    """
-    from core.historique import calculate_suivi_semaine_intra
-    from core.constants import QK, PK
-
-    st.markdown('<div class="stl a">🎯 Anomalies par semaine</div>', unsafe_allow_html=True)
-
-    if hist_df is None or hist_df.empty or "_section" not in hist_df.columns:
-        st.markdown('<div style="padding:12px;color:#94a3b8;">Historique indisponible pour le moment.</div>',
-                     unsafe_allow_html=True)
-        return
-
-    _now = pd.Timestamp(now_ts) if now_ts is not None else pd.Timestamp.today()
-    annee_actuelle = _now.isocalendar().year
-    num_actuel = _now.isocalendar().week
-
-    res = calculate_suivi_semaine_intra(hist_df, int(annee_actuelle), int(num_actuel), QK, PK)
+def _dessiner_barre_empilee_reference(res: dict, label_periode: str, key_prefix: str,
+                                        vp: list = None) -> None:
+    """Helper partagé : dessine la barre empilée (traité/restant) + % +
+    détail au clic, à partir d'un résultat calculate_suivi_*_intra
+    (semaine OU période) — logique de dessin identique dans les 2 cas."""
     par_poste = res["par_poste"]
-
     if par_poste.empty:
         st.markdown(
-            f'<div style="padding:12px;color:#94a3b8;">Aucune extraction enregistrée pour la '
-            f'Semaine {num_actuel} pour le moment.</div>',
+            f'<div style="padding:12px;color:#94a3b8;">Aucune extraction enregistrée pour '
+            f'{label_periode} pour le moment.</div>',
             unsafe_allow_html=True,
         )
         return
 
-    label_semaine = f"Semaine {num_actuel}"
     mode_statique = res["date_prec"] is None
-
     if mode_statique:
-        st.caption(f"📅 {label_semaine} — première extraction : total de référence affiché "
-                    f"(fixe), en attente d'une nouvelle extraction cette même semaine pour "
-                    f"voir le traitement.")
+        st.caption(f"📅 {label_periode} — première extraction : total de référence affiché "
+                    f"(fixe), en attente d'une nouvelle extraction pour voir le traitement.")
     else:
-        st.caption(f"📅 {label_semaine} — référence du {res['date_prec']:%d/%m}, dernière "
+        st.caption(f"📅 {label_periode} — référence du {res['date_prec']:%d/%m}, dernière "
                     f"extraction du {res['date_act']:%d/%m}.")
 
-    postes_vp = [p for p in vp if p in par_poste["Poste"].values]
-    sous = par_poste[par_poste["Poste"].isin(postes_vp)].copy() if postes_vp else par_poste.copy()
+    sous = par_poste[par_poste["Poste"].isin(vp)].copy() if vp else par_poste.copy()
+    if sous.empty:
+        sous = par_poste.copy()
     sous["Baseline"] = sous["Anomalies semaine"] + sous["Anomalies traitees"]
     sous = sous.sort_values("Baseline", ascending=False)
 
@@ -882,7 +854,7 @@ def render_suivi_anomalies_semaine_live(vp: list, hist_df, now_ts, key_prefix: s
     fig = go.Figure()
     if mode_statique:
         fig.add_trace(go.Bar(
-            x=postes, y=baseline, name=f"Anomalies {label_semaine} (référence)",
+            x=postes, y=baseline, name=f"Anomalies (référence)",
             marker=dict(color="#f97316", line=dict(color='white', width=1)),
             text=[str(v) for v in baseline], textposition='outside',
             textfont=dict(color='black', size=11),
@@ -917,7 +889,7 @@ def render_suivi_anomalies_semaine_live(vp: list, hist_df, now_ts, key_prefix: s
     )
     event = st.plotly_chart(
         fig, use_container_width=True, config=PLOTLY_CONFIG,
-        on_select="rerun", selection_mode="points", key=f"{key_prefix}_chart_semaine",
+        on_select="rerun", selection_mode="points", key=f"{key_prefix}_chart",
     )
 
     points = event.selection.points if event and event.selection else []
@@ -960,3 +932,172 @@ def render_suivi_anomalies_semaine_live(vp: list, hist_df, now_ts, key_prefix: s
             st.info("Détail indisponible pour ce poste.")
     else:
         st.caption("👆 Cliquez sur une barre pour voir le détail par KPI.")
+
+
+@st.cache_data(show_spinner="Calcul des anomalies de la semaine...", max_entries=16)
+def _calc_semaine_live(_df_full, _avf_full, now_ts, apm_tuple, annee: int, numero_semaine: int,
+                        qk_tuple, pk_tuple):
+    """Calcul EN DIRECT (pas de dépendance à un fichier historique),
+    correctement filtré sur [lundi, dimanche] de la semaine ISO donnée
+    — corrige le problème où le fichier historique reflétait le filtre
+    période de la sidebar au lieu du périmètre exact de la semaine."""
+    from core.calcul_kpi import calc_kpis
+    from core.anomalies import build_ano_map
+
+    lundi = pd.Timestamp.fromisocalendar(int(annee), int(numero_semaine), 1)
+    dimanche = lundi + pd.Timedelta(days=6)
+    df_sem = _df_full[_df_full["Date de début planifiée"].between(lundi, dimanche)].copy()
+    avf_sem = _avf_full.copy()
+    if "Créé le" in avf_sem.columns:
+        avf_sem = avf_sem[avf_sem["Créé le"].between(lundi, dimanche)]
+
+    apm = list(apm_tuple)
+    tous_kpi = list(qk_tuple) + list(pk_tuple)
+    if df_sem.empty:
+        return lundi, dimanche, {p: 0 for p in apm}, {p: {} for p in apm}
+    try:
+        res = calc_kpis(df_sem, avf_sem, now_ts, apm, df_toutes_dates=df_sem)
+        ano = build_ano_map(res["dfp"], res["avf"], now_ts, dfp_toutes_dates=df_sem)
+    except Exception:
+        return lundi, dimanche, {p: 0 for p in apm}, {p: {} for p in apm}
+
+    total, detail = {}, {}
+    for p in apm:
+        d = {}
+        for k in tous_kpi:
+            s = ano.get(k, {})
+            nb = int(s.get(p, 0)) if hasattr(s, "get") else 0
+            if nb > 0:
+                d[k] = nb
+        detail[p] = d
+        total[p] = sum(d.values())
+    return lundi, dimanche, total, detail
+
+
+def render_suivi_anomalies_semaine_live(vp: list, df_full: pd.DataFrame, avf_full: pd.DataFrame,
+                                          now_ts, apm: list, key_prefix: str) -> None:
+    """
+    CORRIGÉ (bug identifié : le fichier historique reflétait le filtre
+    période de la sidebar, pas le périmètre exact de la semaine) :
+    calcul EN DIRECT filtré précisément sur les dates de la semaine
+    choisie. Filtre par NUMÉRO DE SEMAINE réintroduit (régression
+    corrigée) — permet de choisir S39, S40... librement, indépendamment
+    de la semaine calendaire réelle.
+    « Traité » = comparaison avec la semaine précédente (calculée EN
+    DIRECT de la même façon), faute de pouvoir figer une référence
+    intra-semaine sans nouvelle infrastructure de sauvegarde dédiée.
+    """
+    from core.constants import QK, PK
+
+    st.markdown('<div class="stl a">🎯 Anomalies par semaine</div>', unsafe_allow_html=True)
+
+    if df_full is None or df_full.empty or "Date de début planifiée" not in df_full.columns:
+        st.markdown('<div style="padding:12px;color:#94a3b8;">Données indisponibles.</div>',
+                     unsafe_allow_html=True)
+        return
+
+    _now = pd.Timestamp(now_ts) if now_ts is not None else pd.Timestamp.today()
+    options_semaines = sorted({
+        ((_now - pd.Timedelta(weeks=i)).isocalendar().year, (_now - pd.Timedelta(weeks=i)).isocalendar().week)
+        for i in range(12)
+    }, reverse=True)
+    labels = [f"Semaine {s} ({a})" for a, s in options_semaines]
+
+    choix = st.selectbox(
+        "🔎 Filtrer ce graphique par semaine (n'affecte que ce graphique)",
+        labels, index=0, key=f"{key_prefix}_filtre_semaine",
+    )
+    annee_choisie, num_choisi = options_semaines[labels.index(choix)]
+
+    lundi, dimanche, total_actuel, detail_actuel = _calc_semaine_live(
+        df_full, avf_full, now_ts, tuple(apm), annee_choisie, num_choisi, tuple(QK), tuple(PK),
+    )
+    lundi_prec = lundi - pd.Timedelta(days=7)
+    _, _, total_prec, _ = _calc_semaine_live(
+        df_full, avf_full, now_ts, tuple(apm),
+        lundi_prec.isocalendar().year, lundi_prec.isocalendar().week, tuple(QK), tuple(PK),
+    )
+
+    st.caption(f"📅 Semaine {num_choisi} ({lundi:%d/%m}–{dimanche:%d/%m}) — comparée à la "
+                f"semaine précédente pour le calcul du traité.")
+
+    postes_vp = [p for p in vp if p in total_actuel]
+    sous = sorted(postes_vp, key=lambda p: total_actuel.get(p, 0), reverse=True)
+    valeurs = [total_actuel.get(p, 0) for p in sous]
+    textes = []
+    for p, act in zip(sous, valeurs):
+        prec = total_prec.get(p, 0)
+        traite = max(0, prec - act)
+        textes.append(f"{act} ({traite} traité)" if prec > 0 else f"{act}")
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=sous, y=valeurs, name=f"Anomalies Semaine {num_choisi}",
+        marker=dict(color="#f97316", line=dict(color='white', width=1)),
+        text=textes, textposition='outside', textfont=dict(size=11, family='Inter', color='black'),
+    ))
+    fig.update_layout(
+        barmode='group', height=440,
+        xaxis=dict(tickangle=-45, fixedrange=True),
+        yaxis=dict(showgrid=True, gridcolor="#F1F5F9", fixedrange=True, title="Nombre d'anomalies"),
+        plot_bgcolor='white', paper_bgcolor='white',
+        margin=dict(t=20, b=110, l=20, r=20),
+    )
+    event = st.plotly_chart(
+        fig, use_container_width=True, config=PLOTLY_CONFIG,
+        on_select="rerun", selection_mode="points", key=f"{key_prefix}_chart_semaine",
+    )
+
+    points = event.selection.points if event and event.selection else []
+    if points:
+        poste_sel = points[0].get("x")
+        detail = detail_actuel.get(poste_sel, {})
+        st.markdown(f"**🔍 Détail par KPI — {poste_sel}**")
+        if detail:
+            fig2 = go.Figure()
+            fig2.add_trace(go.Bar(
+                y=list(detail.keys()), x=list(detail.values()), orientation='h',
+                marker=dict(color="#f97316"),
+                text=[str(v) for v in detail.values()], textposition='outside',
+                textfont=dict(color='black'),
+            ))
+            fig2.update_layout(
+                height=max(280, 36 * len(detail) + 90),
+                yaxis=dict(autorange="reversed", fixedrange=True, automargin=True),
+                xaxis=dict(showgrid=True, gridcolor="#F1F5F9", fixedrange=True),
+                plot_bgcolor='white', paper_bgcolor='white',
+                margin=dict(t=20, b=40, l=20, r=40),
+            )
+            st.plotly_chart(fig2, use_container_width=True, config=PLOTLY_CONFIG,
+                             key=f"{key_prefix}_detail_{poste_sel}")
+        else:
+            st.info("Aucune anomalie pour ce poste sur cette semaine.")
+    else:
+        st.caption("👆 Cliquez sur une barre pour voir le détail par KPI.")
+
+
+def render_suivi_anomalies_periode(vp: list, hist_df, sdt, edt, key_prefix: str) -> None:
+    """
+    NOUVEAU (demande explicite, page Tableau de Bord) : même principe
+    que render_suivi_anomalies_semaine_live, mais suit le FILTRE PÉRIODE
+    de la sidebar (sdt/edt) au lieu d'une semaine ISO — la RÉFÉRENCE est
+    la 1ère extraction connue dans [sdt, edt], mise à jour à chaque
+    nouvelle extraction tant que le filtre période ne change pas.
+    """
+    from core.historique import calculate_suivi_periode_intra
+    from core.constants import QK, PK
+
+    st.markdown('<div class="stl a">🎯 Anomalies (période sélectionnée)</div>', unsafe_allow_html=True)
+
+    if hist_df is None or hist_df.empty or "_section" not in hist_df.columns:
+        st.markdown('<div style="padding:12px;color:#94a3b8;">Historique indisponible pour le moment.</div>',
+                     unsafe_allow_html=True)
+        return
+    if sdt is None or edt is None:
+        st.markdown('<div style="padding:12px;color:#94a3b8;">Filtre période indisponible.</div>',
+                     unsafe_allow_html=True)
+        return
+
+    res = calculate_suivi_periode_intra(hist_df, sdt, edt, QK, PK)
+    label = f"Période {pd.Timestamp(sdt):%d/%m/%Y} – {pd.Timestamp(edt):%d/%m/%Y}"
+    _dessiner_barre_empilee_reference(res, label, key_prefix, vp)
