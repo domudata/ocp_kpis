@@ -818,167 +818,145 @@ def render_suivi_anomalies_semaine_filtrable(vp: list, hist_df, now_ts, key_pref
     _dessiner_suivi_anomalies(res, f"{key_prefix}_{annee_choisie}_{num_choisi}")
 
 
-@st.cache_data(show_spinner="Calcul des anomalies de la semaine...", max_entries=16)
-def _calculer_anomalies_semaine_live(df_full_bytes_id, avf_full_bytes_id, now_ts, apm_tuple,
-                                      annee: int, numero_semaine: int, qk_tuple, pk_tuple,
-                                      _df_full, _avf_full):
+def render_suivi_anomalies_semaine_live(vp: list, hist_df, now_ts, key_prefix: str) -> None:
     """
-    NOUVEAU (demande explicite, simplification) : au lieu de dépendre du
-    fichier historique, réutilise DIRECTEMENT le même mécanisme que le
-    filtre période de la sidebar — filtrer les données BRUTES sur
-    [lundi, dimanche] de la semaine ISO donnée, puis recalculer les
-    anomalies EN DIRECT avec calc_kpis()/build_ano_map() (exactement
-    comme app.py le fait pour le filtre période normal). Les 2 premiers
-    arguments (ids) ne servent qu'à la clé de cache Streamlit ; les
-    DataFrames réels sont passés via _df_full/_avf_full (préfixés _
-    pour indiquer à st.cache_data de ne pas les hasher directement).
+    REFAIT (demande explicite, clarification finale) :
+      - PAS de comparaison entre semaines différentes.
+      - Pour LA semaine ISO en cours (celle de now_ts) : la RÉFÉRENCE
+        (baseline) = la PREMIÈRE extraction connue de cette semaine —
+        elle reste FIXE tant qu'on est dans cette même semaine.
+      - À chaque NOUVELLE extraction reçue DANS LA MÊME semaine, on
+        recalcule combien ont été TRAITÉES depuis cette référence fixe.
+      - Affichage : UNE SEULE barre empilée par poste, 2 couleurs (vert
+        = traité, orange = restant), % de traitement affiché au-dessus.
+      - Tous les postes sont affichés, y compris ceux à 0.
+      - Quand une nouvelle semaine ISO commence, une NOUVELLE référence
+        est prise automatiquement (cycle recommence).
     """
-    from core.calcul_kpi import calc_kpis
-    from core.anomalies import build_ano_map
-
-    lundi = pd.Timestamp.fromisocalendar(int(annee), int(numero_semaine), 1)
-    dimanche = lundi + pd.Timedelta(days=6)
-
-    df_sem = _df_full[_df_full["Date de début planifiée"].between(lundi, dimanche)].copy()
-    avf_sem = _avf_full.copy()
-    if "Créé le" in avf_sem.columns:
-        avf_sem = avf_sem[avf_sem["Créé le"].between(lundi, dimanche)]
-
-    apm = list(apm_tuple)
-
-    # AJOUTÉ (bug corrigé) : si aucune donnée ne tombe dans cette semaine,
-    # calc_kpis()/build_ano_map() peuvent échouer sur des DataFrames vides
-    # ayant perdu certaines colonnes attendues — on retourne directement
-    # des totaux à zéro plutôt que de laisser planter le calcul complet.
-    if df_sem.empty:
-        return lundi, dimanche, {p: 0 for p in apm}, {p: {} for p in apm}
-
-    try:
-        res = calc_kpis(df_sem, avf_sem, now_ts, apm, df_toutes_dates=df_sem)
-        ano = build_ano_map(res["dfp"], res["avf"], now_ts, dfp_toutes_dates=df_sem)
-    except Exception:
-        return lundi, dimanche, {p: 0 for p in apm}, {p: {} for p in apm}
-
-    tous_kpi = list(qk_tuple) + list(pk_tuple)
-    total_par_poste = {}
-    detail_par_poste = {}
-    for p in apm:
-        detail = {}
-        for k in tous_kpi:
-            d = ano.get(k, {})
-            nb = int(d.get(p, 0)) if hasattr(d, "get") else 0
-            if nb > 0:
-                detail[k] = nb
-        total_par_poste[p] = sum(detail.values())
-        detail_par_poste[p] = detail
-
-    return lundi, dimanche, total_par_poste, detail_par_poste
-
-
-def render_suivi_anomalies_semaine_live(vp: list, df_full: pd.DataFrame, avf_full: pd.DataFrame,
-                                          now_ts, apm: list, key_prefix: str) -> None:
-    """
-    NOUVEAU (demande explicite) : remplace le système basé sur le
-    fichier historique — utilise le MÊME mécanisme que le filtre
-    période de la sidebar (bornes début/fin de semaine), appliqué
-    UNIQUEMENT à ce graphique, sélectionné par NUMÉRO DE SEMAINE.
-    « Traité » = comparaison avec la semaine précédente, calculée EN
-    DIRECT de la même façon (pas de dépendance à un fichier sauvegardé).
-    """
+    from core.historique import calculate_suivi_semaine_intra
     from core.constants import QK, PK
 
     st.markdown('<div class="stl a">🎯 Anomalies par semaine</div>', unsafe_allow_html=True)
 
-    if df_full is None or df_full.empty or "Date de début planifiée" not in df_full.columns:
-        st.markdown('<div style="padding:12px;color:#94a3b8;">Données indisponibles.</div>',
+    if hist_df is None or hist_df.empty or "_section" not in hist_df.columns:
+        st.markdown('<div style="padding:12px;color:#94a3b8;">Historique indisponible pour le moment.</div>',
                      unsafe_allow_html=True)
         return
 
     _now = pd.Timestamp(now_ts) if now_ts is not None else pd.Timestamp.today()
-    num_actuel = _now.isocalendar().week
     annee_actuelle = _now.isocalendar().year
+    num_actuel = _now.isocalendar().week
 
-    # Liste de semaines proposées : les 12 dernières jusqu'à la semaine actuelle
-    options_semaines = []
-    for i in range(12):
-        d = _now - pd.Timedelta(weeks=i)
-        options_semaines.append((d.isocalendar().year, d.isocalendar().week))
-    options_semaines = sorted(set(options_semaines), reverse=True)
-    labels = [f"Semaine {s} ({a})" for a, s in options_semaines]
+    res = calculate_suivi_semaine_intra(hist_df, int(annee_actuelle), int(num_actuel), QK, PK)
+    par_poste = res["par_poste"]
 
-    choix = st.selectbox(
-        "🔎 Filtrer ce graphique par semaine (n'affecte que ce graphique)",
-        labels, index=0, key=f"{key_prefix}_filtre_semaine_live",
-    )
-    idx = labels.index(choix)
-    annee_choisie, num_choisi = options_semaines[idx]
+    if par_poste.empty:
+        st.markdown(
+            f'<div style="padding:12px;color:#94a3b8;">Aucune extraction enregistrée pour la '
+            f'Semaine {num_actuel} pour le moment.</div>',
+            unsafe_allow_html=True,
+        )
+        return
 
-    lundi, dimanche, total_actuel, detail_actuel = _calculer_anomalies_semaine_live(
-        "actuel", "actuel", now_ts, tuple(apm), annee_choisie, num_choisi,
-        tuple(QK), tuple(PK), df_full, avf_full,
-    )
+    label_semaine = f"Semaine {num_actuel}"
+    mode_statique = res["date_prec"] is None
 
-    # Semaine précédente pour "traité"
-    lundi_prec_ts = lundi - pd.Timedelta(days=7)
-    annee_prec, num_prec = lundi_prec_ts.isocalendar().year, lundi_prec_ts.isocalendar().week
-    _, _, total_prec, _ = _calculer_anomalies_semaine_live(
-        "prec", "prec", now_ts, tuple(apm), annee_prec, num_prec,
-        tuple(QK), tuple(PK), df_full, avf_full,
-    )
+    if mode_statique:
+        st.caption(f"📅 {label_semaine} — première extraction : total de référence affiché "
+                    f"(fixe), en attente d'une nouvelle extraction cette même semaine pour "
+                    f"voir le traitement.")
+    else:
+        st.caption(f"📅 {label_semaine} — référence du {res['date_prec']:%d/%m}, dernière "
+                    f"extraction du {res['date_act']:%d/%m}.")
 
-    st.caption(f"📅 Semaine {num_choisi} ({lundi:%d/%m}–{dimanche:%d/%m}) — comparée à "
-                f"Semaine {num_prec} pour le calcul du traité.")
+    postes_vp = [p for p in vp if p in par_poste["Poste"].values]
+    sous = par_poste[par_poste["Poste"].isin(postes_vp)].copy() if postes_vp else par_poste.copy()
+    sous["Baseline"] = sous["Anomalies semaine"] + sous["Anomalies traitees"]
+    sous = sous.sort_values("Baseline", ascending=False)
 
-    postes_vp = [p for p in vp if p in total_actuel]
-    postes_tries = sorted(postes_vp, key=lambda p: total_actuel.get(p, 0), reverse=True)
-    valeurs = [total_actuel.get(p, 0) for p in postes_tries]
-    textes = []
-    for p, act in zip(postes_tries, valeurs):
-        prec = total_prec.get(p, 0)
-        traite = max(0, prec - act)
-        textes.append(f"{act} ({traite} traité)" if prec > 0 else f"{act}")
+    postes = sous["Poste"].tolist()
+    restant = sous["Anomalies semaine"].tolist()
+    traite = sous["Anomalies traitees"].tolist()
+    baseline = sous["Baseline"].tolist()
 
     fig = go.Figure()
-    fig.add_trace(go.Bar(
-        x=postes_tries, y=valeurs, name=f"Anomalies Semaine {num_choisi}",
-        marker=dict(color="#f97316", line=dict(color='white', width=1)),
-        text=textes, textposition='outside', textfont=dict(size=11, family='Inter', color='black'),
-    ))
+    if mode_statique:
+        fig.add_trace(go.Bar(
+            x=postes, y=baseline, name=f"Anomalies {label_semaine} (référence)",
+            marker=dict(color="#f97316", line=dict(color='white', width=1)),
+            text=[str(v) for v in baseline], textposition='outside',
+            textfont=dict(color='black', size=11),
+        ))
+        barmode = 'group'
+    else:
+        fig.add_trace(go.Bar(
+            x=postes, y=traite, name="Traitées",
+            marker=dict(color="#10b981", line=dict(color='white', width=1)),
+            text=[str(v) if v > 0 else "" for v in traite], textposition='inside',
+            textfont=dict(color='white', size=10),
+        ))
+        fig.add_trace(go.Bar(
+            x=postes, y=restant, name="Restantes",
+            marker=dict(color="#f97316", line=dict(color='white', width=1)),
+            text=[str(v) for v in restant], textposition='inside',
+            textfont=dict(color='white', size=10),
+        ))
+        for p, b, t in zip(postes, baseline, traite):
+            pct = round(t / b * 100) if b > 0 else 0
+            fig.add_annotation(x=p, y=b, text=f"{pct}%", showarrow=False, yshift=14,
+                               font=dict(size=11, color='black'))
+        barmode = 'stack'
+
     fig.update_layout(
-        barmode='group', height=420,
+        barmode=barmode, height=440,
         xaxis=dict(tickangle=-45, fixedrange=True),
         yaxis=dict(showgrid=True, gridcolor="#F1F5F9", fixedrange=True, title="Nombre d'anomalies"),
         plot_bgcolor='white', paper_bgcolor='white',
-        margin=dict(t=20, b=100, l=20, r=20),
+        legend=dict(orientation="h", yanchor="bottom", y=-0.32, x=0.5, xanchor="center"),
+        margin=dict(t=40, b=110, l=20, r=20),
     )
     event = st.plotly_chart(
         fig, use_container_width=True, config=PLOTLY_CONFIG,
-        on_select="rerun", selection_mode="points", key=f"{key_prefix}_live_chart",
+        on_select="rerun", selection_mode="points", key=f"{key_prefix}_chart_semaine",
     )
 
     points = event.selection.points if event and event.selection else []
     if points:
         poste_sel = points[0].get("x")
-        detail = detail_actuel.get(poste_sel, {})
-        st.markdown(f"**🔍 Détail par KPI — {poste_sel}**")
-        if detail:
+        detail = res["detail_par_poste"].get(poste_sel)
+        if detail is not None and not detail.empty:
+            st.markdown(f"**🔍 Détail par KPI — {poste_sel}**")
             fig2 = go.Figure()
-            fig2.add_trace(go.Bar(
-                y=list(detail.keys()), x=list(detail.values()), orientation='h',
-                marker=dict(color="#f97316"),
-                text=[str(v) for v in detail.values()], textposition='outside',
-                textfont=dict(color='black'),
-            ))
+            if not mode_statique:
+                fig2.add_trace(go.Bar(
+                    y=detail["KPI"], x=detail["Anomalies traitees"], orientation='h',
+                    name="Traitées", marker=dict(color="#10b981"),
+                    text=detail["Anomalies traitees"].astype(str), textposition='inside',
+                ))
+                fig2.add_trace(go.Bar(
+                    y=detail["KPI"], x=detail["Anomalies semaine"], orientation='h',
+                    name="Restantes", marker=dict(color="#f97316"),
+                    text=detail["Anomalies semaine"].astype(str), textposition='inside',
+                ))
+                bm2 = 'stack'
+            else:
+                fig2.add_trace(go.Bar(
+                    y=detail["KPI"], x=detail["Anomalies semaine"], orientation='h',
+                    name="Référence", marker=dict(color="#f97316"),
+                    text=detail["Anomalies semaine"].astype(str), textposition='outside',
+                    textfont=dict(color='black'),
+                ))
+                bm2 = 'group'
             fig2.update_layout(
-                height=max(280, 36 * len(detail) + 90),
+                barmode=bm2, height=max(280, 36 * len(detail) + 90),
                 yaxis=dict(autorange="reversed", fixedrange=True, automargin=True),
                 xaxis=dict(showgrid=True, gridcolor="#F1F5F9", fixedrange=True),
                 plot_bgcolor='white', paper_bgcolor='white',
                 margin=dict(t=20, b=40, l=20, r=40),
             )
             st.plotly_chart(fig2, use_container_width=True, config=PLOTLY_CONFIG,
-                             key=f"{key_prefix}_live_detail_{poste_sel}")
+                             key=f"{key_prefix}_detail_{poste_sel}")
         else:
-            st.info("Aucune anomalie pour ce poste sur cette semaine.")
+            st.info("Détail indisponible pour ce poste.")
     else:
         st.caption("👆 Cliquez sur une barre pour voir le détail par KPI.")
