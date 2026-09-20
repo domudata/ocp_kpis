@@ -16,11 +16,12 @@ def render_evolution_tab(hist_df: pd.DataFrame, var_df: pd.DataFrame,
                           df_full: pd.DataFrame = None,
                           av_full: pd.DataFrame = None,
                           apm: list = None) -> None:
-    # ── Anomalies par semaine — CORRIGÉ (demande explicite, simplifié) :
-    # utilise le MÊME mécanisme que le filtre période (bornes début/fin
-    # de semaine appliquées aux données brutes), au lieu du fichier
-    # historique. Le filtre semaine n'affecte QUE ce graphique.
-    render_suivi_anomalies_semaine_live(vp, df_full, av_full, now_ts, apm or vp, "evol")
+    # ── Anomalies par semaine — REFAIT (demande explicite finale) :
+    # référence FIXE prise à la 1ère extraction de la semaine ISO en
+    # cours, mise à jour à chaque nouvelle extraction DANS LA MÊME
+    # semaine (pas de comparaison avec une autre semaine). Barre
+    # empilée 2 couleurs + % de traitement.
+    render_suivi_anomalies_semaine_live(vp, hist_df, now_ts or pd.Timestamp.today(), "evol")
     st.markdown("---")
 
     # NOTE : journal_df, top5_df, bot5_df restent acceptés en paramètres
