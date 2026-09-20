@@ -22,13 +22,26 @@ def _backlogs_non_caracterises(dfp_all: pd.DataFrame, now_ts=None):
     zcor_cree = zcor[
         zcor["Statut système"].fillna("").astype(str).str.strip().str.split().str[0] == "CRÉÉ"
     ]
-    non_prep = zcor_cree[~zcor_cree["Statut utilisateur"].apply(lambda x: match_exact_token(x, CODES_PREP_EXACT))]
+    # CORRIGÉ (bug pandas identifié et reproduit) : sur un DataFrame déjà
+    # VIDE (0 ligne), `~df["col"].apply(fonction)` peut renvoyer un
+    # résultat mal typé qui, une fois utilisé pour indexer le DataFrame,
+    # produit un DataFrame de forme (0, 0) — TOUTES les colonnes
+    # disparaissent, provoquant un KeyError plus loin (ex. sur "Poste
+    # travail princ.") dans le calcul filtré sur une période étroite
+    # (ex. une seule semaine) où aucun ZCOR ne tombe dans la fenêtre.
+    if zcor_cree.empty:
+        non_prep = zcor_cree
+    else:
+        non_prep = zcor_cree[~zcor_cree["Statut utilisateur"].apply(lambda x: match_exact_token(x, CODES_PREP_EXACT))]
 
     zcor_lanc = zcor[
         (zcor["Statut système"].fillna("").astype(str).str.strip().str.split().str[0] == "LANC")
         & (zcor["Contient SOPL"] == 0)
     ]
-    non_plan = zcor_lanc[~zcor_lanc["Statut utilisateur"].apply(lambda x: match_exact_token(x, CODES_PLAN_EXACT))]
+    if zcor_lanc.empty:
+        non_plan = zcor_lanc
+    else:
+        non_plan = zcor_lanc[~zcor_lanc["Statut utilisateur"].apply(lambda x: match_exact_token(x, CODES_PLAN_EXACT))]
 
     full_prep = zcor_cree
     full_plan = zcor_lanc[zcor_lanc["Date de début planifiée"] <= now_ts] if now_ts is not None else zcor_lanc
