@@ -363,3 +363,100 @@ def calculate_suivi_anomalies_semaine(hist_df: pd.DataFrame, now_ts: pd.Timestam
         "date_act": date_act, "date_prec": date_prec,
         "par_poste": par_poste, "detail_par_poste": detail_par_poste,
     }
+
+
+def calculate_suivi_semaine_intra(hist_df: pd.DataFrame, annee: int, numero_semaine: int,
+                                   kpi_list_perf: list, kpi_list_qual: list) -> dict:
+    """
+    NOUVEAU (demande explicite, page Suivi Évolution — corrige la
+    logique précédente qui comparait à la semaine PRÉCÉDENTE) :
+
+    Pour la semaine ISO donnée (année, numéro), compare la PREMIÈRE
+    extraction enregistrée CETTE semaine-là (référence/baseline, début
+    de semaine) à la DERNIÈRE extraction enregistrée cette même semaine
+    (état actuel — se met à jour automatiquement à chaque nouvelle
+    extraction reçue durant la semaine, sans attendre la semaine
+    suivante). "Anomalies traitées" = combien ont été résorbées DEPUIS
+    LE DÉBUT DE CETTE SEMAINE, jusqu'à sa dernière extraction connue.
+
+    Si une seule extraction existe pour la semaine, traité = 0 (rien à
+    comparer pour l'instant, la première extraction sert de référence).
+
+    Retourne le même format que calculate_suivi_anomalies_semaine :
+      {"num_semaine_actuelle", "num_semaine_precedente" (=même numéro
+      ici, gardé pour compatibilité d'affichage), "date_act", "date_prec"
+      (= date de début de semaine), "par_poste", "detail_par_poste"}.
+    """
+    resultat_vide = {
+        "num_semaine_actuelle": numero_semaine, "num_semaine_precedente": numero_semaine,
+        "date_act": None, "date_prec": None,
+        "par_poste": pd.DataFrame(columns=["Poste", "Anomalies semaine", "Anomalies traitees"]),
+        "detail_par_poste": {},
+    }
+    if hist_df is None or hist_df.empty or "_section" not in hist_df.columns:
+        return resultat_vide
+
+    sub_toutes = hist_df[hist_df["_section"].isin(["ano_perf", "ano_qual"])]
+    dates_semaine = sub_toutes["Date_parsed"].dropna()
+    dates_semaine = dates_semaine[
+        dates_semaine.apply(lambda d: d.isocalendar().year == annee and d.isocalendar().week == numero_semaine)
+    ].sort_values().unique()
+
+    if len(dates_semaine) == 0:
+        return resultat_vide
+
+    date_debut = pd.Timestamp(dates_semaine[0])   # référence (baseline)
+    date_fin = pd.Timestamp(dates_semaine[-1])    # dernière extraction connue
+
+    lignes_detail = []
+    for type_nom, section, kpi_list in [("Performance", "ano_perf", kpi_list_perf),
+                                          ("Qualite", "ano_qual", kpi_list_qual)]:
+        sub = hist_df[hist_df["_section"] == section]
+        if sub.empty or "Poste de travail" not in sub.columns:
+            continue
+        row_fin = sub[sub["Date_parsed"] == date_fin].set_index("Poste de travail")
+        row_fin = row_fin[~row_fin.index.duplicated(keep="last")]
+        row_debut = sub[sub["Date_parsed"] == date_debut].set_index("Poste de travail")
+        row_debut = row_debut[~row_debut.index.duplicated(keep="last")]
+
+        for poste in row_fin.index:
+            for kpi in kpi_list:
+                if kpi not in row_fin.columns:
+                    continue
+                try:
+                    a_fin = float(row_fin.loc[poste, kpi])
+                except Exception:
+                    continue
+                if pd.isna(a_fin):
+                    continue
+                a_debut = None
+                if poste in row_debut.index and kpi in row_debut.columns:
+                    try:
+                        a_debut = float(row_debut.loc[poste, kpi])
+                    except Exception:
+                        a_debut = None
+                traite = max(0, int(a_debut) - int(a_fin)) if a_debut is not None and not pd.isna(a_debut) else 0
+                lignes_detail.append({
+                    "Poste": poste, "Type": type_nom, "KPI": kpi,
+                    "Anomalies semaine": int(a_fin), "Anomalies traitees": traite,
+                })
+
+    detail_df = pd.DataFrame(lignes_detail)
+    if detail_df.empty:
+        return resultat_vide
+
+    par_poste = (
+        detail_df.groupby("Poste")[["Anomalies semaine", "Anomalies traitees"]]
+        .sum().reset_index().sort_values("Anomalies semaine", ascending=False)
+    )
+    detail_par_poste = {
+        poste: grp[["Type", "KPI", "Anomalies semaine", "Anomalies traitees"]]
+                .sort_values("Anomalies semaine", ascending=False).reset_index(drop=True)
+        for poste, grp in detail_df.groupby("Poste")
+    }
+
+    return {
+        "num_semaine_actuelle": numero_semaine, "num_semaine_precedente": numero_semaine,
+        "date_act": date_fin, "date_prec": date_debut if date_debut != date_fin else None,
+        "par_poste": par_poste, "detail_par_poste": detail_par_poste,
+    }
