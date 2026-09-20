@@ -379,6 +379,50 @@ def show_grouped_hbar(vp, pscores: dict, qscores: dict, title: str,
     )
     st.plotly_chart(fig, use_container_width=not thin, config=PLOTLY_CONFIG)
 
+def show_butterfly_single_domain(postes: list, valeurs_prec: list, valeurs_act: list,
+                                  titre: str, label_prec: str, label_act: str,
+                                  couleur_prec: str, couleur_act: str) -> None:
+    """AJOUTÉ (demande explicite) : graphique papillon pour UN SEUL
+    domaine (Performance OU Qualité), destiné à être affiché à côté de
+    l'autre domaine (2 graphiques séparés, l'un à côté de l'autre) au
+    lieu de les fusionner sur un même graphique."""
+    if not postes:
+        st.markdown('<div style="padding:20px;color:#94a3b8;">Aucune donnée</div>', unsafe_allow_html=True)
+        return
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        y=postes, x=[-v for v in valeurs_prec], orientation='h',
+        name=label_prec, marker=dict(color=couleur_prec, line=dict(color='white', width=0.5)),
+        text=[f"{v:.0f}%" for v in valeurs_prec], textposition='inside', insidetextanchor='start',
+        textfont=dict(size=12, family='Inter', color='black'),
+        hovertemplate="<b>%{y}</b><br>" + label_prec + " : %{customdata:.1f}%<extra></extra>",
+        customdata=valeurs_prec,
+    ))
+    fig.add_trace(go.Bar(
+        y=postes, x=valeurs_act, orientation='h',
+        name=label_act, marker=dict(color=couleur_act, line=dict(color='white', width=0.5)),
+        text=[f"{v:.0f}%" for v in valeurs_act], textposition='outside',
+        textfont=dict(size=12, family='Inter', color='black'),
+        hovertemplate="<b>%{y}</b><br>" + label_act + " : %{x:.1f}%<extra></extra>",
+    ))
+    fig.add_vline(x=0, line_color="#1e293b", line_width=1.5)
+
+    fig.update_layout(
+        title=dict(text=titre, x=0.5, xanchor='center', font=dict(size=14, color='#1e293b')),
+        barmode='overlay', bargap=0.18,
+        height=max(350, 42 * len(postes) + 120),
+        xaxis=dict(showgrid=False, showticklabels=False, zeroline=False, fixedrange=True,
+                   range=[-115, 115]),
+        yaxis=dict(autorange="reversed", tickfont=dict(size=11, family='Inter', color='#1e293b'),
+                   fixedrange=True, automargin=True),
+        plot_bgcolor='white', paper_bgcolor='white',
+        legend=dict(orientation="h", yanchor="bottom", y=-0.10, x=0.5, xanchor="center", font=dict(size=10)),
+        margin=dict(t=50, b=50, l=20, r=20),
+    )
+    st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
+
+
 def show_butterfly_comparison(postes: list,
                                perf_prec: list, perf_act: list,
                                qual_prec: list, qual_act: list,
