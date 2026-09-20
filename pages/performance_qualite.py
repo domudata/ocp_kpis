@@ -182,9 +182,12 @@ def _rendre_domaine(vp, ckdf, ano_map, anomaly_dfs, nd_full, liste_kpi, cle_pref
     # AJOUTÉ (demande explicite) : bouton bascule Maroc Chimie/FEEDS —
     # le tableau ne montre que la division choisie. Poste PAR DÉFAUT
     # (comme si déjà cliqué) : SF1-ECU pour Maroc Chimie, SF2-MTSP pour FEEDS.
-    division = st.radio(
+    # CORRIGÉ (demande explicite) : st.segmented_control (vrais boutons
+    # connectés) au lieu de st.radio.
+    division = st.segmented_control(
         "Division", ["🏭 Maroc Chimie", "🏭 FEEDS"],
-        horizontal=True, label_visibility="collapsed", key=f"{cle_prefix}_division_toggle",
+        selection_mode="single", default="🏭 Maroc Chimie",
+        label_visibility="collapsed", key=f"{cle_prefix}_division_toggle",
     )
     if division == "🏭 Maroc Chimie":
         vp = [p for p in vp if str(p).startswith("SF1")]
