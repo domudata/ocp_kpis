@@ -21,7 +21,7 @@ def render_evolution_tab(hist_df: pd.DataFrame, var_df: pd.DataFrame,
     # cours, mise à jour à chaque nouvelle extraction DANS LA MÊME
     # semaine (pas de comparaison avec une autre semaine). Barre
     # empilée 2 couleurs + % de traitement.
-    render_suivi_anomalies_semaine_live(vp, hist_df, now_ts or pd.Timestamp.today(), "evol")
+    render_suivi_anomalies_semaine_live(vp, df_full, av_full, now_ts, apm or vp, "evol")
     st.markdown("---")
 
     # NOTE : journal_df, top5_df, bot5_df restent acceptés en paramètres
