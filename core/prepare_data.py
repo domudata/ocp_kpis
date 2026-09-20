@@ -1,17 +1,11 @@
 # -*- coding: utf-8 -*-
 import io
 import os
-import re
 import numpy as np
 import pandas as pd
 import streamlit as st
 
 from core.constants import MP_KW, MPLAN_KW
-
-CODES_PREP_EXACT = {"ATPD", "ATMR", "ATER", "ATRS", "ATMO"}
-CODES_PLAN_EXACT = {"ATPL", "ATEI", "ATAL", "ATAS", "AGAR", "ATHS"}
-
-
 
 # ──────────────────────────────────────────────
 # Utilitaires basiques
@@ -50,7 +44,12 @@ def _lire_date_github():
 
 
 def get_date_from_file() -> str:
-    """Date de l'extraction courante. Lit en priorité date.txt local, puis tente GitHub."""
+    """Date de l'extraction courante. Tente d'abord GitHub (protégé par
+    _lire_date_github ci-dessus), puis le disque local, puis la date du
+    jour — comportement de secours identique à l'original."""
+    date_gh, _source = _lire_date_github()
+    if date_gh:
+        return date_gh
     if os.path.exists("date.txt"):
         try:
             with open("date.txt", "r", encoding="utf-8") as f:
@@ -59,17 +58,7 @@ def get_date_from_file() -> str:
                     return valeur
         except Exception:
             pass
-    date_gh, _source = _lire_date_github()
-    if date_gh:
-        return date_gh
     return pd.Timestamp.today().strftime("%d/%m/%Y")
-
-
-def match_exact_token(statut, codes: set) -> bool:
-    if statut is None or (isinstance(statut, float) and pd.isna(statut)):
-        return False
-    words = set(re.findall(r'[A-Za-z0-9]+', str(statut).upper()))
-    return bool(words & codes)
 
 
 def contient_mot(t, lm) -> bool:
@@ -77,13 +66,12 @@ def contient_mot(t, lm) -> bool:
     return any(m in t for l in lm for m in l.split())
 
 
-
 def cat_age(a) -> str:
     if pd.isna(a):
         return "Inconnu"
-    if a <= 30:
+    if a <= 1:
         return "<1 mois"
-    elif a > 90:
+    elif a >= 3:
         return ">3 mois"
     return "1 mois < <3 mois"
 
@@ -109,7 +97,7 @@ def read_excel_safe(bytes_data: bytes) -> pd.DataFrame:
     header = bytes_data[:8]
 
     if header[:4] in (b'PK\x03\x04', b'PK\x05\x06'):
-        for engine in ['calamine', 'openpyxl']:
+        for engine in ['openpyxl', 'calamine']:
             try:
                 return pd.read_excel(bio, engine=engine)
             except Exception:
@@ -117,14 +105,14 @@ def read_excel_safe(bytes_data: bytes) -> pd.DataFrame:
                 continue
 
     if header == b'\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1':
-        for engine in ['calamine', 'xlrd']:
+        for engine in ['xlrd', 'calamine']:
             try:
                 return pd.read_excel(bio, engine=engine)
             except Exception:
                 bio.seek(0)
                 continue
 
-    for engine in ['calamine', 'openpyxl', 'xlrd']:
+    for engine in ['openpyxl', 'xlrd', 'calamine']:
         try:
             bio.seek(0)
             return pd.read_excel(bio, engine=engine)
@@ -142,66 +130,32 @@ def read_excel_safe(bytes_data: bytes) -> pd.DataFrame:
 # ──────────────────────────────────────────────
 
 @st.cache_data(show_spinner=False)
-def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str, calc_version: str = None):
+def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
     raw_ot = read_excel_safe(ot_bytes)
     raw_av = read_excel_safe(av_bytes)
-    raw_ot.columns = [str(c).strip() for c in raw_ot.columns]
-    raw_av.columns = [str(c).strip() for c in raw_av.columns]
-
-    # ── Normalisation des colonnes de date dans raw_ot ──
-    for col in raw_ot.columns:
-        c_norm = str(col).lower().strip().replace("ã©", "é").replace("ã¨", "è").replace("ãª", "ê")
-        if c_norm in ["cree le", "créé le"]:
-            raw_ot.rename(columns={col: "Créé le"}, inplace=True)
-        elif c_norm in ["date debut planifiee", "date début planifiée", "date de début planifiée", "date de debut planifiee"]:
-            raw_ot.rename(columns={col: "Date de début planifiée"}, inplace=True)
-
-    # Si "Créé le" n'a pas été trouvé, chercher un alias alternatif (Date d'entrée, etc.)
-    if "Créé le" not in raw_ot.columns:
-        for col in raw_ot.columns:
-            c_norm = str(col).lower().strip().replace("ã©", "é").replace("ã¨", "è").replace("ãª", "ê")
-            if c_norm in [
-                "date d'entrée", "date entree", "date d'entree",
-                "date de création", "date création", "date de creation", "date creation",
-                "entré le", "entre le", "date de saisie"
-            ]:
-                raw_ot.rename(columns={col: "Créé le"}, inplace=True)
-                break
-
-    # ── Normalisation des colonnes de date dans raw_av ──
-    for col in raw_av.columns:
-        c_norm = str(col).lower().strip().replace("ã©", "é").replace("ã¨", "è").replace("ãª", "ê")
-        if c_norm in ["cree le", "créé le"]:
-            raw_av.rename(columns={col: "Créé le"}, inplace=True)
-
-    # Déduplication stricte des noms de colonnes
-    raw_ot = raw_ot.loc[:, ~raw_ot.columns.duplicated()].copy()
-    raw_av = raw_av.loc[:, ~raw_av.columns.duplicated()].copy()
-
     raw_ot = excr(raw_ot)
     raw_av = excr(raw_av)
 
     for c in ["Créé le", "Date de début planifiée", "Date de clôture", "Début réel", "Fin réelle"]:
         if c in raw_ot.columns:
-            s = raw_ot[c]
-            if isinstance(s, pd.DataFrame):
-                s = s.iloc[:, 0]
-            parsed = pd.to_datetime(s, errors="coerce", dayfirst=True)
-            if parsed.isna().all() and len(s) > 0 and pd.to_numeric(s, errors="coerce").notna().any():
-                parsed = pd.to_datetime(pd.to_numeric(s, errors="coerce"), unit='D', origin='1899-12-30', errors="coerce")
-            raw_ot[c] = parsed
+            raw_ot[c] = pd.to_datetime(raw_ot[c], errors="coerce")
     for c in ["Créé le", "Début souhaité", "Date de la clôture"]:
         if c in raw_av.columns:
-            s = raw_av[c]
-            if isinstance(s, pd.DataFrame):
-                s = s.iloc[:, 0]
-            parsed = pd.to_datetime(s, errors="coerce", dayfirst=True)
-            if parsed.isna().all() and len(s) > 0 and pd.to_numeric(s, errors="coerce").notna().any():
-                parsed = pd.to_datetime(pd.to_numeric(s, errors="coerce"), unit='D', origin='1899-12-30', errors="coerce")
-            raw_av[c] = parsed
+            raw_av[c] = pd.to_datetime(raw_av[c], errors="coerce")
 
-    ref_date = pd.to_datetime(date_str, format="%d/%m/%Y", errors="coerce")
-    now_ts = ref_date.normalize() if pd.notna(ref_date) else pd.Timestamp.today().normalize()
+    # CORRIGÉ (bug identifié) : now_ts utilisait pd.Timestamp.today() et
+    # ignorait TOTALEMENT date_str, quel que soit son contenu. Corrigé
+    # pour utiliser réellement date_str, avec un format jj/mm/aaaa
+    # EXPLICITE (dayfirst) — sans cela, pandas peut interpréter une date
+    # ambiguë comme "05/09/2026" en mois/jour (5 septembre lu comme
+    # "9 mai"), faussant tous les calculs d'âge en aval.
+    try:
+        now_ts = pd.to_datetime(date_str, format="%d/%m/%Y")
+    except Exception:
+        try:
+            now_ts = pd.to_datetime(date_str, dayfirst=True)
+        except Exception:
+            now_ts = pd.Timestamp.today()
     # NOTE : pas de copie "df_toutes_dates" ici — inutile. La valeur "df"
     # retournée par cette fonction EST déjà la version complète, sans
     # aucun filtre de date (le filtre de période est appliqué plus tard,
@@ -211,51 +165,34 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str, calc_version: 
     df = raw_ot.copy()
 
     df["Backlog preparation"] = np.where(
-        df["Statut utilisateur"].apply(lambda x: match_exact_token(x, CODES_PREP_EXACT)),
+        df["Statut utilisateur"].apply(lambda x: contient_mot(x, MP_KW)),
         "CARACTERISE", "NON CARACTERISE"
     )
     df["Backlog planification"] = np.where(
-        df["Statut utilisateur"].apply(lambda x: match_exact_token(x, CODES_PLAN_EXACT)),
+        df["Statut utilisateur"].apply(lambda x: contient_mot(x, MPLAN_KW)),
         "CARACTERISE", "NON CARACTERISE"
     )
     df["Type Carac Prep"] = df["Statut utilisateur"].apply(
-        lambda x: next((kw for kw in ["ATPD", "ATMR", "ATER", "ATRS", "ATMO"] if kw in set(re.findall(r'[A-Za-z0-9]+', str(x).upper()))), "NON CARACTERISE")
+        lambda x: next((kw.split()[0] for kw in MP_KW if kw in str(x)), "NON CARACTERISE")
     )
     df["Type Carac Plan"] = df["Statut utilisateur"].apply(
-        lambda x: next((kw for kw in ["ATPL", "ATEI", "ATAL", "ATAS", "AGAR", "ATHS"] if kw in set(re.findall(r'[A-Za-z0-9]+', str(x).upper()))), "NON CARACTERISE")
+        lambda x: next((kw.split()[0] for kw in MPLAN_KW if kw in str(x)), "NON CARACTERISE")
     )
 
-    # ── Âge Préparation ('ap') : date de création avec repli sur date planifiée ──
-    if "Créé le" in df.columns:
-        if "Date de début planifiée" in df.columns:
-            dt_prep = df["Créé le"].fillna(df["Date de début planifiée"])
-        else:
-            dt_prep = df["Créé le"]
-    elif "Date de début planifiée" in df.columns:
-        dt_prep = df["Date de début planifiée"]
-    else:
-        dt_prep = pd.Series(pd.NaT, index=df.index)
-
-    df["amp"] = (now_ts - dt_prep.dt.normalize()).dt.days
-    df["ap"] = df["amp"].apply(cat_age)
-
-    # ── Âge Planification ('alp') et Exécution ('aex') : Date de début planifiée ──
     for dc, am, ac in [
+        ('Créé le', "amp", "ap"),
         ('Date de début planifiée', "amlp", "alp"),
         ('Date de début planifiée', "amex", "aex"),
     ]:
         if dc in df.columns:
-            df[am] = (now_ts - df[dc].dt.normalize()).dt.days
+            df[am] = (
+                (now_ts.year - df[dc].dt.year) * 12
+                + (now_ts.month - df[dc].dt.month)
+            ).round(2)
             df[ac] = df[am].apply(cat_age)
         else:
             df[am] = np.nan
             df[ac] = "Inconnu"
-
-    if "Statut système" in df.columns:
-        df["Statut OT"] = (
-            df["Statut système"].fillna("").astype(str).str.strip().str.split().str[0]
-        )
-        df["Statut OT"] = df["Statut OT"].replace({"CREE": "CRÉÉ"})
 
     df["OT CONFIME"] = np.where(
         df["Statut système"].str.contains("CLOT|TCLO", na=False)
@@ -266,30 +203,24 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str, calc_version: 
     df["Contient SOPL"] = (
         df["Statut utilisateur"].str.contains("SOPL", na=False).map({True: 1, False: 0})
     )
-    _is_zcor_prep = df["Type d'ordre"].fillna("").astype(str).str.strip().str.upper() == "ZCOR"
-    _statut_lanc_prep = df["Statut système"].fillna("").astype(str).str.contains("LANC", na=False) | (df.get("Statut OT", pd.Series("", index=df.index)) == "LANC")
-    _b_prep = pd.to_numeric(df["Total coûts budgétés"], errors="coerce").fillna(0)
-    df["OT LANC ESTIME"] = np.where(_is_zcor_prep & _statut_lanc_prep & (_b_prep > 0), "OUI", "NON")
-
-    _statut_clot_tclo_prep = df["Statut système"].fillna("").astype(str).str.contains("CLOT|TCLO", na=False) | (df.get("Statut OT", pd.Series("", index=df.index)).isin(["CLOT", "TCLO"]))
-    _r_prep = pd.to_numeric(df["Total coûts réels"], errors="coerce").fillna(0)
-    # OT_COR_EGAL : ZCOR + CLOT/TCLO + Total coûts réels > 0 et budget != réel
+    df["OT LANC ESTIME"] = np.where(df["Total coûts budgétés"].fillna(0) == 0, "NON", "OUI")
     df["OT_COR_EGAL"] = np.where(
-        _is_zcor_prep & _statut_clot_tclo_prep & (_r_prep > 0) & (_b_prep != _r_prep),
+        (df["Total coûts budgétés"].fillna(0) - df["Total coûts réels"].fillna(0)) == 0,
         "OUI", "NON"
     )
     df["_tw_num"] = pd.to_numeric(
         df.get("Type de travail", pd.Series(dtype=float)), errors="coerce"
     )
 
-    _type_av = raw_av["Type d'avis"].fillna("").astype(str).str.strip().str.upper()
-    _ordre_vide = raw_av["Ordre"].isna() | (raw_av["Ordre"].astype(str).str.strip() == "")
-    _is_aclo = pd.Series(False, index=raw_av.index)
-    if "Statut système" in raw_av.columns:
-        _is_aclo = _is_aclo | raw_av["Statut système"].fillna("").astype(str).str.contains("ACLO", case=False, na=False)
-    if "Statut utilisateur" in raw_av.columns:
-        _is_aclo = _is_aclo | raw_av["Statut utilisateur"].fillna("").astype(str).str.contains("ACLO", case=False, na=False)
-    avf = raw_av[_ordre_vide & _type_av.isin(["ZU", "Z4", "ZR", "ZP"]) & ~_is_aclo].copy()
+    if "Statut système" in df.columns:
+        df["Statut OT"] = (
+            df["Statut système"].fillna("").astype(str).str.strip().str.split().str[0]
+        )
+
+    avf = raw_av[
+        (raw_av["Ordre"].isna() | (raw_av["Ordre"].astype(str).str.strip() == ""))
+        & raw_av["Type d'avis"].isin(["ZU", "Z4", "ZR", "ZP"])
+    ].copy()
 
     apm = sorted(
         df[
@@ -297,8 +228,10 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str, calc_version: 
         ]["Poste travail princ."].dropna().unique().tolist()
     )
 
-    # avis_complet : conserve TOUS les types d'avis sans exception (brut de raw_av),
-    # indispensable pour la page Suivi HSE (Avis Inspection ZI, Avis HSE ZH, etc.).
+    # AJOUTÉ : avis complet (non restreint aux types ZU/Z4/ZR/ZP), destiné
+    # aux usages autres que le Taux d'approbation des Avis — notamment le
+    # suivi HSE, qui a besoin des types ZI (Inspection) et ZH (HSE),
+    # structurellement absents de "avf" ci-dessus.
     avis_complet = raw_av.copy()
 
     return df, avf, apm, now_ts, avis_complet
