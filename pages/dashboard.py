@@ -126,7 +126,7 @@ def render_dashboard_tab(vp: list, pscores: dict, qscores: dict,
 
     # ── 3) Suivi hebdomadaire des anomalies (bar empilée 2 couleurs,
     # gère l'état "1ère semaine" statique — voir components/charts.py) ──
-    render_suivi_anomalies_semaine(vp, hist_df, now_ts, "dash", ano_map_actuel=ano_map)
+    render_suivi_anomalies_semaine(vp, hist_df, now_ts, "dash", ano_map_actuel=ano_map, division=prefixe_div)
 
     st.markdown("---")
 
