@@ -563,6 +563,7 @@ def main() -> None:
             render_evolution_tab(
                 hist_df, var_df, journal_df, top5_df, bot5_df,
                 synth_perf, synth_qual, vp, now_ts,
+                df_full, av_full, apm,
             )
         with tabs[4]:
             try:
