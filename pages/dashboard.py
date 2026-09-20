@@ -31,11 +31,22 @@ def render_dashboard_tab(vp: list, pscores: dict, qscores: dict,
 
     # ── 2) Score global par poste ET comparaison semaine précédente/
     # actuelle CÔTE À CÔTE (demande explicite) ──────────────────────────
+    # AJOUTÉ (demande explicite) : bouton bascule UNIQUE Maroc Chimie
+    # (SF1) / FEEDS (SF2), qui filtre LES DEUX graphiques ci-dessous
+    # simultanément — un seul graphique par côté est affiché à la fois
+    # (pas les deux divisions superposées).
+    division_dash = st.radio(
+        "Division", ["🏭 Maroc Chimie", "🏭 FEEDS"],
+        horizontal=True, label_visibility="collapsed", key="dash_division_toggle",
+    )
+    prefixe_div = "SF1" if division_dash == "🏭 Maroc Chimie" else "SF2"
+    vp_div = [p for p in vp if str(p).startswith(prefixe_div)]
+
     col_score, col_compar = st.columns(2)
 
     with col_score:
-        st.markdown('<div class="stl p">Scores globaux par poste — Performance et Qualité</div>', unsafe_allow_html=True)
-        show_grouped_hbar(vp, pscores, qscores, "Performance & Qualité par poste", thin=True)
+        st.markdown(f'<div class="stl p">Scores globaux par poste — {division_dash}</div>', unsafe_allow_html=True)
+        show_grouped_hbar(vp_div, pscores, qscores, f"Performance & Qualité — {division_dash}", thin=True)
 
     with col_compar:
         st.markdown('<div class="stl c">Comparaison Semaine Actuelle vs Semaine Précédente</div>', unsafe_allow_html=True)
@@ -81,7 +92,7 @@ def render_dashboard_tab(vp: list, pscores: dict, qscores: dict,
 
                 perf_h = hist_df[hist_df["_section"] == "perf"]
                 qual_h = hist_df[hist_df["_section"] == "qual"]
-                postes_dispo = sorted([p for p in vp if p in hist_df["Poste de travail"].unique()])
+                postes_dispo = sorted([p for p in vp_div if p in hist_df["Poste de travail"].unique()])
 
                 if not postes_dispo:
                     st.markdown(
@@ -108,7 +119,7 @@ def render_dashboard_tab(vp: list, pscores: dict, qscores: dict,
 
                     show_butterfly_comparison(
                         postes_valides, perf_prec, perf_act, qual_prec, qual_act,
-                        "Performance & Qualité", f"Préc. ({date_prec})", f"Actuelle ({date_act})",
+                        f"Performance & Qualité — {division_dash}", f"Préc. ({date_prec})", f"Actuelle ({date_act})",
                     )
 
     st.markdown("---")
