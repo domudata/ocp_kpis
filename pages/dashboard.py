@@ -81,9 +81,15 @@ def render_dashboard_tab(vp: list, pscores: dict, qscores: dict,
 
     st.markdown("---")
 
-    # ── 2) Score global par poste (division choisie) ───────────────────
-    st.markdown(f'<div class="stl p">Scores globaux par poste — {division_dash}</div>', unsafe_allow_html=True)
-    show_grouped_hbar(vp_div, pscores, qscores, f"Performance & Qualité — {division_dash}", thin=True)
+    # ── 2) Score global par poste ET Suivi des anomalies CÔTE À CÔTE
+    # (demande explicite) — l'anomalie chart est compact pour tenir à
+    # côté du score. ──────────────────────────────────────────────────
+    col_score, col_anom = st.columns([3, 2])
+    with col_score:
+        st.markdown(f'<div class="stl p">Scores globaux par poste — {division_dash}</div>', unsafe_allow_html=True)
+        show_grouped_hbar(vp_div, pscores, qscores, f"Performance & Qualité — {division_dash}", thin=True)
+    with col_anom:
+        render_suivi_anomalies_semaine(vp, hist_df, now_ts, "dash", ano_map_actuel=ano_map, division=prefixe_div)
 
     st.markdown("---")
 
@@ -126,9 +132,12 @@ def render_dashboard_tab(vp: list, pscores: dict, qscores: dict,
             date_prec_ts = dates_semaine_prec.max()
             date_prec = date_prec_ts.strftime("%d/%m/%Y")
             date_act = date_act_ts.strftime("%d/%m/%Y")
+            num_s_act = date_act_ts.isocalendar().week
+            num_s_prec = date_prec_ts.isocalendar().week
             st.markdown(
                 f'<div style="margin-bottom:8px;font-size:11px;color:#64748b;">'
-                f'📅 Préc. : <b>{date_prec}</b> &nbsp;→&nbsp; Actuelle : <b>{date_act}</b></div>',
+                f'📅 Semaine Précédente <b>S{num_s_prec}</b> ({date_prec}) &nbsp;→&nbsp; '
+                f'Semaine Actuelle <b>S{num_s_act}</b> ({date_act})</div>',
                 unsafe_allow_html=True,
             )
 
@@ -163,20 +172,17 @@ def render_dashboard_tab(vp: list, pscores: dict, qscores: dict,
                 with col_bp:
                     show_butterfly_single_domain(
                         postes_valides, perf_prec, perf_act,
-                        f"Performance — {division_dash}", f"Préc. ({date_prec})", f"Actuelle ({date_act})",
+                        f"Performance — {division_dash} (S{num_s_prec} vs S{num_s_act})",
+                        f"Semaine Précédente S{num_s_prec}", f"Semaine Actuelle S{num_s_act}",
                         couleur_prec="#93c5fd", couleur_act="#1d4ed8",
                     )
                 with col_bq:
                     show_butterfly_single_domain(
                         postes_valides, qual_prec, qual_act,
-                        f"Qualité — {division_dash}", f"Préc. ({date_prec})", f"Actuelle ({date_act})",
+                        f"Qualité — {division_dash} (S{num_s_prec} vs S{num_s_act})",
+                        f"Semaine Précédente S{num_s_prec}", f"Semaine Actuelle S{num_s_act}",
                         couleur_prec="#86efac", couleur_act="#15803d",
                     )
-
-    st.markdown("---")
-
-    # ── 4) Suivi hebdomadaire des anomalies (division choisie) ──────────
-    render_suivi_anomalies_semaine(vp, hist_df, now_ts, "dash", ano_map_actuel=ano_map, division=prefixe_div)
 
     st.markdown("---")
 
