@@ -394,7 +394,7 @@ def show_butterfly_single_domain(postes: list, valeurs_prec: list, valeurs_act: 
     fig.add_trace(go.Bar(
         y=postes, x=[-v for v in valeurs_prec], orientation='h',
         name=label_prec, marker=dict(color=couleur_prec, line=dict(color='white', width=0.5)),
-        text=[f"{v:.0f}%" for v in valeurs_prec], textposition='inside', insidetextanchor='start',
+        text=[f"{v:.0f}%" for v in valeurs_prec], textposition='outside',
         textfont=dict(size=12, family='Inter', color='black'),
         hovertemplate="<b>%{y}</b><br>" + label_prec + " : %{customdata:.1f}%<extra></extra>",
         customdata=valeurs_prec,
@@ -585,11 +585,15 @@ def _dessiner_suivi_anomalies(res: dict, key_prefix: str) -> None:
         return
 
     label_semaine = f"Semaine {res['num_semaine_actuelle']}"
-    if res["date_prec"] is None:
-        st.caption(f"📅 {label_semaine} — première extraction de cette semaine : total affiché, "
-                    f"en attente de la semaine suivante pour voir ce qui aura été traité.")
-    else:
-        st.caption(f"📅 {label_semaine} (comparée à Semaine {res['num_semaine_precedente']})")
+    total_anomalies = int(par_poste["Anomalies semaine"].sum())
+    total_traite = int(par_poste["Anomalies traitees"].sum())
+    st.markdown(
+        f'<div style="margin-bottom:6px;">'
+        f'<span style="font-size:13px;color:#334155;">📅 <b>{label_semaine}</b> — '
+        f'<b style="color:#f97316;">{total_anomalies}</b> anomalie(s) &nbsp;|&nbsp; '
+        f'<b style="color:#10b981;">{total_traite}</b> traitée(s)</span></div>',
+        unsafe_allow_html=True,
+    )
 
     tous_postes = par_poste["Poste"].tolist()
     postes_sf1 = [p for p in tous_postes if str(p).startswith("SF1")]
@@ -774,14 +778,13 @@ def render_suivi_anomalies_semaine(vp: list, hist_df, now_ts, key_prefix: str,
 
 def render_suivi_anomalies_semaine_filtrable(vp: list, hist_df, now_ts, key_prefix: str) -> None:
     """
-    AJOUTÉ (demande explicite, page Suivi Évolution) : même système que
-    render_suivi_anomalies_semaine, MAIS avec un filtre par NUMÉRO DE
-    SEMAINE (ex. "Semaine 38") qui ne s'applique QU'À CE GRAPHIQUE — les
-    autres sections de la page ne sont pas affectées par ce filtre.
-    Permet de consulter n'importe quelle semaine passée enregistrée,
-    pas seulement la semaine calendaire en cours.
+    CORRIGÉ (demande explicite) : pour la semaine sélectionnée, compare
+    DÉSORMAIS le début de CETTE semaine à sa dernière extraction connue
+    (se met à jour au fil des extractions de la semaine), au lieu de la
+    comparer à la semaine précédente. Filtre par numéro de semaine
+    (ex. "Semaine 38"), n'affecte que ce graphique.
     """
-    from core.historique import calculate_suivi_anomalies_semaine
+    from core.historique import calculate_suivi_semaine_intra
     from core.constants import QK, PK
 
     st.markdown('<div class="stl a">🎯 Suivi hebdomadaire des anomalies</div>', unsafe_allow_html=True)
@@ -811,7 +814,5 @@ def render_suivi_anomalies_semaine_filtrable(vp: list, hist_df, now_ts, key_pref
     idx_choisi = labels_semaines.index(choix)
     annee_choisie, num_choisi = semaines_vues[idx_choisi]
 
-    lundi_choisi = pd.Timestamp.fromisocalendar(int(annee_choisie), int(num_choisi), 1)
-
-    res = calculate_suivi_anomalies_semaine(hist_df, lundi_choisi, QK, PK)
+    res = calculate_suivi_semaine_intra(hist_df, int(annee_choisie), int(num_choisi), QK, PK)
     _dessiner_suivi_anomalies(res, f"{key_prefix}_{annee_choisie}_{num_choisi}")
