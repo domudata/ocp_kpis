@@ -461,6 +461,191 @@ def show_scores_hbar(vp, scores: dict, title, s1=S1_DEFAULT, s2=S2_DEFAULT):
     show_hbar_thresholds(postes, vals, title, s1, s2)
 
 
+def show_scores_vbar(postes: list, scores: dict, title: str,
+                     s1=S1_DEFAULT, s2=S2_DEFAULT, score_global=None,
+                     color_theme: str = "blue") -> None:
+    """
+    Graphique à barres verticales des scores (Performance ou Qualité)
+    par poste de travail pour un périmètre donné (Maroc Chimie ou FEED),
+    avec lignes de seuil s1 (70%) et s2 (90%) et affichage des pourcentages.
+    """
+    postes_valides = [p for p in postes if p in scores]
+    if not postes_valides:
+        st.markdown('<div style="padding:20px;color:#94a3b8;">Aucune donnée pour ce périmètre</div>', unsafe_allow_html=True)
+        return
+
+    vals = [round(float(scores.get(p, 0)), 1) for p in postes_valides]
+
+    def _color(v):
+        if v >= s2:
+            return C_HIGH
+        elif v >= s1:
+            return C_MID
+        return C_LOW
+
+    colors = [_color(v) for v in vals]
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=postes_valides, y=vals, orientation='v',
+        marker=dict(color=colors, line=dict(color='white', width=1)),
+        text=[f"{v:.0f}%" for v in vals],
+        textposition='outside',
+        textfont=dict(size=11, family='Inter, sans-serif', color='#1e293b'),
+        hovertemplate="<b>%{x}</b><br>Score : %{y:.1f}%<extra></extra>",
+    ))
+
+    fig.add_hline(y=s1, line_dash="dash", line_color=C_MID, line_width=1.5)
+    fig.add_hline(y=s2, line_dash="dash", line_color=C_HIGH, line_width=1.5)
+    fig.add_annotation(x=1.0, xref="paper", y=s1, text=f"Seuil {s1}%",
+                       showarrow=False, font=dict(color=C_MID, size=11, family='Inter'),
+                       xanchor='left', yshift=4)
+    fig.add_annotation(x=1.0, xref="paper", y=s2, text=f"Cible {s2}%",
+                       showarrow=False, font=dict(color=C_HIGH, size=11, family='Inter'),
+                       xanchor='left', yshift=4)
+
+    if score_global is not None:
+        try:
+            sg_val = float(score_global)
+            fig.add_hline(y=sg_val, line_dash="dot", line_color="#2563eb" if color_theme == "blue" else "#059669", line_width=2)
+            fig.add_annotation(x=0.0, xref="paper", y=sg_val, text=f"Moyenne périmètre {sg_val:.1f}%",
+                               showarrow=False, font=dict(color="#1e3a5f", size=11, family='Inter'),
+                               xanchor='left', yshift=-10)
+        except Exception:
+            pass
+
+    fig.update_layout(
+        title=dict(text=title, x=0.5, xanchor='center', font=dict(size=15, color='#1e293b')),
+        height=380,
+        yaxis=dict(range=[0, 115], showgrid=True, gridcolor="#f1f5f9", tickfont=dict(size=11, family='Inter'), fixedrange=True, zeroline=False),
+        xaxis=dict(tickangle=-35, tickfont=dict(size=10, family='Inter', color='#1e293b'), fixedrange=True),
+        plot_bgcolor='white', paper_bgcolor='white',
+        margin=dict(t=60, b=70, l=40, r=65),
+        showlegend=False,
+    )
+    st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
+
+
+def show_weekly_comparison_vbar(postes: list, vals_prec: list, vals_act: list,
+                                 title: str, label_prec: str, label_act: str,
+                                 kpi_type: str = "perf", s1=S1_DEFAULT, s2=S2_DEFAULT) -> None:
+    """
+    Graphique indépendant en barres verticales pour comparer la semaine précédente
+    et la semaine actuelle par poste, pour un périmètre et un type (Performance ou Qualité) donnés.
+    Barres groupées : Barre 1 = Semaine précédente, Barre 2 = Semaine actuelle.
+    """
+    if not postes:
+        st.markdown('<div style="padding:20px;color:#94a3b8;">Aucune donnée à comparer</div>', unsafe_allow_html=True)
+        return
+
+    if kpi_type == "perf":
+        c_prec = "#93c5fd"  # bleu clair
+        c_act  = "#1d4ed8"  # bleu roi
+    else:
+        c_prec = "#86efac"  # vert clair
+        c_act  = "#15803d"  # vert émeraude foncé
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        x=postes, y=vals_prec, orientation='v',
+        name=f"Préc. ({label_prec})",
+        marker=dict(color=c_prec, line=dict(color='white', width=1)),
+        text=[f"{v:.0f}%" for v in vals_prec],
+        textposition='outside',
+        textfont=dict(size=10, family='Inter, sans-serif', color='#1e293b'),
+        hovertemplate="<b>%{x}</b><br>Précédente : %{y:.1f}%<extra></extra>",
+    ))
+    fig.add_trace(go.Bar(
+        x=postes, y=vals_act, orientation='v',
+        name=f"Actuelle ({label_act})",
+        marker=dict(color=c_act, line=dict(color='white', width=1)),
+        text=[f"{v:.0f}%" for v in vals_act],
+        textposition='outside',
+        textfont=dict(size=10, family='Inter, sans-serif', color='#1e293b'),
+        hovertemplate="<b>%{x}</b><br>Actuelle : %{y:.1f}%<extra></extra>",
+    ))
+
+    fig.add_hline(y=s1, line_dash="dash", line_color=C_MID, line_width=1.5)
+    fig.add_hline(y=s2, line_dash="dash", line_color=C_HIGH, line_width=1.5)
+    fig.add_annotation(x=1.0, xref="paper", y=s1, text=f"{s1}%",
+                       showarrow=False, font=dict(color=C_MID, size=10, family='Inter'),
+                       xanchor='left', yshift=3)
+    fig.add_annotation(x=1.0, xref="paper", y=s2, text=f"{s2}%",
+                       showarrow=False, font=dict(color=C_HIGH, size=10, family='Inter'),
+                       xanchor='left', yshift=3)
+
+    fig.update_layout(
+        title=dict(text=title, x=0.5, xanchor='center', font=dict(size=14, color='#1e293b')),
+        barmode='group', bargap=0.22, bargroupgap=0.06,
+        height=400,
+        yaxis=dict(range=[0, 115], showgrid=True, gridcolor="#f1f5f9", tickfont=dict(size=11, family='Inter'), fixedrange=True, zeroline=False),
+        xaxis=dict(tickangle=-35, tickfont=dict(size=10, family='Inter', color='#1e293b'), fixedrange=True),
+        plot_bgcolor='white', paper_bgcolor='white',
+        legend=dict(orientation="h", yanchor="bottom", y=-0.30, x=0.5, xanchor="center", font=dict(size=11)),
+        margin=dict(t=55, b=85, l=35, r=40),
+    )
+    st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
+
+
+def show_global_scores_summary_vbar(sf1_p, sf1_q, sf2_p, sf2_q,
+                                     s1=S1_DEFAULT, s2=S2_DEFAULT) -> None:
+    """
+    Graphique synthétique à barres verticales comparant directement
+    les 4 scores globaux :
+    - Maroc Chimie : Performance & Qualité
+    - FEED : Performance & Qualité
+    """
+    labels = [
+        "Maroc Chimie<br><b>Performance</b>",
+        "Maroc Chimie<br><b>Qualité</b>",
+        "FEED<br><b>Performance</b>",
+        "FEED<br><b>Qualité</b>",
+    ]
+    vals = [
+        float(sf1_p) if sf1_p is not None else 0.0,
+        float(sf1_q) if sf1_q is not None else 0.0,
+        float(sf2_p) if sf2_p is not None else 0.0,
+        float(sf2_q) if sf2_q is not None else 0.0,
+    ]
+
+    colors = [
+        "#1d4ed8" if vals[0] >= s2 else ("#f59e0b" if vals[0] >= s1 else "#ef4444"),
+        "#15803d" if vals[1] >= s2 else ("#f59e0b" if vals[1] >= s1 else "#ef4444"),
+        "#3b82f6" if vals[2] >= s2 else ("#f59e0b" if vals[2] >= s1 else "#ef4444"),
+        "#10b981" if vals[3] >= s2 else ("#f59e0b" if vals[3] >= s1 else "#ef4444"),
+    ]
+
+    fig = go.Figure(go.Bar(
+        x=labels, y=vals, orientation='v',
+        marker=dict(color=colors, line=dict(color='white', width=1.5)),
+        text=[f"{v:.1f}%" for v in vals],
+        textposition='outside',
+        textfont=dict(size=13, family='Inter, sans-serif', color='#1e293b'),
+        hovertemplate="<b>%{x}</b><br>Score global : %{y:.1f}%<extra></extra>",
+    ))
+
+    fig.add_hline(y=s1, line_dash="dash", line_color=C_MID, line_width=1.5)
+    fig.add_hline(y=s2, line_dash="dash", line_color=C_HIGH, line_width=1.5)
+    fig.add_annotation(x=1.0, xref="paper", y=s1, text=f"Seuil {s1}%",
+                       showarrow=False, font=dict(color=C_MID, size=11, family='Inter'),
+                       xanchor='left', yshift=4)
+    fig.add_annotation(x=1.0, xref="paper", y=s2, text=f"Cible {s2}%",
+                       showarrow=False, font=dict(color=C_HIGH, size=11, family='Inter'),
+                       xanchor='left', yshift=4)
+
+    fig.update_layout(
+        title=dict(text="Comparaison synthétique des 4 Scores Globaux", x=0.5, xanchor='center',
+                   font=dict(size=15, color='#1e293b')),
+        height=320,
+        yaxis=dict(range=[0, 115], showgrid=True, gridcolor="#f1f5f9", tickfont=dict(size=11, family='Inter'), fixedrange=True, zeroline=False),
+        xaxis=dict(tickfont=dict(size=12, family='Inter', color='#1e293b'), fixedrange=True),
+        plot_bgcolor='white', paper_bgcolor='white',
+        margin=dict(t=60, b=40, l=40, r=65),
+        showlegend=False,
+    )
+    st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
+
+
 def _dessiner_barre_horizontale_semaine_division(postes_div, par_poste, detail_par_poste,
                                                    key_prefix) -> None:
     """Dessine UN graphique bar HORIZONTAL (système hebdomadaire par
