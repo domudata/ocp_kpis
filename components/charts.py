@@ -644,14 +644,15 @@ def _dessiner_barre_horizontale_division(postes_div, total_actuel, total_referen
 
 
 def render_suivi_anomalies_semaine(vp: list, hist_df, now_ts, key_prefix: str,
-                                    ano_map_actuel: dict = None) -> None:
+                                    ano_map_actuel: dict = None, division: str = None) -> None:
     """
     Suivi des anomalies sous le filtre période actif (sidebar).
-    CORRIGÉ (demande explicite) : SÉPARÉ en 2 graphiques bar HORIZONTAUX
-    côte à côte — SF1 = « Maroc Chimie » à gauche, SF2 = « FEEDS » à
-    droite — au lieu d'un seul graphique vertical mélangeant les 2
-    divisions. Comparaison contre le dernier instantané historique
-    enregistré ; pourcentage traité affiché à l'extérieur de la barre.
+    CORRIGÉ (demande explicite) : si `division` est fourni ("SF1" ou
+    "SF2"), un SEUL graphique bar horizontal est affiché pour cette
+    division uniquement (respecte le bouton bascule Maroc Chimie/FEEDS
+    de la page). Sans `division`, affiche les 2 côte à côte comme avant.
+    Comparaison contre le dernier instantané historique enregistré ;
+    pourcentage traité affiché à l'extérieur de la barre.
     """
     from core.constants import QK, PK
 
@@ -696,6 +697,16 @@ def render_suivi_anomalies_semaine(vp: list, hist_df, now_ts, key_prefix: str,
     else:
         st.caption("📌 Aucune extraction antérieure enregistrée — ce total sert de RÉFÉRENCE. "
                     "Le pourcentage traité apparaîtra dès la prochaine extraction.")
+
+    if division in ("SF1", "SF2"):
+        postes_div = [p for p in vp if str(p).startswith(division)]
+        label_div = "Maroc Chimie (SF1)" if division == "SF1" else "FEEDS (SF2)"
+        st.markdown(f"**🏭 {label_div}**")
+        _dessiner_barre_horizontale_division(
+            postes_div, total_actuel, total_reference, reference_disponible,
+            tous_kpi, ano_map_actuel, f"{key_prefix}_{division.lower()}",
+        )
+        return
 
     postes_sf1 = [p for p in vp if str(p).startswith("SF1")]
     postes_sf2 = [p for p in vp if str(p).startswith("SF2")]
