@@ -312,7 +312,15 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     ).reindex(posts, fill_value=0)
     for c in ["APRQ", "APRV", "APRV AVAU", "REJT"]:
         tca[c] = tca.get(c, 0)
-    tca["Total"] = tca[["APRQ", "APRV", "APRV AVAU", "REJT"]].sum(axis=1)
+    # CORRIGÉ (2e bug identifié) : pd.pivot_table(columns="Statut
+    # utilisateur", ...) EXCLUT SILENCIEUSEMENT les lignes où ce champ
+    # est NaN — ces avis disparaissaient du dénominateur, gonflant le
+    # taux d'approbation. Total calculé via groupby DIRECT sur avf (qui
+    # ne fait AUCUNE distinction de statut, donc n'exclut rien), comme
+    # le fait déjà anomalies.py (avf_tot) — les deux sont maintenant
+    # cohérents.
+    total_reel = avf.groupby("Poste travail princ.")["Avis"].count().reindex(posts, fill_value=0)
+    tca["Total"] = total_reel
     tca["Taux d'approbation des Avis"] = ckpi(tca["APRV"], tca["Total"])
 
     # ── Performance Graissage — CORRIGÉ (2 bugs détectés lors de l'audit) ──
