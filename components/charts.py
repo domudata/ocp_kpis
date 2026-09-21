@@ -854,38 +854,39 @@ def _dessiner_barre_empilee_reference(res: dict, label_periode: str, key_prefix:
     fig = go.Figure()
     if mode_statique:
         fig.add_trace(go.Bar(
-            x=postes, y=baseline, name=f"Anomalies (référence)",
+            y=postes, x=baseline, orientation='h', name=f"Anomalies (référence)",
             marker=dict(color="#f97316", line=dict(color='white', width=1)),
             text=[str(v) for v in baseline], textposition='outside',
-            textfont=dict(color='black', size=11),
+            textfont=dict(color='black', size=13),
         ))
         barmode = 'group'
     else:
         fig.add_trace(go.Bar(
-            x=postes, y=traite, name="Traitées",
+            y=postes, x=traite, orientation='h', name="Traitées",
             marker=dict(color="#10b981", line=dict(color='white', width=1)),
             text=[str(v) if v > 0 else "" for v in traite], textposition='inside',
-            textfont=dict(color='white', size=10),
+            textfont=dict(color='white', size=12),
         ))
         fig.add_trace(go.Bar(
-            x=postes, y=restant, name="Restantes",
+            y=postes, x=restant, orientation='h', name="Restantes",
             marker=dict(color="#f97316", line=dict(color='white', width=1)),
             text=[str(v) for v in restant], textposition='inside',
-            textfont=dict(color='white', size=10),
+            textfont=dict(color='white', size=12),
         ))
         for p, b, t in zip(postes, baseline, traite):
             pct = round(t / b * 100) if b > 0 else 0
-            fig.add_annotation(x=p, y=b, text=f"{pct}%", showarrow=False, yshift=14,
-                               font=dict(size=11, color='black'))
+            fig.add_annotation(x=b, y=p, text=f"  {b} total — {pct}% traité", showarrow=False,
+                               xanchor='left', font=dict(size=12, color='black'))
         barmode = 'stack'
 
     fig.update_layout(
-        barmode=barmode, height=440,
-        xaxis=dict(tickangle=-45, fixedrange=True),
-        yaxis=dict(showgrid=True, gridcolor="#F1F5F9", fixedrange=True, title="Nombre d'anomalies"),
+        barmode=barmode, height=max(400, 42 * len(postes) + 100),
+        yaxis=dict(autorange="reversed", tickfont=dict(size=12, family='Inter'),
+                   fixedrange=True, automargin=True),
+        xaxis=dict(showgrid=True, gridcolor="#F1F5F9", fixedrange=True, title="Nombre d'anomalies"),
         plot_bgcolor='white', paper_bgcolor='white',
-        legend=dict(orientation="h", yanchor="bottom", y=-0.32, x=0.5, xanchor="center"),
-        margin=dict(t=40, b=110, l=20, r=20),
+        legend=dict(orientation="h", yanchor="bottom", y=-0.12, x=0.5, xanchor="center"),
+        margin=dict(t=30, b=60, l=20, r=140),
     )
     event = st.plotly_chart(
         fig, use_container_width=True, config=PLOTLY_CONFIG,
@@ -894,7 +895,7 @@ def _dessiner_barre_empilee_reference(res: dict, label_periode: str, key_prefix:
 
     points = event.selection.points if event and event.selection else []
     if points:
-        poste_sel = points[0].get("x")
+        poste_sel = points[0].get("y")
         detail = res["detail_par_poste"].get(poste_sel)
         if detail is not None and not detail.empty:
             st.markdown(f"**🔍 Détail par KPI — {poste_sel}**")
@@ -1028,13 +1029,17 @@ def render_suivi_anomalies_semaine_live(vp: list, df_full: pd.DataFrame, avf_ful
     for p, act in zip(sous, valeurs):
         prec = total_prec.get(p, 0)
         traite = max(0, prec - act)
-        textes.append(f"{act} ({traite} traité)" if prec > 0 else f"{act}")
+        if prec > 0:
+            pct = round(traite / prec * 100) if traite > 0 else 0
+            textes.append(f"{act}  (✅ {traite} traité, {pct}%)" if traite > 0 else f"{act}  (0% traité)")
+        else:
+            textes.append(f"{act}")
 
     fig = go.Figure()
     fig.add_trace(go.Bar(
         x=sous, y=valeurs, name=f"Anomalies Semaine {num_choisi}",
         marker=dict(color="#f97316", line=dict(color='white', width=1)),
-        text=textes, textposition='outside', textfont=dict(size=11, family='Inter', color='black'),
+        text=textes, textposition='outside', textfont=dict(size=12, family='Inter', color='black'),
     ))
     fig.update_layout(
         barmode='group', height=440,
