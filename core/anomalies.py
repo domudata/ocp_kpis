@@ -90,11 +90,11 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
     ano_map["OT préparation >3 mois"] = full_prep[full_prep["ap"] == ">3 mois"].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["OT préparation 1mois< <3mois"] = full_prep[full_prep["ap"] == "1 mois < <3 mois"].groupby("Poste travail princ.")["Ordre"].count()
 
-    # ── OT planification <1/1-3/>3 mois — SYNCHRONISÉ avec calcul_kpi.py ──
-    # Base = full_plan (ZCOR + LANC + SOPL==0 + date passée).
-    ano_map["OT planification <1 mois"] = full_plan[full_plan["alp"] == "<1 mois"].groupby("Poste travail princ.")["Ordre"].count()
-    ano_map["OT planification >3 mois"] = full_plan[full_plan["alp"] == ">3 mois"].groupby("Poste travail princ.")["Ordre"].count()
-    ano_map["OT planification 1mois< <3mois"] = full_plan[full_plan["alp"] == "1 mois < <3 mois"].groupby("Poste travail princ.")["Ordre"].count()
+    # ── OT planification <1/1-3/>3 mois — ANOMALIES NON CARACTÉRISÉES (demande explicite) ──
+    # Répartition des anomalies de planification (non_plan) par tranche d'âge
+    ano_map["OT planification <1 mois"] = non_plan[non_plan["alp"] == "<1 mois"].groupby("Poste travail princ.")["Ordre"].count()
+    ano_map["OT planification >3 mois"] = non_plan[non_plan["alp"] == ">3 mois"].groupby("Poste travail princ.")["Ordre"].count()
+    ano_map["OT planification 1mois< <3mois"] = non_plan[non_plan["alp"] == "1 mois < <3 mois"].groupby("Poste travail princ.")["Ordre"].count()
 
     # ── OT exécution <1/1-3/>3 mois — NOUVELLE POPULATION (demande explicite) ──
     # Même population que calc_kpis.py : LANC + SOPL==1 + ZCOR + date ≤ now.
@@ -109,13 +109,11 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
     ano_map["Performance Inspection"] = dfp[perf_filt & (dfp["_tw_num"].isin([290, 300, 310])) & (dfp["Date de début planifiée"] <= now_ts)].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["Performance Systématiques"] = dfp[perf_filt & (dfp["_tw_num"] == 360) & (dfp["Date de début planifiée"] <= now_ts)].groupby("Poste travail princ.")["Ordre"].count()
 
-    # ── Taux d'approbation des Avis — RESTREINT AUX AVIS ZC (demande explicite) ──
-    # Même population que calc_kpis.py via build_avis_zc_population().
-    # Anomalies = avis ZC ni approuvés (APRV / APRV AVAU) ni rejetés (REJT) :
-    # seuls les avis en attente d'approbation sont des anomalies.
+    # ── Taux d'approbation des Avis — ANOMALIES = STATUT UTILISATEUR APRQ (demande explicite) ──
+    # Filtre ZU/Z4/ZR/ZP retiré. Anomalies = tous les avis en attente d'approbation (APRQ).
     avf_zc = build_avis_zc_population(avf)
     ano_map["Taux d'approbation des Avis"] = (
-        avf_zc[~avf_zc["Statut utilisateur"].isin(["APRV", "APRV AVAU", "REJT"])]
+        avf_zc[avf_zc["Statut utilisateur"].fillna("").astype(str).str.contains("APRQ", case=False, na=False)]
         .groupby("Poste travail princ.")["Avis"].count()
     )
 
@@ -193,9 +191,9 @@ def build_anomaly_dfs(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
         "OT préparation <1 mois": full_prep[full_prep["ap"] == "<1 mois"].copy(),
         "OT préparation >3 mois": full_prep[full_prep["ap"] == ">3 mois"].copy(),
         "OT préparation 1mois< <3mois": full_prep[full_prep["ap"] == "1 mois < <3 mois"].copy(),
-        "OT planification <1 mois": full_plan[full_plan["alp"] == "<1 mois"].copy(),
-        "OT planification >3 mois": full_plan[full_plan["alp"] == ">3 mois"].copy(),
-        "OT planification 1mois< <3mois": full_plan[full_plan["alp"] == "1 mois < <3 mois"].copy(),
+        "OT planification <1 mois": non_plan[non_plan["alp"] == "<1 mois"].copy(),
+        "OT planification >3 mois": non_plan[non_plan["alp"] == ">3 mois"].copy(),
+        "OT planification 1mois< <3mois": non_plan[non_plan["alp"] == "1 mois < <3 mois"].copy(),
         # Exécution : MÊME POPULATION que build_ano_map (LANC+SOPL+ZCOR+date≤now).
         "OT exécution <1 mois": df_exec_det[df_exec_det["aex"] == "<1 mois"].copy(),
         "OT exécution >3 mois": df_exec_det[df_exec_det["aex"] == ">3 mois"].copy(),
@@ -203,8 +201,8 @@ def build_anomaly_dfs(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
         "Performance Graissage": dfp[perf_filt & (dfp["_tw_num"] == 350)].copy(),
         "Performance Inspection": dfp[perf_filt & (dfp["_tw_num"].isin([290, 300, 310])) & (dfp["Date de début planifiée"] <= now_ts)].copy(),
         "Performance Systématiques": dfp[perf_filt & (dfp["_tw_num"] == 360) & (dfp["Date de début planifiée"] <= now_ts)].copy(),
-        # Avis : MÊME POPULATION ZC que build_ano_map (en attente : ni APRV ni REJT).
-        "Taux d'approbation des Avis": avf_zc_det[~avf_zc_det["Statut utilisateur"].isin(["APRV", "APRV AVAU", "REJT"])].copy(),
+        # Avis : ANOMALIES = STATUT UTILISATEUR APRQ (demande explicite).
+        "Taux d'approbation des Avis": avf_zc_det[avf_zc_det["Statut utilisateur"].fillna("").astype(str).str.contains("APRQ", case=False, na=False)].copy(),
         "OT LANC ESTIME": dfp[(dfp["Statut OT"] == "LANC") & (dfp["Contient SOPL"] == 1) & (dfp["Type d'ordre"] == "ZCOR") & (dfp["OT LANC ESTIME"] == "NON")].copy(),
         "Backlog préparation caractérisé": non_prep.copy(),
         "Backlog planification caractérisé": non_plan.copy(),
