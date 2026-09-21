@@ -68,7 +68,7 @@ def contient_mot(t, lm) -> bool:
 
 def cat_age(a) -> str:
     if pd.isna(a):
-        return "Inconnu"
+        return ">3 mois"
     if a <= 1:
         return "<1 mois"
     elif a >= 3:
@@ -192,7 +192,7 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
             df[ac] = df[am].apply(cat_age)
         else:
             df[am] = np.nan
-            df[ac] = "Inconnu"
+            df[ac] = ">3 mois"
 
     df["OT CONFIME"] = np.where(
         df["Statut système"].str.contains("CLOT|TCLO", na=False)
