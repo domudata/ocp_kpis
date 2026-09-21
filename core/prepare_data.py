@@ -217,9 +217,14 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
             df["Statut système"].fillna("").astype(str).str.strip().str.split().str[0]
         )
 
+    # MODIFIÉ : population Avis restreinte au type ZC uniquement (demande
+    # explicite). L'ancienne restriction ZU/Z4/ZR/ZP est remplacée par ZC.
+    # Le filtre "Ordre vide" est conservé (avis non rattachés à un OT).
+    # build_avis_zc_population() dans calcul_kpi.py applique la même règle
+    # en double sécurité, garantissant la cohérence KPI / anomalies.
     avf = raw_av[
         (raw_av["Ordre"].isna() | (raw_av["Ordre"].astype(str).str.strip() == ""))
-        & raw_av["Type d'avis"].isin(["ZU", "Z4", "ZR", "ZP"])
+        & raw_av["Type d'avis"].astype(str).str.strip().str.upper().eq("ZC")
     ].copy()
 
     apm = sorted(
