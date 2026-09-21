@@ -113,6 +113,48 @@ def match_exact_token(statut, codes: set) -> bool:
 
 
 # ──────────────────────────────────────────────
+# Fonctions de population centralisées
+# Réutilisées par anomalies.py pour garantir la cohérence KPI / anomalies.
+# ──────────────────────────────────────────────
+
+def build_avis_zc_population(avdf: pd.DataFrame) -> pd.DataFrame:
+    """Filtre les avis sur Type d'avis == 'ZC' uniquement.
+
+    Population commune pour le KPI « Taux d'approbation des Avis »
+    et les anomalies Avis dans anomalies.py.
+    """
+    return avdf[
+        avdf["Type d'avis"]
+        .astype(str)
+        .str.strip()
+        .str.upper()
+        .eq("ZC")
+    ].copy()
+
+
+def build_execution_population(df: pd.DataFrame, now_ts) -> pd.DataFrame:
+    """Population d'exécution : LANC + SOPL==1 + ZCOR + date planifiée ≤ now_ts.
+
+    Exclut :
+      - OT CRÉÉ ;
+      - OT LANC sans SOPL ;
+      - autres types d'ordre ;
+      - dates futures ou invalides/manquantes.
+
+    Population commune pour les KPI âge d'exécution (<1 mois / 1-3 mois /
+    >3 mois) et les anomalies correspondantes dans anomalies.py.
+    """
+    mask = (
+        (df["Statut OT"] == "LANC")
+        & (df["Contient SOPL"] == 1)
+        & (df["Type d'ordre"] == "ZCOR")
+        & (df["Date de début planifiée"].notna())
+        & (df["Date de début planifiée"] <= now_ts)
+    )
+    return df[mask].copy()
+
+
+# ──────────────────────────────────────────────
 # Calcul principal des KPI
 # ──────────────────────────────────────────────
 
@@ -144,15 +186,19 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
         an["TOTAL_OT"] == 0, 100.0, ckpi(an["OT_CLOTURES"], an["TOTAL_OT"])
     )
 
-    # ── Exécution (inchangé) ──
-    ex = cpiv(
-        df,
-        (df["Statut OT"] == "LANC") & (df["Contient SOPL"] == 1),
-        "aex", posts
-    )
-    for c in ["<1 mois", ">3 mois", "1 mois < <3 mois", "Inconnu"]:
+    # ── Exécution — NOUVELLE POPULATION : LANC + SOPL==1 + ZCOR + date ≤ now ──
+    # Population centralisée dans build_execution_population(), réutilisée
+    # par anomalies.py pour garantir une cohérence totale KPI / anomalies.
+    # Formules directes : <1 mois / Total * 100 (somme des 3 tranches = 100 %).
+    # "Inconnu" exclu : les dates invalides/futures sont déjà exclues par la
+    # population (notna() + <= now_ts), donc aex ne vaut jamais "Inconnu" ici.
+    df_exec = build_execution_population(df, now_ts)
+    ex = cpiv(df_exec, pd.Series(True, index=df_exec.index), "aex", posts)
+    for c in ["<1 mois", ">3 mois", "1 mois < <3 mois"]:
         ex[c] = ex.get(c, 0)
-    ex["Total"] = ex[["<1 mois", "1 mois < <3 mois", ">3 mois", "Inconnu"]].sum(axis=1)
+    # Total = somme des 3 tranches réelles seulement (pas d'"Inconnu").
+    ex["Total"] = ex[["<1 mois", "1 mois < <3 mois", ">3 mois"]].sum(axis=1)
+    # Pourcentages directs — si Total == 0 : résultat = 0 % (ckpi sz=0).
     ex["OT exécution <1 mois"] = ckpi(ex["<1 mois"], ex["Total"])
     ex["OT exécution >3 mois"] = ckpi(ex[">3 mois"], ex["Total"], 0)
     ex["OT exécution 1mois< <3mois"] = ckpi(ex["1 mois < <3 mois"], ex["Total"], 0)
@@ -299,29 +345,28 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     pv_cor["OT_COR_EGAL"] = ckpi(pv_cor["NON"], pv_cor["Total"])
     res["ot_cor_egal"] = pv_cor
 
-    # NOTE : le filtre d'exclusion ZU/Z4/ZR/ZP a été retiré ici. avf, tel
-    # que construit par prepare_data.py, est DÉJÀ restreint à ces mêmes
-    # types (avec Ordre vide) — un filtre d'exclusion supplémentaire ici
-    # viderait la population presque entièrement (107 → 0 lignes constaté
-    # sur données réelles). Voir prepare_data.py pour la définition d'avf.
-    avf = av.copy()
-    res['avf'] = avf
+    # ── Taux d'approbation des Avis — RESTREINT AUX AVIS ZC (demande explicite) ──
+    # Population : Type d'avis == "ZC" uniquement. La même fonction
+    # build_avis_zc_population() est réutilisée par anomalies.py pour garantir
+    # que KPI, anomalies, Plans d'Actions et tableau par poste utilisent
+    # EXACTEMENT la même population. avf (de prepare_data.py) est déjà
+    # pré-filtré ZC ; build_avis_zc_population() constitue la double sécurité.
+    avf_zc = build_avis_zc_population(av)
+    res['avf'] = avf_zc
     tca = pd.pivot_table(
-        avf, index="Poste travail princ.", columns="Statut utilisateur",
+        avf_zc, index="Poste travail princ.", columns="Statut utilisateur",
         values="Avis", aggfunc="count", fill_value=0
     ).reindex(posts, fill_value=0)
     for c in ["APRQ", "APRV", "APRV AVAU", "REJT"]:
         tca[c] = tca.get(c, 0)
-    # CORRIGÉ (2e bug identifié) : pd.pivot_table(columns="Statut
-    # utilisateur", ...) EXCLUT SILENCIEUSEMENT les lignes où ce champ
-    # est NaN — ces avis disparaissaient du dénominateur, gonflant le
-    # taux d'approbation. Total calculé via groupby DIRECT sur avf (qui
-    # ne fait AUCUNE distinction de statut, donc n'exclut rien), comme
-    # le fait déjà anomalies.py (avf_tot) — les deux sont maintenant
-    # cohérents.
-    total_reel = avf.groupby("Poste travail princ.")["Avis"].count().reindex(posts, fill_value=0)
+    # CORRIGÉ (bug identifié) : groupby direct pour le total afin d'éviter
+    # l'exclusion silencieuse des lignes à Statut utilisateur NaN par pivot_table.
+    total_reel = avf_zc.groupby("Poste travail princ.")["Avis"].count().reindex(posts, fill_value=0)
     tca["Total"] = total_reel
-    tca["Taux d'approbation des Avis"] = ckpi(tca["APRV"], tca["Total"])
+    # Si 0 avis ZC, taux = 0 % (ckpi sz=100 par défaut → on force 0 ici).
+    tca["Taux d'approbation des Avis"] = np.where(
+        tca["Total"] == 0, 0.0, ckpi(tca["APRV"], tca["Total"])
+    )
 
     # ── Performance Graissage — CORRIGÉ (2 bugs détectés lors de l'audit) ──
     # Bug 1 : le numérateur (Statut CLOT/TCLO) n'était pas contraint à
