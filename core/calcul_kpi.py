@@ -118,18 +118,11 @@ def match_exact_token(statut, codes: set) -> bool:
 # ──────────────────────────────────────────────
 
 def build_avis_zc_population(avdf: pd.DataFrame) -> pd.DataFrame:
-    """Filtre les avis sur Type d'avis == 'ZC' uniquement.
-
-    Population commune pour le KPI « Taux d'approbation des Avis »
+    """Population commune pour le KPI « Taux d'approbation des Avis »
     et les anomalies Avis dans anomalies.py.
+    Filtre ZU/Z4/ZR/ZP et ZC retiré (demande explicite) : tous les avis créés.
     """
-    return avdf[
-        avdf["Type d'avis"]
-        .astype(str)
-        .str.strip()
-        .str.upper()
-        .eq("ZC")
-    ].copy()
+    return avdf.copy()
 
 
 def build_execution_population(df: pd.DataFrame, now_ts=None) -> pd.DataFrame:
@@ -273,11 +266,11 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     pr["OT préparation >3 mois"] = ckpi(pr[">3 mois"], pr["Total"], 0)
     pr["OT préparation 1mois< <3mois"] = ckpi(pr["1 mois < <3 mois"], pr["Total"], 0)
 
-    # ── OT planification <1/1-3/>3 mois ──
-    # Base = POPULATION COMPLÈTE du Backlog planification (ZCOR + LANC + SOPL==0),
-    # CARACTERISE ET NON CARACTERISE confondus, répartie intégralement sur
-    # les 3 tranches d'âge sans filtre restrictif de date future.
-    pl = cpiv(_zcor_lanc_all, pd.Series(True, index=_zcor_lanc_all.index), "alp", posts)
+    # ── OT planification <1/1-3/>3 mois — NOUVELLE BASE : ANOMALIES NON CARACTÉRISÉES (demande explicite) ──
+    # Base = Population des OT lancés NON CARACTÉRISÉS en planification (ZCOR + LANC + SOPL==0 + non carac),
+    # répartie sur les 3 tranches d'âge. Le total correspond au total des anomalies de planification.
+    _zcor_lanc_non_carac = _zcor_lanc_all[_zcor_lanc_all["_plan_carac"] == "NON CARACTERISE"].copy()
+    pl = cpiv(_zcor_lanc_non_carac, pd.Series(True, index=_zcor_lanc_non_carac.index), "alp", posts)
     for c in ["<1 mois", ">3 mois", "1 mois < <3 mois"]:
         pl[c] = pl.get(c, 0)
     pl["Total"] = pl[["<1 mois", "1 mois < <3 mois", ">3 mois"]].sum(axis=1)
@@ -329,12 +322,8 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     pv_cor["OT_COR_EGAL"] = ckpi(pv_cor["NON"], pv_cor["Total"])
     res["ot_cor_egal"] = pv_cor
 
-    # ── Taux d'approbation des Avis — RESTREINT AUX AVIS ZC (demande explicite) ──
-    # Population : Type d'avis == "ZC" uniquement. La même fonction
-    # build_avis_zc_population() est réutilisée par anomalies.py pour garantir
-    # que KPI, anomalies, Plans d'Actions et tableau par poste utilisent
-    # EXACTEMENT la même population. avf (de prepare_data.py) est déjà
-    # pré-filtré ZC ; build_avis_zc_population() constitue la double sécurité.
+    # ── Taux d'approbation des Avis — FILTRE ZU/Z4/ZR/ZP ET ZC RETIRÉ (demande explicite) ──
+    # Population : Tous les avis créés sans ordre (filtre type retiré).
     avf_zc = build_avis_zc_population(av)
     res['avf'] = avf_zc
     tca = pd.pivot_table(
@@ -343,13 +332,11 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     ).reindex(posts, fill_value=0)
     for c in ["APRQ", "APRV", "APRV AVAU", "REJT"]:
         tca[c] = tca.get(c, 0)
-    # CORRIGÉ (bug identifié) : groupby direct pour le total afin d'éviter
-    # l'exclusion silencieuse des lignes à Statut utilisateur NaN par pivot_table.
     total_reel = avf_zc.groupby("Poste travail princ.")["Avis"].count().reindex(posts, fill_value=0)
     tca["Total"] = total_reel
-    # Si 0 avis ZC, taux = 0 % (ckpi sz=100 par défaut → on force 0 ici).
+    aprv_total = tca["APRV"] + tca["APRV AVAU"]
     tca["Taux d'approbation des Avis"] = np.where(
-        tca["Total"] == 0, 0.0, ckpi(tca["APRV"], tca["Total"])
+        tca["Total"] == 0, 0.0, ckpi(aprv_total, tca["Total"])
     )
 
     # ── Performance Graissage — CORRIGÉ (2 bugs détectés lors de l'audit) ──
@@ -448,7 +435,7 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
         "Performance Graissage": (g_df["_n"], g_df["_d"]),
         "Performance Inspection": (ins_df["_n"], ins_df["_d"]),
         "Performance Systématiques": (sys_df["_n"], sys_df["_d"]),
-        "Taux d'approbation des Avis": (tca["APRV"], tca["Total"]),
+        "Taux d'approbation des Avis": (aprv_total, tca["Total"]),
         "OT LANC ESTIME": (la["OUI"], la["Total"]),
         "Backlog préparation caractérisé": (pc["CARACTERISE"], pc["Total"]),
         "Backlog planification caractérisé": (plc["CARACTERISE"], plc["Total"]),
