@@ -426,7 +426,7 @@ def _calculer_sections_hse(_dfp, _avf, vp_tuple, date_str, sel_annee, sel_mois, 
         total = len(df)
         en_ot = int(df["Ordre"].notna().sum()) if "Ordre" in df.columns else 0
         if "Poste travail princ." in df.columns:
-            piv = df.groupby("Poste travail princ.").size().to_frame(name=titre)
+            piv = df.groupby("Poste travail princ.").size().reindex(vp, fill_value=0).to_frame(name=titre)
             b = _bar(piv, f"Affectation des {titre.lower()} par poste de travail",
                      {titre: couleur}, "Nombre d'avis")
             if b:
@@ -473,7 +473,7 @@ def _calculer_sections_hse(_dfp, _avf, vp_tuple, date_str, sel_annee, sel_mois, 
         total = len(df)
         avec_avis = int(df["Avis"].notna().sum()) if "Avis" in df.columns else 0
         if "Poste travail princ." in df.columns:
-            piv = pd.crosstab(df["Poste travail princ."], df["_Statut"])
+            piv = pd.crosstab(df["Poste travail princ."], df["_Statut"]).reindex(vp, fill_value=0)
             b = _bar(piv, f"{titre} par poste de travail et par statut", PALETTE_STATUT, "Nombre d'OT")
             if b:
                 buffers[f"bar_{cle}"] = b
