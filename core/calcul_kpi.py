@@ -132,24 +132,22 @@ def build_avis_zc_population(avdf: pd.DataFrame) -> pd.DataFrame:
     ].copy()
 
 
-def build_execution_population(df: pd.DataFrame, now_ts) -> pd.DataFrame:
-    """Population d'exécution : LANC + SOPL==1 + ZCOR + date planifiée ≤ now_ts.
+def build_execution_population(df: pd.DataFrame, now_ts=None) -> pd.DataFrame:
+    """Population d'exécution : LANC (contient) + Contient SOPL==1 + Type d'ordre ZCOR.
 
-    Exclut :
-      - OT CRÉÉ ;
-      - OT LANC sans SOPL ;
-      - autres types d'ordre ;
-      - dates futures ou invalides/manquantes.
+    Tous les OT de type ZCOR lancés contenant SOPL sont distribués sur les 3 tranches
+    d'âge d'exécution (<1 mois / 1-3 mois / >3 mois).
 
-    Population commune pour les KPI âge d'exécution (<1 mois / 1-3 mois /
-    >3 mois) et les anomalies correspondantes dans anomalies.py.
+    Population commune pour les KPI âge d'exécution et les anomalies
+    correspondantes dans anomalies.py.
     """
     mask = (
-        (df["Statut OT"] == "LANC")
+        (
+            (df["Statut OT"] == "LANC")
+            | df["Statut système"].fillna("").astype(str).str.contains("LANC", na=False)
+        )
         & (df["Contient SOPL"] == 1)
         & (df["Type d'ordre"] == "ZCOR")
-        & (df["Date de début planifiée"].notna())
-        & (df["Date de début planifiée"] <= now_ts)
     )
     return df[mask].copy()
 
@@ -217,17 +215,15 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
 
     # ── Backlog préparation caractérisé — NOUVELLE LOGIQUE (convenue) ──
     # Périmètre : Type d'ordre == "ZCOR", sur df_all (toutes dates).
+    # Statut système contient "CRÉÉ" (pas restreint au 1er mot).
     # Caractérisé = Statut utilisateur égal STRICTEMENT à ATPD/ATMR/ATER/ATRS/ATMO.
     _zcor_all = df_all[df_all["Type d'ordre"] == "ZCOR"].copy()
 
-    # AJOUTÉ (demande explicite) : le périmètre de la Préparation doit
-    # être ZCOR ET Statut système == CRÉÉ (symétrique à Planification,
-    # qui exige déjà ZCOR ET Statut système == LANC ci-dessous). Cette
-    # restriction est appliquée à une COPIE dédiée (_zcor_cree_all) pour
-    # ne pas restreindre _zcor_all, dont dérive aussi la population
-    # Planification (ZCOR seul, puis filtrée sur LANC séparément).
     _zcor_cree_all = _zcor_all[
-        _zcor_all["Statut système"].fillna("").astype(str).str.strip().str.split().str[0] == "CRÉÉ"
+        (
+            (_zcor_all["Statut OT"] == "CRÉÉ")
+            | _zcor_all["Statut système"].fillna("").astype(str).str.contains("CRÉÉ|CREE|CRÉE", regex=True, na=False)
+        )
     ].copy()
     _zcor_cree_all["_prep_carac"] = np.where(
         _zcor_cree_all["Statut utilisateur"].apply(lambda x: match_exact_token(x, CODES_PREP_EXACT)),
@@ -243,11 +239,13 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     pc["Backlog préparation caractérisé"] = ckpi(pc["CARACTERISE"], pc["Total"])
 
     # ── Backlog planification caractérisé — NOUVELLE LOGIQUE (convenue) ──
-    # Périmètre : ZCOR ET Statut système == LANC, sur df_all.
+    # Périmètre : ZCOR ET Statut système contient "LANC" ET Contient SOPL == 0, sur df_all.
     # Caractérisé = Statut utilisateur égal STRICTEMENT à ATEI/ATAL/ATAS/AGAR/ATHS.
-    # Périmètre planification : ZCOR ET Statut système == LANC ET Contient SOPL == 0
     _zcor_lanc_all = _zcor_all[
-        (_zcor_all["Statut système"].fillna("").astype(str).str.strip().str.split().str[0] == "LANC")
+        (
+            (_zcor_all["Statut OT"] == "LANC")
+            | _zcor_all["Statut système"].fillna("").astype(str).str.contains("LANC", na=False)
+        )
         & (_zcor_all["Contient SOPL"] == 0)
     ].copy()
     _zcor_lanc_all["_plan_carac"] = np.where(
@@ -263,40 +261,26 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     plc["Total"] = plc["CARACTERISE"] + plc["NON CARACTERISE"]
     plc["Backlog planification caractérisé"] = ckpi(plc["CARACTERISE"], plc["Total"])
 
-    # ── OT préparation <1/1-3/>3 mois — NOUVELLE LOGIQUE (convenue) ──
-    # Base = OT NON CARACTERISE du Backlog préparation ci-dessus (ZCOR +
-    # Statut=CRÉÉ), répartis selon leur âge ("ap" = depuis "Créé le").
-    # ── OT préparation <1/1-3/>3 mois — CONFIRMÉ (clarification explicite) ──
-    # Base = uniquement la part NON CARACTERISE du Backlog préparation
-    # (ZCOR + CRÉÉ + non caractérisé), répartie selon l'âge ("ap" = depuis
-    # "Créé le"). La somme des 3 tranches d'âge est donc égale au nombre
-    # de NON CARACTERISE — PAS au Total (caractérisé + non caractérisé).
-    # ── OT préparation <1/1-3/>3 mois — CORRIGÉ (précision explicite) ──
+    # ── OT préparation <1/1-3/>3 mois ──
     # Base = POPULATION COMPLÈTE du Backlog préparation (ZCOR + CRÉÉ),
-    # CARACTERISE ET NON CARACTERISE confondus, répartie selon l'âge
-    # ("ap" = jours depuis "Créé le"). Ne dépend pas de "Date de début
-    # planifiée".
+    # CARACTERISE ET NON CARACTERISE confondus, répartie intégralement sur
+    # les 3 tranches d'âge.
     pr = cpiv(_zcor_cree_all, pd.Series(True, index=_zcor_cree_all.index), "ap", posts)
-    for c in ["<1 mois", ">3 mois", "1 mois < <3 mois", "Inconnu"]:
+    for c in ["<1 mois", ">3 mois", "1 mois < <3 mois"]:
         pr[c] = pr.get(c, 0)
-    pr["Total"] = pr[["<1 mois", "1 mois < <3 mois", ">3 mois", "Inconnu"]].sum(axis=1)
+    pr["Total"] = pr[["<1 mois", "1 mois < <3 mois", ">3 mois"]].sum(axis=1)
     pr["OT préparation <1 mois"] = ckpi(pr["<1 mois"], pr["Total"])
     pr["OT préparation >3 mois"] = ckpi(pr[">3 mois"], pr["Total"], 0)
     pr["OT préparation 1mois< <3mois"] = ckpi(pr["1 mois < <3 mois"], pr["Total"], 0)
 
-    # ── OT planification <1/1-3/>3 mois — même logique, sur "alp" ──
-    # ── OT planification <1/1-3/>3 mois — même principe, sur "alp" ──
-    # ── OT planification <1/1-3/>3 mois — CORRIGÉ (précision explicite) ──
-    # Base = POPULATION COMPLÈTE du Backlog planification (ZCOR + LANC +
-    # SOPL==0), CARACTERISE ET NON CARACTERISE confondus, répartie selon
-    # l'âge ("alp" = depuis "Date de début planifiée"). NOUVEAU : restreint
-    # aux OT dont "Date de début planifiée" est déjà passée (<= aujourd'hui)
-    # — un OT planifié dans le futur n'a pas de sens à classer par "retard".
-    _zcor_lanc_age = _zcor_lanc_all[_zcor_lanc_all["Date de début planifiée"] <= now_ts]
-    pl = cpiv(_zcor_lanc_age, pd.Series(True, index=_zcor_lanc_age.index), "alp", posts)
-    for c in ["<1 mois", ">3 mois", "1 mois < <3 mois", "Inconnu"]:
+    # ── OT planification <1/1-3/>3 mois ──
+    # Base = POPULATION COMPLÈTE du Backlog planification (ZCOR + LANC + SOPL==0),
+    # CARACTERISE ET NON CARACTERISE confondus, répartie intégralement sur
+    # les 3 tranches d'âge sans filtre restrictif de date future.
+    pl = cpiv(_zcor_lanc_all, pd.Series(True, index=_zcor_lanc_all.index), "alp", posts)
+    for c in ["<1 mois", ">3 mois", "1 mois < <3 mois"]:
         pl[c] = pl.get(c, 0)
-    pl["Total"] = pl[["<1 mois", "1 mois < <3 mois", ">3 mois", "Inconnu"]].sum(axis=1)
+    pl["Total"] = pl[["<1 mois", "1 mois < <3 mois", ">3 mois"]].sum(axis=1)
     pl["OT planification <1 mois"] = ckpi(pl["<1 mois"], pl["Total"])
     pl["OT planification >3 mois"] = ckpi(pl[">3 mois"], pl["Total"], 0)
     pl["OT planification 1mois< <3mois"] = ckpi(pl["1 mois < <3 mois"], pl["Total"], 0)
