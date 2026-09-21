@@ -19,11 +19,6 @@ st.set_page_config(
     initial_sidebar_state="expanded",
 )
 
-
-# ============================================================
-# MODE HSE UNIQUEMENT
-# ============================================================
-
 HSE_ONLY = True
 
 
@@ -34,7 +29,6 @@ HSE_ONLY = True
 st.markdown(
     """
     <style>
-
     .main-title {
         font-size: 30px;
         font-weight: 800;
@@ -64,7 +58,6 @@ st.markdown(
         font-weight: 600;
         margin-bottom: 15px;
     }
-
     </style>
     """,
     unsafe_allow_html=True,
@@ -76,71 +69,46 @@ st.markdown(
 # ============================================================
 
 try:
-
     from core.prepare_data import (
         prepare_data,
         get_date_from_file,
     )
 
 except Exception as e:
-
     st.error(
-        f"""
-        ❌ Erreur lors du chargement de `core.prepare_data`.
-
-        **Détail :**
-        `{e}`
-        """
+        f"Erreur lors du chargement de core.prepare_data : {e}"
     )
-
     st.stop()
 
 
 # ============================================================
-# IMPORT DYNAMIQUE DU MODULE HSE
+# IMPORT MODULE HSE
 # ============================================================
 
 try:
-
     hse_module = importlib.import_module(
         "pages.suivi_hse"
     )
 
 except Exception as e:
-
     st.error(
-        f"""
-        ❌ Impossible de charger `pages.suivi_hse`.
-
-        **Détail :**
-        `{e}`
-        """
+        f"Impossible de charger pages.suivi_hse : {e}"
     )
-
     st.stop()
 
 
 # ============================================================
-# VERIFICATION DE LA FONCTION HSE
+# VERIFICATION FONCTION HSE
 # ============================================================
 
 if not hasattr(
     hse_module,
     "render_suivi_hse_tab"
 ):
-
     st.error(
-        """
-        ❌ La fonction
-
-        `render_suivi_hse_tab`
-
-        n'existe pas dans :
-
-        `pages/suivi_hse.py`
-        """
+        "La fonction render_suivi_hse_tab "
+        "n'existe pas dans pages/suivi_hse.py."
     )
-
     st.stop()
 
 
@@ -150,11 +118,10 @@ render_suivi_hse_tab = (
 
 
 # ============================================================
-# SPLASH SCREEN HSE
+# SPLASH SCREEN
 # ============================================================
 
 if "hse_affiche" not in st.session_state:
-
     st.session_state.hse_affiche = False
 
 
@@ -167,9 +134,7 @@ if not st.session_state.hse_affiche:
             margin-top:100px;
         ">
 
-        <div style="
-            font-size:70px;
-        ">
+        <div style="font-size:70px;">
             🦺
         </div>
 
@@ -209,15 +174,12 @@ if not st.session_state.hse_affiche:
 
 
 # ============================================================
-# DATE DU FICHIER
+# DATE
 # ============================================================
 
 try:
-
     fichier_date = get_date_from_file()
-
 except Exception:
-
     fichier_date = ""
 
 
@@ -251,88 +213,62 @@ with st.sidebar:
 
     st.markdown("## 🦺 Navigation")
 
-    st.success(
-        "Mode HSE uniquement"
-    )
+    st.success("Mode HSE uniquement")
 
     st.markdown("---")
 
     st.markdown(
         """
-        ### ⚙️ Mode actuel
+        ### Modules désactivés
 
-        Les modules suivants sont temporairement désactivés :
+        ❌ Calcul KPI  
+        ❌ Scores Performance  
+        ❌ Scores Qualité  
+        ❌ Anomalies  
+        ❌ Plan d'action  
+        ❌ Historique  
+        ❌ Variations  
+        ❌ Backlog KPI  
+        ❌ Fréquence Maintenance  
+        ❌ Export KPI  
 
-        - ❌ Calcul des KPI
-        - ❌ Scores Performance
-        - ❌ Scores Qualité
-        - ❌ Calcul des anomalies
-        - ❌ Plan d'action
-        - ❌ Historique
-        - ❌ Variations
-        - ❌ Backlog KPI
-        - ❌ Fréquence Maintenance
-        - ❌ Export KPI
+        ### Module actif
 
-        Module actif :
-
-        - 🦺 **Suivi HSE**
+        🦺 **Suivi HSE**
         """
     )
 
     if fichier_date:
-
         st.markdown("---")
-
         st.caption(
             f"📅 Date fichier : **{fichier_date}**"
         )
 
 
 # ============================================================
-# CHARGEMENT DES FICHIERS
+# FICHIERS
 # ============================================================
 
 ot_path = "ot.xlsx"
 avis_path = "avis.xlsx"
 
 
-# ------------------------------------------------------------
-# Vérification OT
-# ------------------------------------------------------------
-
 if not os.path.exists(ot_path):
-
     st.error(
-        f"""
-        ❌ Le fichier `{ot_path}` est introuvable.
-
-        Placez `ot.xlsx` à la racine du projet.
-        """
+        "Le fichier ot.xlsx est introuvable."
     )
-
     st.stop()
 
 
-# ------------------------------------------------------------
-# Vérification AVIS
-# ------------------------------------------------------------
-
 if not os.path.exists(avis_path):
-
     st.error(
-        f"""
-        ❌ Le fichier `{avis_path}` est introuvable.
-
-        Placez `avis.xlsx` à la racine du projet.
-        """
+        "Le fichier avis.xlsx est introuvable."
     )
-
     st.stop()
 
 
 # ============================================================
-# LECTURE DES FICHIERS
+# LECTURE FICHIERS
 # ============================================================
 
 try:
@@ -341,33 +277,25 @@ try:
         ot_path,
         "rb"
     ) as f:
-
         ot_bytes = f.read()
-
 
     with open(
         avis_path,
         "rb"
     ) as f:
-
         av_bytes = f.read()
-
 
 except Exception as e:
 
     st.error(
-        f"""
-        ❌ Erreur de lecture des fichiers Excel.
-
-        `{e}`
-        """
+        f"Erreur pendant la lecture des fichiers Excel : {e}"
     )
 
     st.stop()
 
 
 # ============================================================
-# FONCTION DE PREPARATION HSE
+# PREPARATION DONNEES
 # ============================================================
 
 @st.cache_data(
@@ -387,7 +315,7 @@ def prepare_hse_data(
 
 
 # ============================================================
-# PREPARATION DES DONNEES
+# EXECUTION PREPARE DATA
 # ============================================================
 
 try:
@@ -401,13 +329,7 @@ try:
 except Exception as e:
 
     st.error(
-        f"""
-        ❌ Erreur pendant la préparation des données HSE.
-
-        **Détail :**
-
-        `{e}`
-        """
+        f"Erreur pendant la préparation des données HSE : {e}"
     )
 
     st.exception(e)
@@ -416,8 +338,17 @@ except Exception as e:
 
 
 # ============================================================
-# VERIFICATION DU RESULTAT
+# VERIFICATION RESULTAT
 # ============================================================
+
+if result is None:
+
+    st.error(
+        "prepare_data() n'a retourné aucune donnée."
+    )
+
+    st.stop()
+
 
 if not isinstance(
     result,
@@ -425,19 +356,7 @@ if not isinstance(
 ):
 
     st.error(
-        """
-        ❌ `prepare_data()` ne retourne pas le résultat attendu.
-
-        Le résultat attendu est :
-
-        ```text
-        df_full
-        av_full
-        apm
-        now_ts
-        avis_complet_full
-        ```
-        """
+        "prepare_data() ne retourne pas un tuple."
     )
 
     st.stop()
@@ -446,19 +365,15 @@ if not isinstance(
 if len(result) < 5:
 
     st.error(
-        f"""
-        ❌ `prepare_data()` retourne seulement
-        **{len(result)} éléments**.
-
-        Il faut au minimum 5 éléments.
-        """
+        f"prepare_data() retourne {len(result)} "
+        "éléments alors que 5 sont attendus."
     )
 
     st.stop()
 
 
 # ============================================================
-# RECUPERATION DES DONNEES
+# RECUPERATION
 # ============================================================
 
 df_full = result[0]
@@ -473,10 +388,183 @@ avis_complet_full = result[4]
 
 
 # ============================================================
-# SECURITE DATAFRAME OT
+# VERIFICATION OT
 # ============================================================
 
 if df_full is None:
 
     st.error(
-        "❌ Les données OT sont vides.
+        "Les données OT sont vides."
+    )
+
+    st.stop()
+
+
+if not isinstance(
+    df_full,
+    pd.DataFrame
+):
+
+    st.error(
+        "df_full n'est pas un DataFrame."
+    )
+
+    st.stop()
+
+
+if df_full.empty:
+
+    st.warning(
+        "Le fichier OT ne contient aucune donnée."
+    )
+
+    st.stop()
+
+
+# ============================================================
+# VERIFICATION AVIS
+# ============================================================
+
+if av_full is None:
+    av_full = pd.DataFrame()
+
+
+if not isinstance(
+    av_full,
+    pd.DataFrame
+):
+
+    av_full = pd.DataFrame(
+        av_full
+    )
+
+
+# ============================================================
+# AVIS COMPLETS
+# ============================================================
+
+if avis_complet_full is None:
+
+    avis_complet_full = av_full.copy()
+
+
+if not isinstance(
+    avis_complet_full,
+    pd.DataFrame
+):
+
+    avis_complet_full = pd.DataFrame(
+        avis_complet_full
+    )
+
+
+# ============================================================
+# LISTE POSTES
+# ============================================================
+
+if apm is None:
+
+    apm = []
+
+
+try:
+
+    vp = list(apm)
+
+except Exception:
+
+    vp = []
+
+
+# ============================================================
+# SI APM VIDE
+# ============================================================
+
+if not vp:
+
+    if "Poste travail princ." in df_full.columns:
+
+        vp = sorted(
+            df_full[
+                "Poste travail princ."
+            ]
+            .dropna()
+            .astype(str)
+            .unique()
+            .tolist()
+        )
+
+    else:
+
+        vp = []
+
+
+# ============================================================
+# SIDEBAR STATISTIQUES
+# ============================================================
+
+with st.sidebar:
+
+    st.markdown("---")
+
+    st.markdown("### 📊 Données HSE")
+
+    st.metric(
+        "Nombre OT",
+        f"{len(df_full):,}"
+    )
+
+    st.metric(
+        "Nombre Avis",
+        f"{len(av_full):,}"
+    )
+
+    st.metric(
+        "Nombre Postes",
+        f"{len(vp):,}"
+    )
+
+
+# ============================================================
+# RENDU HSE
+# ============================================================
+
+try:
+
+    render_suivi_hse_tab(
+        df_full,
+        avis_complet_full,
+        vp,
+        fichier_date
+    )
+
+except Exception as e:
+
+    st.error(
+        f"Erreur dans le module Suivi HSE : {e}"
+    )
+
+    st.exception(e)
+
+    st.stop()
+
+
+# ============================================================
+# FOOTER
+# ============================================================
+
+st.markdown(
+    """
+    <div class="footer">
+        Bureau Méthodes Maroc Chimie — 2026
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+# ============================================================
+# FIN
+# ============================================================
+
+st.stop()
