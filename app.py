@@ -1,79 +1,153 @@
 # -*- coding: utf-8 -*-
 
-import locale
 import os
 import time
 import traceback
+import importlib
+import locale
 
-import numpy as np
 import pandas as pd
 import streamlit as st
 
 
 # ============================================================
-# CONFIGURATION STREAMLIT
+# CONFIGURATION
 # ============================================================
 
 st.set_page_config(
-    layout="wide",
     page_title="Suivi HSE",
-    initial_sidebar_state="expanded"
+    page_icon="🦺",
+    layout="wide",
+    initial_sidebar_state="expanded",
 )
-
 
 # ============================================================
 # MODE HSE UNIQUEMENT
 # ============================================================
 #
-# True  = uniquement Suivi HSE
-# False = ancien dashboard KPI
+# True  -> uniquement Suivi HSE
+# False -> ancien dashboard KPI
 #
-# Pour le moment on laisse True afin de réduire fortement
-# la charge CPU sur Streamlit Cloud.
+# Pour le moment : True
 # ============================================================
 
 HSE_ONLY = True
 
 
 # ============================================================
-# IMPORTS
+# IMPORT DU MODULE PREPARE DATA
 # ============================================================
-
-_IMPORT_ERROR = None
 
 try:
 
-    # Préparation des données nécessaire au module HSE
     from core.prepare_data import (
         prepare_data,
         get_date_from_file,
     )
 
-    # Module HSE
-    from pages.suivi_hse import (
-        render_suivi_hse_tab,
+except Exception:
+
+    st.error(
+        "❌ Impossible de charger `core.prepare_data`."
+    )
+
+    st.code(
+        traceback.format_exc(),
+        language="python"
+    )
+
+    st.stop()
+
+
+# ============================================================
+# IMPORT DYNAMIQUE DU MODULE HSE
+# ============================================================
+#
+# On évite :
+#
+# from pages.suivi_hse import render_suivi_hse_tab
+#
+# afin d'avoir un diagnostic beaucoup plus clair si le fichier
+# HSE n'est pas la bonne version sur GitHub.
+# ============================================================
+
+try:
+
+    hse_module = importlib.import_module(
+        "pages.suivi_hse"
     )
 
 except Exception:
-    _IMPORT_ERROR = traceback.format_exc()
+
+    st.error(
+        "❌ Impossible de charger `pages.suivi_hse`."
+    )
+
+    st.code(
+        traceback.format_exc(),
+        language="python"
+    )
+
+    st.stop()
+
+
+# ============================================================
+# VERIFICATION DE LA FONCTION HSE
+# ============================================================
+
+if not hasattr(
+    hse_module,
+    "render_suivi_hse_tab"
+):
+
+    st.error(
+        "❌ La fonction `render_suivi_hse_tab()` "
+        "est absente de `pages/suivi_hse.py`."
+    )
+
+    st.markdown(
+        """
+        ### Vérification à faire dans GitHub
+
+        Le fichier doit contenir exactement une fonction de ce type :
+
+        ```python
+        def render_suivi_hse_tab(dfp, avf, vp, date_str=""):
+            ...
+        ```
+
+        Vérifiez également que le fichier déployé est bien :
+
+        `pages/suivi_hse.py`
+        """
+    )
+
+    st.stop()
+
+
+render_suivi_hse_tab = (
+    hse_module.render_suivi_hse_tab
+)
 
 
 # ============================================================
 # CSS
 # ============================================================
 
-def inject_hse_css():
+def inject_css():
 
     st.markdown(
         """
         <style>
 
-        /* Cacher la navigation Streamlit */
-        [data-testid="stSidebarNav"] {
-            display: none !important;
+        /* ================================================== */
+        /* GENERAL                                            */
+        /* ================================================== */
+
+        .stApp {
+            background-color: #f7f9fb;
         }
 
-        /* Cacher certains éléments Streamlit */
         [data-testid="stToolbar"] {
             display: none !important;
         }
@@ -86,10 +160,6 @@ def inject_hse_css():
             display: none !important;
         }
 
-        [data-testid="stDecoration"] {
-            display: none !important;
-        }
-
         #MainMenu {
             visibility: hidden !important;
         }
@@ -98,30 +168,32 @@ def inject_hse_css():
             visibility: hidden !important;
         }
 
-        /* Fond général */
-        .stApp {
-            background-color: #f7f9fb;
+        /* ================================================== */
+        /* BADGE MODE HSE                                     */
+        /* ================================================== */
+
+        .hse-mode {
+            background: #ecfdf5;
+            border: 1px solid #10b981;
+            border-radius: 10px;
+            padding: 10px 16px;
+            margin-bottom: 15px;
+            color: #047857;
+            font-weight: 700;
+            text-align: center;
         }
 
-        /* Footer */
+        /* ================================================== */
+        /* FOOTER                                             */
+        /* ================================================== */
+
         .hse-footer {
             margin-top: 40px;
             padding: 15px;
             text-align: center;
-            color: #777;
+            color: #64748b;
             font-size: 13px;
-            border-top: 1px solid #ddd;
-        }
-
-        /* Badge mode HSE */
-        .hse-mode {
-            background: #e8f5e9;
-            border: 1px solid #81c784;
-            border-radius: 8px;
-            padding: 8px 14px;
-            margin-bottom: 15px;
-            color: #2e7d32;
-            font-weight: 600;
+            border-top: 1px solid #e2e8f0;
         }
 
         </style>
@@ -131,15 +203,17 @@ def inject_hse_css():
 
 
 # ============================================================
-# SPLASH SCREEN HSE
+# SPLASH SCREEN
 # ============================================================
 
-def render_hse_splash():
+def render_splash():
 
-    if st.session_state.get("hse_affiche", False):
+    if st.session_state.get(
+        "hse_splash_done",
+        False
+    ):
         return
 
-    # On évite de refaire le splash à chaque rerun
     st.markdown(
         """
         <div style="
@@ -150,8 +224,8 @@ def render_hse_splash():
         ">
 
             <div style="
-                width:850px;
-                padding:60px;
+                width:800px;
+                padding:55px;
                 border-radius:25px;
                 background:
                     linear-gradient(
@@ -177,12 +251,12 @@ def render_hse_splash():
                     font-weight:900;
                     margin-bottom:10px;
                 ">
-                    HSE
+                    SUIVI HSE
                 </h1>
 
                 <p style="
                     color:#d1d5db;
-                    font-size:20px;
+                    font-size:19px;
                     letter-spacing:2px;
                 ">
                     SÉCURITÉ · SANTÉ · ENVIRONNEMENT
@@ -195,11 +269,11 @@ def render_hse_splash():
                             #f6e05e,
                             #ed8936
                         );
-                    padding:30px;
+                    padding:25px;
                     border-radius:18px;
-                    margin-top:35px;
+                    margin-top:30px;
                     color:#1a202c;
-                    font-size:27px;
+                    font-size:24px;
                     font-weight:700;
                 ">
                     Aucun travail n'est plus urgent
@@ -207,9 +281,9 @@ def render_hse_splash():
                 </div>
 
                 <div style="
-                    margin-top:40px;
+                    margin-top:35px;
                     color:#9ca3af;
-                    font-size:15px;
+                    font-size:14px;
                 ">
                     Chargement du suivi HSE...
                 </div>
@@ -221,11 +295,10 @@ def render_hse_splash():
         unsafe_allow_html=True
     )
 
-    # Ancien délai de 6 secondes :
-    # on le réduit pour éviter une attente inutile.
+    # Petit délai uniquement pour le splash
     time.sleep(2)
 
-    st.session_state.hse_affiche = True
+    st.session_state.hse_splash_done = True
 
     st.rerun()
 
@@ -236,10 +309,10 @@ def render_hse_splash():
 # CHARGEMENT DES FICHIERS
 # ============================================================
 
-def load_input_files():
+def load_files():
 
     ot_bytes = None
-    av_bytes = None
+    avis_bytes = None
 
     # --------------------------------------------------------
     # OT
@@ -249,13 +322,17 @@ def load_input_files():
 
         try:
 
-            with open("ot.xlsx", "rb") as f:
+            with open(
+                "ot.xlsx",
+                "rb"
+            ) as f:
+
                 ot_bytes = f.read()
 
         except Exception as e:
 
             st.error(
-                f"❌ Impossible de lire `ot.xlsx` : {e}"
+                f"❌ Erreur lecture `ot.xlsx` : {e}"
             )
 
     # --------------------------------------------------------
@@ -266,35 +343,53 @@ def load_input_files():
 
         try:
 
-            with open("avis.xlsx", "rb") as f:
-                av_bytes = f.read()
+            with open(
+                "avis.xlsx",
+                "rb"
+            ) as f:
+
+                avis_bytes = f.read()
 
         except Exception as e:
 
             st.error(
-                f"❌ Impossible de lire `avis.xlsx` : {e}"
+                f"❌ Erreur lecture `avis.xlsx` : {e}"
             )
 
-    return ot_bytes, av_bytes
+    return ot_bytes, avis_bytes
 
 
 # ============================================================
-# PREPARATION DES DONNEES HSE
+# PREPARATION HSE
+# ============================================================
+#
+# On garde uniquement prepare_data().
+#
+# Aucun :
+# calc_kpis()
+# build_ano_map()
+# historique
+# score
+# plan d'action
+# export KPI
+# etc.
+#
+# Cela réduit fortement la charge CPU.
 # ============================================================
 
 @st.cache_data(
     show_spinner="Préparation des données HSE...",
-    max_entries=4
+    max_entries=2
 )
 def prepare_hse_data(
     ot_bytes,
-    av_bytes,
+    avis_bytes,
     fichier_date
 ):
 
     return prepare_data(
         ot_bytes,
-        av_bytes,
+        avis_bytes,
         fichier_date
     )
 
@@ -306,70 +401,28 @@ def prepare_hse_data(
 def main():
 
     # ========================================================
-    # ERREUR IMPORT
-    # ========================================================
-
-    if _IMPORT_ERROR is not None:
-
-        st.error(
-            "❌ Erreur lors du chargement des modules."
-        )
-
-        st.code(
-            _IMPORT_ERROR,
-            language="python"
-        )
-
-        st.stop()
-
-
-    # ========================================================
-    # LOCALE
-    # ========================================================
-
-    try:
-
-        locale.setlocale(
-            locale.LC_ALL,
-            "fr_FR.UTF-8"
-        )
-
-    except Exception:
-
-        try:
-
-            locale.setlocale(
-                locale.LC_ALL,
-                "fr_FR"
-            )
-
-        except Exception:
-
-            pass
-
-
-    # ========================================================
     # CSS
     # ========================================================
 
-    inject_hse_css()
+    inject_css()
 
 
     # ========================================================
-    # SPLASH HSE
+    # SPLASH
     # ========================================================
 
-    render_hse_splash()
+    render_splash()
 
 
     # ========================================================
-    # TITRE
+    # BADGE
     # ========================================================
 
     st.markdown(
         """
         <div class="hse-mode">
-            🦺 MODE HSE UNIQUEMENT — Calculs KPI désactivés
+            🦺 MODE HSE UNIQUEMENT
+            — CALCULS KPI DÉSACTIVÉS
         </div>
         """,
         unsafe_allow_html=True
@@ -377,7 +430,43 @@ def main():
 
 
     # ========================================================
-    # DATE DU FICHIER
+    # SIDEBAR
+    # ========================================================
+
+    with st.sidebar:
+
+        st.markdown(
+            "## 🦺 Suivi HSE"
+        )
+
+        st.info(
+            "Le dashboard KPI est temporairement "
+            "désactivé afin de réduire la charge CPU."
+        )
+
+        st.markdown(
+            "---"
+        )
+
+        st.markdown(
+            "**Module actif :**"
+        )
+
+        st.success(
+            "🦺 Suivi HSE"
+        )
+
+        st.markdown(
+            "---"
+        )
+
+        st.caption(
+            "Mode temporaire HSE uniquement"
+        )
+
+
+    # ========================================================
+    # DATE EXTRACTION
     # ========================================================
 
     try:
@@ -393,14 +482,14 @@ def main():
 
 
     # ========================================================
-    # CHARGEMENT OT + AVIS
+    # CHARGEMENT OT / AVIS
     # ========================================================
 
-    ot_bytes, av_bytes = load_input_files()
+    ot_bytes, avis_bytes = load_files()
 
 
     # ========================================================
-    # VERIFICATION
+    # VERIFICATION OT
     # ========================================================
 
     if not ot_bytes:
@@ -410,47 +499,48 @@ def main():
         )
 
         st.info(
-            "Placez `ot.xlsx` à la racine du projet."
+            "Vérifiez que `ot.xlsx` est présent "
+            "à la racine du dépôt GitHub."
         )
 
         st.stop()
 
 
-    if not av_bytes:
+    # ========================================================
+    # VERIFICATION AVIS
+    # ========================================================
+
+    if not avis_bytes:
 
         st.error(
             "❌ Le fichier `avis.xlsx` est introuvable."
         )
 
         st.info(
-            "Placez `avis.xlsx` à la racine du projet."
+            "Vérifiez que `avis.xlsx` est présent "
+            "à la racine du dépôt GitHub."
         )
 
         st.stop()
 
 
     # ========================================================
-    # PREPARATION
+    # PREPARATION DES DONNEES
     # ========================================================
 
     try:
 
-        (
-            df_full,
-            av_full,
-            apm,
-            now_ts,
-            avis_complet_full
-        ) = prepare_hse_data(
+        result = prepare_hse_data(
             ot_bytes,
-            av_bytes,
+            avis_bytes,
             fichier_date
         )
 
-    except Exception as e:
+    except Exception:
 
         st.error(
-            "❌ Erreur lors de la préparation des données HSE."
+            "❌ Erreur pendant la préparation "
+            "des données HSE."
         )
 
         st.code(
@@ -462,10 +552,42 @@ def main():
 
 
     # ========================================================
-    # VERIFICATION DATAFRAME OT
+    # RECUPERATION DU RESULTAT
     # ========================================================
 
-    if df_full is None or df_full.empty:
+    try:
+
+        (
+            df_full,
+            av_full,
+            apm,
+            now_ts,
+            avis_complet_full
+        ) = result
+
+    except Exception:
+
+        st.error(
+            "❌ Format inattendu retourné par "
+            "`prepare_data()`."
+        )
+
+        st.write(
+            "Résultat retourné :",
+            type(result)
+        )
+
+        st.stop()
+
+
+    # ========================================================
+    # VERIFICATION DATA OT
+    # ========================================================
+
+    if (
+        df_full is None
+        or df_full.empty
+    ):
 
         st.warning(
             "⚠️ Aucune donnée OT disponible."
@@ -488,11 +610,59 @@ def main():
 
 
     # ========================================================
-    # FILTRAGE SECURITE
+    # INFORMATIONS TECHNIQUES
     # ========================================================
-    #
-    # On conserve ici les données préparées.
-    # Le module HSE réalise ensuite ses propres filtres.
+
+    with st.expander(
+        "ℹ️ Informations techniques",
+        expanded=False
+    ):
+
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+
+            st.metric(
+                "OT",
+                f"{len(df_full):,}"
+            )
+
+        with col2:
+
+            if (
+                avis_complet_full is not None
+                and hasattr(
+                    avis_complet_full,
+                    "__len__"
+                )
+            ):
+
+                st.metric(
+                    "Avis",
+                    f"{len(avis_complet_full):,}"
+                )
+
+            else:
+
+                st.metric(
+                    "Avis",
+                    "0"
+                )
+
+        with col3:
+
+            st.metric(
+                "Postes",
+                f"{len(vp):,}"
+            )
+
+        st.caption(
+            f"Date d'extraction : {fichier_date}"
+        )
+
+
+    # ========================================================
+    # RENDU HSE
     # ========================================================
 
     try:
@@ -504,10 +674,11 @@ def main():
             fichier_date
         )
 
-    except Exception as e:
+    except Exception:
 
         st.error(
-            "❌ Erreur dans le module Suivi HSE."
+            "❌ Erreur pendant l'affichage du "
+            "Suivi HSE."
         )
 
         st.code(
@@ -526,7 +697,7 @@ def main():
         """
         <div class="hse-footer">
             Bureau Méthodes Maroc Chimie 2026
-            — Mode HSE uniquement
+            — Suivi HSE
         </div>
         """,
         unsafe_allow_html=True
@@ -538,4 +709,5 @@ def main():
 # ============================================================
 
 if __name__ == "__main__":
+
     main()
