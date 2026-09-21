@@ -447,7 +447,12 @@ def main() -> None:
             for kpi in ALL_KPI:
                 actual  = float(poste_data.get(kpi, 100))
                 target  = CIBLE.get(kpi, 100)
-                nb_anom = int(ano_map.get(kpi, pd.Series()).get(poste, 0))
+                _raw_anom = ano_map.get(kpi, pd.Series()).get(poste, 0)
+                try:
+                    _f_anom = float(_raw_anom)
+                    nb_anom = 0 if (pd.isna(_f_anom) or _f_anom == float("inf") or _f_anom == float("-inf")) else int(_f_anom)
+                except (TypeError, ValueError):
+                    nb_anom = 0
                 lower   = is_lb(kpi)
                 ecart = (target - actual) if lower else (actual - target)
                 if nb_anom == 0:
