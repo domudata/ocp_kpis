@@ -23,7 +23,8 @@ def _backlogs_non_caracterises(dfp_all: pd.DataFrame, now_ts=None):
     zcor = dfp_all[dfp_all["Type d'ordre"] == "ZCOR"].copy()
 
     zcor_cree = zcor[
-        zcor["Statut système"].fillna("").astype(str).str.strip().str.split().str[0] == "CRÉÉ"
+        (zcor["Statut OT"] == "CRÉÉ")
+        | zcor["Statut système"].fillna("").astype(str).str.contains("CRÉÉ|CREE|CRÉE", regex=True, na=False)
     ]
     # CORRIGÉ (bug pandas identifié et reproduit) : sur un DataFrame déjà
     # VIDE (0 ligne), `~df["col"].apply(fonction)` peut renvoyer un
@@ -38,7 +39,10 @@ def _backlogs_non_caracterises(dfp_all: pd.DataFrame, now_ts=None):
         non_prep = zcor_cree[~zcor_cree["Statut utilisateur"].apply(lambda x: match_exact_token(x, CODES_PREP_EXACT))]
 
     zcor_lanc = zcor[
-        (zcor["Statut système"].fillna("").astype(str).str.strip().str.split().str[0] == "LANC")
+        (
+            (zcor["Statut OT"] == "LANC")
+            | zcor["Statut système"].fillna("").astype(str).str.contains("LANC", na=False)
+        )
         & (zcor["Contient SOPL"] == 0)
     ]
     if zcor_lanc.empty:
@@ -47,7 +51,7 @@ def _backlogs_non_caracterises(dfp_all: pd.DataFrame, now_ts=None):
         non_plan = zcor_lanc[~zcor_lanc["Statut utilisateur"].apply(lambda x: match_exact_token(x, CODES_PLAN_EXACT))]
 
     full_prep = zcor_cree
-    full_plan = zcor_lanc[zcor_lanc["Date de début planifiée"] <= now_ts] if now_ts is not None else zcor_lanc
+    full_plan = zcor_lanc
 
     return non_prep, non_plan, full_prep, full_plan
 
