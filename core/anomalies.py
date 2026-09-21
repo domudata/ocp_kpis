@@ -162,7 +162,14 @@ def build_anomaly_dfs(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
     exec_filt = (dfp["Statut OT"] == "LANC") & (dfp["Contient SOPL"] == 1)
     perf_filt = (dfp["Contient SOPL"] == 1) & (~dfp["Statut OT"].isin(["CLOT", "TCLO"]))
 
-    avf_filtre = avf[~avf["Type d'avis"].isin(["ZU", "Z4", "ZR", "ZP"])] if "Type d'avis" in avf.columns else avf
+    # CORRIGÉ (bug identifié) : filtre d'exclusion ZU/Z4/ZR/ZP retiré ici
+    # aussi — avf est DÉJÀ restreint à CES MÊMES types en amont dans
+    # prepare_data.py (voir la note équivalente dans calcul_kpi.py). Ce
+    # filtre d'exclusion, laissé par erreur, VIDAIT SYSTÉMATIQUEMENT la
+    # population (148 → 0 lignes constaté sur données réelles),
+    # rendant le détail "Taux d'approbation des Avis" indisponible bien
+    # que le compte d'anomalies (ano_map) soit correct.
+    avf_filtre = avf
 
     return {
         "TAUX_REALISATION_CORRECTIF/PT": dfp[(dfp["Nº appel pl.entret."].fillna(0) == 0) & (dfp["Contient SOPL"] == 1) & (~dfp["Statut OT"].isin(["CLOT", "TCLO"]))].copy(),
