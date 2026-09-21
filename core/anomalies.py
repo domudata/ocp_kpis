@@ -107,11 +107,13 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
 
     # ── Taux d'approbation des Avis — RESTREINT AUX AVIS ZC (demande explicite) ──
     # Même population que calc_kpis.py via build_avis_zc_population().
-    # anomalies = total ZC - approuvés ZC (statut APRV ou APRV AVAU).
+    # Anomalies = avis ZC ni approuvés (APRV / APRV AVAU) ni rejetés (REJT) :
+    # seuls les avis en attente d'approbation sont des anomalies.
     avf_zc = build_avis_zc_population(avf)
-    avf_tot = avf_zc.groupby("Poste travail princ.")["Avis"].count()
-    avf_aprv = avf_zc[avf_zc["Statut utilisateur"].isin(["APRV", "APRV AVAU"])].groupby("Poste travail princ.")["Avis"].count()
-    ano_map["Taux d'approbation des Avis"] = avf_tot.sub(avf_aprv, fill_value=0)
+    ano_map["Taux d'approbation des Avis"] = (
+        avf_zc[~avf_zc["Statut utilisateur"].isin(["APRV", "APRV AVAU", "REJT"])]
+        .groupby("Poste travail princ.")["Avis"].count()
+    )
 
     ano_map["OT LANC ESTIME"] = dfp[(dfp["Statut OT"] == "LANC") & (dfp["Contient SOPL"] == 1) & (dfp["Type d'ordre"] == "ZCOR") & (dfp["OT LANC ESTIME"] == "NON")].groupby("Poste travail princ.")["Ordre"].count()
 
@@ -197,8 +199,8 @@ def build_anomaly_dfs(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
         "Performance Graissage": dfp[perf_filt & (dfp["_tw_num"] == 350)].copy(),
         "Performance Inspection": dfp[perf_filt & (dfp["_tw_num"].isin([290, 300, 310])) & (dfp["Date de début planifiée"] <= now_ts)].copy(),
         "Performance Systématiques": dfp[perf_filt & (dfp["_tw_num"] == 360) & (dfp["Date de début planifiée"] <= now_ts)].copy(),
-        # Avis : MÊME POPULATION ZC que build_ano_map (non approuvés ZC).
-        "Taux d'approbation des Avis": avf_zc_det[~avf_zc_det["Statut utilisateur"].isin(["APRV", "APRV AVAU"])].copy(),
+        # Avis : MÊME POPULATION ZC que build_ano_map (en attente : ni APRV ni REJT).
+        "Taux d'approbation des Avis": avf_zc_det[~avf_zc_det["Statut utilisateur"].isin(["APRV", "APRV AVAU", "REJT"])].copy(),
         "OT LANC ESTIME": dfp[(dfp["Statut OT"] == "LANC") & (dfp["Contient SOPL"] == 1) & (dfp["Type d'ordre"] == "ZCOR") & (dfp["OT LANC ESTIME"] == "NON")].copy(),
         "Backlog préparation caractérisé": non_prep.copy(),
         "Backlog planification caractérisé": non_plan.copy(),
