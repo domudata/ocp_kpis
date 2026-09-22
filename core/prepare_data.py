@@ -218,9 +218,9 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
         )
 
     avf = raw_av[
-        (raw_av["Ordre"].isna() | (raw_av["Ordre"].astype(str).str.strip() == ""))
-        & raw_av["Type d'avis"].isin(["ZU", "Z4", "ZR", "ZP"])
-    ].copy()
+    (raw_av["Ordre"].isna() | (raw_av["Ordre"].astype(str).str.strip() == ""))
+    & ~raw_av["Type d'avis"].isin(["ZU", "Z4", "ZR", "ZP"])
+].copy()
 
     apm = sorted(
         df[
