@@ -219,7 +219,7 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
 
     avf = raw_av[
     (raw_av["Ordre"].isna() | (raw_av["Ordre"].astype(str).str.strip() == ""))
-    & ~raw_av["Type d'avis"].isin(["ZU", "Z4", "ZR", "ZP"])
+    & (raw_av["Type d'avis"].astype(str).str.strip() == "ZC")
 ].copy()
 
     apm = sorted(
