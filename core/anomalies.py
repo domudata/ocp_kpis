@@ -105,7 +105,7 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
     # NOTE : filtre ZU/Z4/ZR/ZP retiré (voir calcul_kpi.py) — avf est déjà
     # restreint à ces types en amont dans prepare_data.py.
     avf_tot = avf.groupby("Poste travail princ.")["Avis"].count()
-    avf_aprv = avf[avf["Statut utilisateur"].isin(["APRV", "APRV AVAU"])].groupby("Poste travail princ.")["Avis"].count()
+    avf_aprv = avf[avf["Statut utilisateur"].isin(["APRV", "APRV AVAU","REJE"])].groupby("Poste travail princ.")["Avis"].count()
     ano_map["Taux d'approbation des Avis"] = avf_tot.sub(avf_aprv, fill_value=0)
 
     ano_map["OT LANC ESTIME"] = dfp[(dfp["Statut OT"] == "LANC") & (dfp["Contient SOPL"] == 1) & (dfp["Type d'ordre"] == "ZCOR") & (dfp["OT LANC ESTIME"] == "NON")].groupby("Poste travail princ.")["Ordre"].count()
