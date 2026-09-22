@@ -217,10 +217,16 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
             df["Statut système"].fillna("").astype(str).str.strip().str.split().str[0]
         )
 
-    # MODIFIÉ : filtre ZU/Z4/ZR/ZP et ZC retiré sur les avis (demande explicite).
-    # Tous les avis créés sans ordre sont conservés.
+    # MODIFIÉ : filtre Statut système == AOUV (demande explicite).
+    # Filtre ZU/Z4/ZR/ZP retiré. Avis créés sans ordre et au statut système AOUV.
+    is_aouv = (
+        raw_av["Statut système"].fillna("").astype(str).str.contains("AOUV", na=False)
+        if "Statut système" in raw_av.columns
+        else pd.Series(True, index=raw_av.index)
+    )
     avf = raw_av[
         (raw_av["Ordre"].isna() | (raw_av["Ordre"].astype(str).str.strip() == ""))
+        & is_aouv
     ].copy()
 
     apm = sorted(
