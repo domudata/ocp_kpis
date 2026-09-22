@@ -98,8 +98,7 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
 
     # ── OT exécution <1/1-3/>3 mois — NOUVELLE POPULATION (demande explicite) ──
     # Même population que calc_kpis.py : LANC + SOPL==1 + ZCOR + date ≤ now.
-    # build_execution_population() garantit la cohérence totale KPI / anomalies.
-    df_exec_ano = build_execution_population(dfp, now_ts)
+    df_exec_ano = build_execution_population(dfp_all, now_ts)
     ano_map["OT exécution <1 mois"] = df_exec_ano[df_exec_ano["aex"] == "<1 mois"].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["OT exécution >3 mois"] = df_exec_ano[df_exec_ano["aex"] == ">3 mois"].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["OT exécution 1mois< <3mois"] = df_exec_ano[df_exec_ano["aex"] == "1 mois < <3 mois"].groupby("Poste travail princ.")["Ordre"].count()
@@ -175,8 +174,7 @@ def build_anomaly_dfs(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
 
     non_prep, non_plan, full_prep, full_plan = _backlogs_non_caracterises(dfp_all, now_ts)
 
-    # Population exécution — MÊME LOGIQUE que build_ano_map et calc_kpis.
-    df_exec_det = build_execution_population(dfp, now_ts)
+    df_exec_det = build_execution_population(dfp_all, now_ts)
 
     # Population Avis ZC — MÊME LOGIQUE que build_ano_map et calc_kpis.
     # avf reçu ici est déjà avf_zc (res['avf'] de calc_kpis via app.py) ;
