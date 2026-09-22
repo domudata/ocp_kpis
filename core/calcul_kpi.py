@@ -1,4 +1,4 @@
-# -*- coding: utf-8 -*-
+
 import numpy as np
 import pandas as pd
 
@@ -118,11 +118,31 @@ def match_exact_token(statut, codes: set) -> bool:
 # ──────────────────────────────────────────────
 
 def build_avis_zc_population(avdf: pd.DataFrame) -> pd.DataFrame:
-    """Population commune pour le KPI « Taux d'approbation des Avis »
-    et les anomalies Avis dans anomalies.py.
-    Filtre ZU/Z4/ZR/ZP et ZC retiré (demande explicite) : tous les avis créés.
+    """Population commune pour le KPI « Taux d'approbation des Avis ».
+
+    Règles :
+      - exclusion des types d'Avis ZU, Z4, ZR et ZP ;
+      - les autres types sont conservés ;
+      - la population APRV sert au numérateur ;
+      - le dénominateur du KPI est le total des OT CRÉÉ et non le total des Avis.
+
+    La fonction accepte les colonnes préparées par prepare_data.py :
+      _type_avis / _avis_type_exclu.
+    Elle reste rétrocompatible si ces colonnes n'existent pas.
     """
-    return avdf.copy()
+    av = avdf.copy()
+
+    if "_avis_type_exclu" in av.columns:
+        return av[~av["_avis_type_exclu"].fillna(False)].copy()
+
+    if "_type_avis" in av.columns:
+        types_exclus = {"ZU", "Z4", "ZR", "ZP"}
+        types = av["_type_avis"].fillna("").astype(str).str.strip().str.upper()
+        return av[~types.isin(types_exclus)].copy()
+
+    # Si la préparation n'a pas encore ajouté le type, on conserve la population
+    # afin de ne pas casser l'application.
+    return av.copy()
 
 
 def build_execution_population(df: pd.DataFrame, now_ts=None) -> pd.DataFrame:
@@ -136,12 +156,38 @@ def build_execution_population(df: pd.DataFrame, now_ts=None) -> pd.DataFrame:
     """
     mask = (
         (
-            (df["Statut OT"] == "LANC")
+            (df["Statut OT"].fillna("").astype(str).str.upper().str.strip() == "LANC")
             | df["Statut système"].fillna("").astype(str).str.contains("LANC", na=False)
         )
-        & (df["Contient SOPL"] == 1)
+        & (pd.to_numeric(df["Contient SOPL"], errors="coerce").fillna(0) == 1)
     )
     return df[mask].copy()
+
+
+def build_avis_anomalies_population(avdf: pd.DataFrame) -> pd.DataFrame:
+    """Population commune des anomalies Avis.
+
+    Une anomalie Avis est définie par :
+      - Statut système = AOUV
+      - Statut utilisateur = APRQ
+      - exclusion des types ZU, Z4, ZR et ZP
+    """
+    av = build_avis_zc_population(avdf)
+
+    statut_sys = (
+        av.get("Statut système", pd.Series("", index=av.index))
+        .fillna("").astype(str).str.upper().str.strip()
+    )
+    statut_usr = (
+        av.get("Statut utilisateur", pd.Series("", index=av.index))
+        .fillna("").astype(str).str.upper().str.strip()
+    )
+
+    mask = (
+        statut_sys.str.contains(r"\bAOUV\b", regex=True, na=False)
+        & statut_usr.str.contains(r"\bAPRQ\b", regex=True, na=False)
+    )
+    return av[mask].copy()
 
 
 # ──────────────────────────────────────────────
@@ -316,22 +362,57 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     pv_cor["OT_COR_EGAL"] = ckpi(pv_cor["NON"], pv_cor["Total"])
     res["ot_cor_egal"] = pv_cor
 
-    # ── Taux d'approbation des Avis — FILTRE ZU/Z4/ZR/ZP ET ZC RETIRÉ (demande explicite) ──
-    # Population : Tous les avis créés sans ordre (filtre type retiré).
+    # ── Taux d'approbation des Avis — NOUVELLE LOGIQUE ──
+    # Numérateur : Avis APRV (hors ZU/Z4/ZR/ZP).
+    # Dénominateur : TOTAL OT CRÉÉ, et NON le nombre total d'Avis.
+    # Le calcul reste par Poste de travail afin de conserver la granularité
+    # du dashboard.
     avf_zc = build_avis_zc_population(av)
     res['avf'] = avf_zc
-    tca = pd.pivot_table(
-        avf_zc, index="Poste travail princ.", columns="Statut utilisateur",
-        values="Avis", aggfunc="count", fill_value=0
-    ).reindex(posts, fill_value=0)
-    for c in ["APRQ", "APRV", "APRV AVAU", "REJT"]:
-        tca[c] = tca.get(c, 0)
-    total_reel = avf_zc.groupby("Poste travail princ.")["Avis"].count().reindex(posts, fill_value=0)
-    tca["Total"] = total_reel
-    aprv_total = tca["APRV"] + tca["APRV AVAU"]
-    tca["Taux d'approbation des Avis"] = np.where(
-        tca["Total"] == 0, 0.0, ckpi(aprv_total, tca["Total"])
+
+    # Avis APRV par poste. On accepte APRV et APRV AVAU comme auparavant,
+    # mais uniquement après exclusion des types ZU/Z4/ZR/ZP.
+    if not avf_zc.empty and "Poste travail princ." in avf_zc.columns:
+        _avis_statut = (
+            avf_zc.get("Statut utilisateur", pd.Series("", index=avf_zc.index))
+            .fillna("").astype(str).str.upper().str.strip()
+        )
+        _avis_aprv_mask = _avis_statut.str.contains(r"\bAPRV\b", regex=True, na=False)
+        aprv_par_poste = (
+            avf_zc.loc[_avis_aprv_mask]
+            .groupby("Poste travail princ.")["Avis"]
+            .count()
+            .reindex(posts, fill_value=0)
+        )
+    else:
+        aprv_par_poste = pd.Series(0, index=posts, dtype=float)
+
+    # Total OT CRÉÉ par Poste de travail. Compatibilité CRÉÉ/CREE.
+    _statut_ot_calc = (
+        df["Statut OT"].fillna("").astype(str).str.upper().str.strip()
     )
+    _ot_cree_mask = _statut_ot_calc.isin(["CRÉÉ", "CREE"])
+    ot_cree_par_poste = (
+        df.loc[_ot_cree_mask]
+        .groupby("Poste travail princ.")["Ordre"]
+        .count()
+        .reindex(posts, fill_value=0)
+    )
+
+    tca = pd.DataFrame(index=posts)
+    tca["APRV"] = aprv_par_poste.astype(float)
+    tca["Total OT CRÉÉ"] = ot_cree_par_poste.astype(float)
+    tca["Total"] = tca["Total OT CRÉÉ"]
+    tca["Taux d'approbation des Avis"] = np.where(
+        tca["Total OT CRÉÉ"] == 0,
+        0.0,
+        ckpi(tca["APRV"], tca["Total OT CRÉÉ"])
+    )
+    # Pour conserver les colonnes historiques éventuellement utilisées par
+    # l'interface ou les exports.
+    tca["APRQ"] = 0
+    tca["APRV AVAU"] = 0
+    tca["REJT"] = 0
 
     # ── Performance Graissage — CORRIGÉ (2 bugs détectés lors de l'audit) ──
     # Bug 1 : le numérateur (Statut CLOT/TCLO) n'était pas contraint à
@@ -429,7 +510,7 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
         "Performance Graissage": (g_df["_n"], g_df["_d"]),
         "Performance Inspection": (ins_df["_n"], ins_df["_d"]),
         "Performance Systématiques": (sys_df["_n"], sys_df["_d"]),
-        "Taux d'approbation des Avis": (aprv_total, tca["Total"]),
+        "Taux d'approbation des Avis": (tca["APRV"], tca["Total OT CRÉÉ"]),
         "OT LANC ESTIME": (la["OUI"], la["Total"]),
         "Backlog préparation caractérisé": (pc["CARACTERISE"], pc["Total"]),
         "Backlog planification caractérisé": (plc["CARACTERISE"], plc["Total"]),
