@@ -8,6 +8,86 @@ from core.calcul_kpi import (
 )
 
 
+# Types d'Avis exclus des calculs Avis
+TYPES_AVIS_EXCLUS = {"ZU", "Z4", "ZR", "ZP"}
+
+
+def _normaliser_type_avis(v) -> str:
+    if pd.isna(v):
+        return ""
+    return str(v).strip().upper()
+
+
+def _trouver_colonne_type_avis(df: pd.DataFrame):
+    candidats = [
+        "Type", "Type avis", "Type Avis", "Type d'avis", "Type d’Avis",
+        "Type de avis", "Type de Avis", "Type demande", "Type de demande",
+        "Catégorie", "Categorie",
+    ]
+    for c in candidats:
+        if c in df.columns:
+            return c
+
+    for c in df.columns:
+        n = str(c).strip().lower().replace("’", "'")
+        if (
+            n == "type"
+            or "type avis" in n
+            or "type d'avis" in n
+            or "type de avis" in n
+            or "type demande" in n
+            or "type de demande" in n
+        ):
+            return c
+    return None
+
+
+def _avis_hors_types_exclus(avdf: pd.DataFrame) -> pd.DataFrame:
+    """Population Avis utilisée pour le KPI et ses anomalies.
+
+    Les Avis ZU/Z4/ZR/ZP sont toujours exclus.
+    Si prepare_data.py a déjà créé _avis_type_exclu, on l'utilise.
+    Sinon, on détecte automatiquement la colonne Type d'Avis.
+    """
+    av = avdf.copy()
+
+    if "_avis_type_exclu" in av.columns:
+        return av[~av["_avis_type_exclu"].fillna(False)].copy()
+
+    col_type = _trouver_colonne_type_avis(av)
+    if col_type is None:
+        # Impossible d'identifier le type : ne pas inventer un filtre.
+        return av
+
+    types = av[col_type].apply(_normaliser_type_avis)
+    return av[~types.isin(TYPES_AVIS_EXCLUS)].copy()
+
+
+def _avis_anomalies_population(avdf: pd.DataFrame) -> pd.DataFrame:
+    """Anomalies Avis :
+       Statut système = AOUV
+       ET Statut utilisateur = APRQ
+       ET type Avis non ZU/Z4/ZR/ZP.
+    """
+    av = _avis_hors_types_exclus(avdf)
+
+    sys = (
+        av["Statut système"].fillna("").astype(str).str.upper().str.strip()
+        if "Statut système" in av.columns
+        else pd.Series("", index=av.index)
+    )
+    usr = (
+        av["Statut utilisateur"].fillna("").astype(str).str.upper().str.strip()
+        if "Statut utilisateur" in av.columns
+        else pd.Series("", index=av.index)
+    )
+
+    return av[
+        sys.str.contains(r"\bAOUV\b", regex=True, na=False)
+        & usr.str.contains(r"\bAPRQ\b", regex=True, na=False)
+    ].copy()
+
+
 def _backlogs_non_caracterises(dfp_all: pd.DataFrame, now_ts=None):
     """Reconstruit les populations Backlog préparation/planification.
 
@@ -108,12 +188,20 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
     ano_map["Performance Inspection"] = dfp[perf_filt & (dfp["_tw_num"].isin([290, 300, 310])) & (dfp["Date de début planifiée"] <= now_ts)].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["Performance Systématiques"] = dfp[perf_filt & (dfp["_tw_num"] == 360) & (dfp["Date de début planifiée"] <= now_ts)].groupby("Poste travail princ.")["Ordre"].count()
 
-    # ── Taux d'approbation des Avis — ANOMALIES = STATUT UTILISATEUR APRQ (demande explicite) ──
-    # Filtre ZU/Z4/ZR/ZP retiré. Anomalies = tous les avis en attente d'approbation (APRQ).
-    avf_zc = build_avis_zc_population(avf)
+    # ── Taux d'approbation des Avis ──
+    # ANOMALIES :
+    #   Statut système = AOUV
+    #   ET Statut utilisateur = APRQ
+    #   ET type Avis NOT IN ZU/Z4/ZR/ZP.
+    avf_avis = _avis_hors_types_exclus(
+        build_avis_zc_population(avf)
+    )
+    ano_avis = _avis_anomalies_population(avf_avis)
+
     ano_map["Taux d'approbation des Avis"] = (
-        avf_zc[avf_zc["Statut utilisateur"].fillna("").astype(str).str.contains("APRQ", case=False, na=False)]
-        .groupby("Poste travail princ.")["Avis"].count()
+        ano_avis
+        .groupby("Poste travail princ.")["Avis"]
+        .count()
     )
 
     ano_map["OT LANC ESTIME"] = dfp[(dfp["Statut OT"] == "LANC") & (dfp["Contient SOPL"] == 1) & (dfp["Type d'ordre"] == "ZCOR") & (dfp["OT LANC ESTIME"] == "NON")].groupby("Poste travail princ.")["Ordre"].count()
@@ -176,10 +264,11 @@ def build_anomaly_dfs(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
 
     df_exec_det = build_execution_population(dfp_all, now_ts)
 
-    # Population Avis ZC — MÊME LOGIQUE que build_ano_map et calc_kpis.
-    # avf reçu ici est déjà avf_zc (res['avf'] de calc_kpis via app.py) ;
-    # build_avis_zc_population() garantit la cohérence en double sécurité.
-    avf_zc_det = build_avis_zc_population(avf)
+    # Population Avis commune KPI/anomalies.
+    # Exclusion systématique ZU/Z4/ZR/ZP.
+    avf_zc_det = _avis_hors_types_exclus(
+        build_avis_zc_population(avf)
+    )
 
     perf_filt = (dfp["Contient SOPL"] == 1) & (~dfp["Statut OT"].isin(["CLOT", "TCLO"]))
 
@@ -192,15 +281,16 @@ def build_anomaly_dfs(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
         "OT planification <1 mois": non_plan[non_plan["alp"] == "<1 mois"].copy(),
         "OT planification >3 mois": non_plan[non_plan["alp"] == ">3 mois"].copy(),
         "OT planification 1mois< <3mois": non_plan[non_plan["alp"] == "1 mois < <3 mois"].copy(),
-        # Exécution : MÊME POPULATION que build_ano_map (LANC+SOPL+ZCOR+date≤now).
+        # Exécution : MÊME POPULATION que build_ano_map (LANC+SOPL==1,
+        # sans filtre Type d'ordre, Type de travail ou date).
         "OT exécution <1 mois": df_exec_det[df_exec_det["aex"] == "<1 mois"].copy(),
         "OT exécution >3 mois": df_exec_det[df_exec_det["aex"] == ">3 mois"].copy(),
         "OT exécution 1mois< <3mois": df_exec_det[df_exec_det["aex"] == "1 mois < <3 mois"].copy(),
         "Performance Graissage": dfp[perf_filt & (dfp["_tw_num"] == 350)].copy(),
         "Performance Inspection": dfp[perf_filt & (dfp["_tw_num"].isin([290, 300, 310])) & (dfp["Date de début planifiée"] <= now_ts)].copy(),
         "Performance Systématiques": dfp[perf_filt & (dfp["_tw_num"] == 360) & (dfp["Date de début planifiée"] <= now_ts)].copy(),
-        # Avis : ANOMALIES = STATUT UTILISATEUR APRQ (demande explicite).
-        "Taux d'approbation des Avis": avf_zc_det[avf_zc_det["Statut utilisateur"].fillna("").astype(str).str.contains("APRQ", case=False, na=False)].copy(),
+        # Avis : AOUV + APRQ, avec exclusion ZU/Z4/ZR/ZP.
+        "Taux d'approbation des Avis": _avis_anomalies_population(avf_zc_det),
         "OT LANC ESTIME": dfp[(dfp["Statut OT"] == "LANC") & (dfp["Contient SOPL"] == 1) & (dfp["Type d'ordre"] == "ZCOR") & (dfp["OT LANC ESTIME"] == "NON")].copy(),
         "Backlog préparation caractérisé": non_prep.copy(),
         "Backlog planification caractérisé": non_plan.copy(),
