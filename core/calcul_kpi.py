@@ -126,9 +126,9 @@ def build_avis_zc_population(avdf: pd.DataFrame) -> pd.DataFrame:
 
 
 def build_execution_population(df: pd.DataFrame, now_ts=None) -> pd.DataFrame:
-    """Population d'exécution : LANC (contient) + Contient SOPL==1 + Type d'ordre ZCOR.
-
-    Tous les OT de type ZCOR lancés contenant SOPL sont distribués sur les 3 tranches
+    """Population d'exécution : LANC (contient) + Contient SOPL==1.
+    Filtre Type d'ordre (ZCOR) et Type de travail SUPPRIMÉ (demande explicite).
+    Tous les OT lancés contenant SOPL sont distribués sur les 3 tranches
     d'âge d'exécution (<1 mois / 1-3 mois / >3 mois).
 
     Population commune pour les KPI âge d'exécution et les anomalies
@@ -140,7 +140,6 @@ def build_execution_population(df: pd.DataFrame, now_ts=None) -> pd.DataFrame:
             | df["Statut système"].fillna("").astype(str).str.contains("LANC", na=False)
         )
         & (df["Contient SOPL"] == 1)
-        & (df["Type d'ordre"] == "ZCOR")
     )
     return df[mask].copy()
 
@@ -177,13 +176,8 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
         an["TOTAL_OT"] == 0, 100.0, ckpi(an["OT_CLOTURES"], an["TOTAL_OT"])
     )
 
-    # ── Exécution — NOUVELLE POPULATION : LANC + SOPL==1 + ZCOR + date ≤ now ──
-    # Population centralisée dans build_execution_population(), réutilisée
-    # par anomalies.py pour garantir une cohérence totale KPI / anomalies.
-    # Formules directes : <1 mois / Total * 100 (somme des 3 tranches = 100 %).
-    # "Inconnu" exclu : les dates invalides/futures sont déjà exclues par la
-    # population (notna() + <= now_ts), donc aex ne vaut jamais "Inconnu" ici.
-    df_exec = build_execution_population(df, now_ts)
+    # ── Exécution — NOUVELLE POPULATION : LANC + SOPL==1 (sans filtre ZCOR/type travail) ──
+    df_exec = build_execution_population(df_all, now_ts)
     ex = cpiv(df_exec, pd.Series(True, index=df_exec.index), "aex", posts)
     for c in ["<1 mois", ">3 mois", "1 mois < <3 mois"]:
         ex[c] = ex.get(c, 0)
