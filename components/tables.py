@@ -26,8 +26,6 @@ def get_bar_color(kpi, val) -> str:
         elif v <= cible + 5:
             return "#f59e0b"
         return "#e53e3e"
-    elif kpi == "OT_COR_EGAL":
-        return "#38a169" if v <= 5 else "#e53e3e"
     else:
         # Plus haut = mieux
         if v >= cible:
@@ -54,8 +52,6 @@ def ks(v, c) -> str:
             return "background:#ffeb9c;color:#9c6500;font-weight:600"
         else:
             return "background:#ffc7ce;color:#9c0006;font-weight:600"
-    elif c == "OT_COR_EGAL":
-        return "background:#c6efce;color:#006100;font-weight:600" if val <= 5 else "background:#ffc7ce;color:#9c0006;font-weight:600"
     else:
         # Plus haut = mieux
         # Vert si val >= cible
