@@ -38,22 +38,21 @@ def render_dashboard_tab(vp: list, pscores: dict, qscores: dict,
     # (rouge = loin de la cible) ; pa_div/qa_div = moyenne de ces 1/0 sur
     # tous les postes de la division, pour CE KPI (taux de conformité,
     # pas moyenne des valeurs) ─────────────────────────────────────────
-    from core.calcul_kpi import is_lb
+    from core.calcul_kpi import gscore
 
     def _taux_conformite(ckdf_scope, liste_kpi):
         resultat = {}
         for kpi in liste_kpi:
             if kpi not in ckdf_scope.columns or ckdf_scope.empty:
                 continue
-            cible = CIBLE.get(kpi, 100)
-            lower = is_lb(kpi)
             classifications = []
             for v in ckdf_scope[kpi].dropna():
-                if lower:
-                    conforme = (v <= cible) or (v <= cible * 1.05)
-                else:
-                    conforme = (v >= cible) or (v >= cible * 0.95)
-                classifications.append(1 if conforme else 0)
+                try:
+                    fv = float(v)
+                    # Règle utilisateur : si cellule rouge -> compte 0, sinon compte 1
+                    classifications.append(gscore(kpi, fv, CIBLE.get(kpi, 100)))
+                except Exception:
+                    pass
             if classifications:
                 resultat[kpi] = round(sum(classifications) / len(classifications) * 100, 1)
         return resultat
@@ -73,13 +72,13 @@ def render_dashboard_tab(vp: list, pscores: dict, qscores: dict,
         labels = [k for k in QK if k in pa_div]
         values = [pa_div[k] for k in labels]
         show_hbar_thresholds(labels, values, f"Taux moyens — Performance — {division_dash}",
-                             cible_map=CIBLE, lower_set=LOWER_BETTER)
+                             s1=70, s2=90)
     with col2:
         st.markdown(f'<div class="stl q">Indicateurs de Qualité — {division_dash}</div>', unsafe_allow_html=True)
         labels = [k for k in PK if k in qa_div]
         values = [qa_div[k] for k in labels]
         show_hbar_thresholds(labels, values, f"Taux moyens — Qualité — {division_dash}",
-                             cible_map=CIBLE, lower_set=LOWER_BETTER)
+                             s1=70, s2=90)
 
     st.markdown("---")
 
