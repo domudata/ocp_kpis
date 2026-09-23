@@ -72,8 +72,8 @@ CALC_VERSION, _CALC_SIG_OK = _calc_signature()
 # calc_kpis(). Le reste de la fonction est inchange.
 # ═══════════════════════════════════════════════════════════════════════════
 @st.cache_data(show_spinner="Calcul des KPIs en cours...")
-def calc_kpis_cached(df_period, avdf_period, now_ts, apm_tuple, fichier_date, sdt, edt, df_toutes_dates, calc_version=CALC_VERSION):
-    return calc_kpis(df_period, avdf_period, now_ts, list(apm_tuple), df_toutes_dates=df_toutes_dates)
+def calc_kpis_cached(df_period, avdf_period, now_ts, apm_tuple, fichier_date, sdt, edt, df_toutes_dates, avf_approve=None, calc_version=CALC_VERSION):
+    return calc_kpis(df_period, avdf_period, now_ts, list(apm_tuple), df_toutes_dates=df_toutes_dates, av_approve_i=avf_approve)
 
 
 def main() -> None:
@@ -173,10 +173,11 @@ def main() -> None:
             av_bytes = f.read()
 
     if ot_bytes and av_bytes:
-        df_full, av_full, apm, now_ts, avis_complet_full = prepare_data(ot_bytes, av_bytes, fichier_date)
+        df_full, av_full, apm, now_ts, avis_complet_full, avf_approve_full = prepare_data(ot_bytes, av_bytes, fichier_date)
     else:
         df_full, av_full, apm, now_ts = pd.DataFrame(), pd.DataFrame(), [], pd.Timestamp.now()
         avis_complet_full = pd.DataFrame()
+        avf_approve_full = pd.DataFrame()
 
     ctx = render_sidebar(fichier_date, apm, df_full, av_full, now_ts)
     vp      = ctx["vp"]
@@ -213,17 +214,19 @@ def main() -> None:
         # opération, de façon uniforme. On transmet df_period (déjà
         # filtré) au lieu de df_full : calc_kpis() retombe alors sur le
         # même comportement que pour tous les autres KPI.
-        res = calc_kpis_cached(df_period, avdf_period, now_ts, tuple(apm), fichier_date, sdt, edt, df_period)
+        res = calc_kpis_cached(df_period, avdf_period, now_ts, tuple(apm), fichier_date, sdt, edt, df_period, avf_approve=avf_approve_full)
 
         ckdf_full = res['ckdf']
         nd_full = res.get('nd', {})
         dfp_full  = res['dfp']
         avf_full  = res['avf']
+        avf_approve_res = res.get('avf_approve', avf_approve_full)
 
         vp_present = [p for p in vp if p in ckdf_full.index]
         ckdf = ckdf_full.loc[vp_present] if vp_present else ckdf_full.iloc[0:0]
         dfp  = dfp_full[dfp_full["Poste travail princ."].isin(vp)]
         avf  = avf_full[avf_full["Poste travail princ."].isin(vp)] if "Poste travail princ." in avf_full.columns else avf_full
+        avf_approve = avf_approve_res[avf_approve_res["Poste travail princ."].isin(vp)] if "Poste travail princ." in avf_approve_res.columns else avf_approve_res
         avis_complet = (
             avis_complet_full[avis_complet_full["Poste travail princ."].isin(vp)]
             if "Poste travail princ." in avis_complet_full.columns else avis_complet_full
@@ -290,7 +293,7 @@ def main() -> None:
         # des deux Backlogs restent cohérentes avec leurs nouvelles
         # populations (calculées sur toutes les dates dans calc_kpis).
         # ═══════════════════════════════════════════════════════════════
-        ano_map = build_ano_map(dfp, avf, now_ts, dfp_toutes_dates=df_period)
+        ano_map = build_ano_map(dfp, avf, now_ts, dfp_toutes_dates=df_period, avf_approve=avf_approve)
 
         # ── Score des CARTES SF1/SF2 — IDENTIQUE À TOTAL GÉNÉRAL (demande
         # explicite) : réutilise EXACTEMENT calc_score_cellules(), la même
@@ -310,7 +313,7 @@ def main() -> None:
         ano_q_rows = build_ano_rows(vp, ano_map, PK, fixed_zero=["OT Fiabilité","Total Avis de Panne"])
         ano_p_cols = ["Poste de travail"] + QK + ["Total Anomalies"]
         ano_q_cols = ["Poste de travail"] + PK + ["Total Anomalies"]
-        anomaly_dfs = build_anomaly_dfs(dfp, avf, now_ts, dfp_toutes_dates=df_period)
+        anomaly_dfs = build_anomaly_dfs(dfp, avf, now_ts, dfp_toutes_dates=df_period, avf_approve=avf_approve)
 
         with st.sidebar:
             with st.expander("📥 Export anomalies (OT + Avis)", expanded=False):
