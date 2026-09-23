@@ -13,15 +13,20 @@ def _backlogs_non_caracterises(dfp_all: pd.DataFrame, now_ts=None):
         l'indicateur Backlog préparation/planification caractérisé) ;
       - full_prep / full_plan : la population COMPLÈTE (CARACTERISE ET
         NON CARACTERISE confondus), pour les indicateurs OT préparation/
-        planification <1/1-3/>3 mois (précision explicite : ces
-        indicateurs se répartissent sur le TOTAL, pas seulement le non
-        caractérisé). full_plan est en outre restreint aux OT dont
-        "Date de début planifiée" est déjà passée (<= now_ts)."""
+        planification <1/1-3/>3 mois.
+    CORRIGÉ (spec §3/§4) : le dénominateur est « dépêché sur la période »,
+    c'est-à-dire restreint aux OT dont Date de début planifiée ≤ now_ts,
+    cohérent avec calcul_kpi.py."""
     zcor = dfp_all[dfp_all["Type d'ordre"] == "ZCOR"].copy()
 
-    zcor_cree = zcor[
+    # Préparation : ZCOR + CRÉÉ + Date de début planifiée ≤ now_ts
+    _cree_filt = (
         zcor["Statut système"].fillna("").astype(str).str.strip().str.split().str[0] == "CRÉÉ"
-    ]
+    )
+    if now_ts is not None:
+        _cree_filt = _cree_filt & (zcor["Date de début planifiée"] <= now_ts)
+    zcor_cree = zcor[_cree_filt]
+
     # CORRIGÉ (bug pandas identifié et reproduit) : sur un DataFrame déjà
     # VIDE (0 ligne), `~df["col"].apply(fonction)` peut renvoyer un
     # résultat mal typé qui, une fois utilisé pour indexer le DataFrame,
@@ -34,23 +39,30 @@ def _backlogs_non_caracterises(dfp_all: pd.DataFrame, now_ts=None):
     else:
         non_prep = zcor_cree[~zcor_cree["Statut utilisateur"].apply(lambda x: match_exact_token(x, CODES_PREP_EXACT))]
 
-    zcor_lanc = zcor[
+    # Planification : ZCOR + LANC + SOPL==0 + Date de début planifiée ≤ now_ts
+    _lanc_filt = (
         (zcor["Statut système"].fillna("").astype(str).str.strip().str.split().str[0] == "LANC")
         & (zcor["Contient SOPL"] == 0)
-    ]
+    )
+    if now_ts is not None:
+        _lanc_filt = _lanc_filt & (zcor["Date de début planifiée"] <= now_ts)
+    zcor_lanc = zcor[_lanc_filt]
+
     if zcor_lanc.empty:
         non_plan = zcor_lanc
     else:
         non_plan = zcor_lanc[~zcor_lanc["Statut utilisateur"].apply(lambda x: match_exact_token(x, CODES_PLAN_EXACT))]
 
     full_prep = zcor_cree
-    full_plan = zcor_lanc[zcor_lanc["Date de début planifiée"] <= now_ts] if now_ts is not None else zcor_lanc
+    # Le filtre date est déjà appliqué dans zcor_lanc ; full_plan = zcor_lanc.
+    full_plan = zcor_lanc
 
     return non_prep, non_plan, full_prep, full_plan
 
 
 def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
-                   dfp_toutes_dates: pd.DataFrame = None) -> dict:
+                   dfp_toutes_dates: pd.DataFrame = None,
+                   avf_approve: pd.DataFrame = None) -> dict:
     """
     Construit le dictionnaire ano_map :
     {kpi_name → pd.Series(index=poste, values=nb_anomalies)}
@@ -59,8 +71,11 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
     latérale, utilisé UNIQUEMENT pour les deux indicateurs Backlog
     préparation/planification caractérisé (demande explicite). Si non
     fourni, dfp est réutilisé (comportement inchangé).
+    avf_approve : DataFrame des avis pour AVIS APPROUVE (spec §20 :
+    exclut ACLO + exclut ZU/Z4/ZR/ZP). Si non fourni, avf est réutilisé.
     """
     dfp_all = dfp_toutes_dates.copy() if dfp_toutes_dates is not None else dfp
+    _avf_ap = avf_approve if avf_approve is not None else avf
 
     # ── Populations Backlog préparation/planification — CALCULÉES UNE
     # SEULE FOIS ici, réutilisées à la fois pour l'indicateur Backlog
@@ -82,14 +97,11 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
     )
 
     # ── OT préparation <1/1-3/>3 mois — SYNCHRONISÉ avec calcul_kpi.py ──
-    # Base = non_prep (NON CARACTERISE du Backlog préparation), pas
-    # l'ancien périmètre indépendant (Statut OT=CRÉÉ + contient CRPR).
     ano_map["OT préparation <1 mois"] = full_prep[full_prep["ap"] == "<1 mois"].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["OT préparation >3 mois"] = full_prep[full_prep["ap"] == ">3 mois"].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["OT préparation 1mois< <3mois"] = full_prep[full_prep["ap"] == "1 mois < <3 mois"].groupby("Poste travail princ.")["Ordre"].count()
 
     # ── OT planification <1/1-3/>3 mois — SYNCHRONISÉ avec calcul_kpi.py ──
-    # Base = non_plan (NON CARACTERISE du Backlog planification).
     ano_map["OT planification <1 mois"] = full_plan[full_plan["alp"] == "<1 mois"].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["OT planification >3 mois"] = full_plan[full_plan["alp"] == ">3 mois"].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["OT planification 1mois< <3mois"] = full_plan[full_plan["alp"] == "1 mois < <3 mois"].groupby("Poste travail princ.")["Ordre"].count()
@@ -102,11 +114,12 @@ def build_ano_map(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
     ano_map["Performance Inspection"] = dfp[perf_filt & (dfp["_tw_num"].isin([290, 300, 310])) & (dfp["Date de début planifiée"] <= now_ts)].groupby("Poste travail princ.")["Ordre"].count()
     ano_map["Performance Systématiques"] = dfp[perf_filt & (dfp["_tw_num"] == 360) & (dfp["Date de début planifiée"] <= now_ts)].groupby("Poste travail princ.")["Ordre"].count()
 
-    # NOTE : filtre ZU/Z4/ZR/ZP retiré (voir calcul_kpi.py) — avf est déjà
-    # restreint à ces types en amont dans prepare_data.py.
-    avf_tot = avf.groupby("Poste travail princ.")["Avis"].count()
-    avf_aprv = avf[avf["Statut utilisateur"].isin(["APRV", "APRV AVAU"])].groupby("Poste travail princ.")["Avis"].count()
-    ano_map["Taux d'approbation des Avis"] = avf_tot.sub(avf_aprv, fill_value=0)
+    # ── AVIS APPROUVE — anomalie = Statut utilisateur == "APRQ" (spec §20) ──
+    # Population : avf_approve (exclut ACLO + exclut ZU/Z4/ZR/ZP).
+    ano_map["Taux d'approbation des Avis"] = (
+        _avf_ap[_avf_ap["Statut utilisateur"].fillna("").str.strip() == "APRQ"]
+        .groupby("Poste travail princ.")["Avis"].count()
+    )
 
     ano_map["OT LANC ESTIME"] = dfp[(dfp["Statut OT"] == "LANC") & (dfp["Contient SOPL"] == 1) & (dfp["Type d'ordre"] == "ZCOR") & (dfp["OT LANC ESTIME"] == "NON")].groupby("Poste travail princ.")["Ordre"].count()
 
@@ -149,12 +162,15 @@ def build_ano_rows(vp: list, ano_map: dict, kpi_list: list, fixed_zero: list = N
 
 
 def build_anomaly_dfs(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
-                       dfp_toutes_dates: pd.DataFrame = None) -> dict:
+                       dfp_toutes_dates: pd.DataFrame = None,
+                       avf_approve: pd.DataFrame = None) -> dict:
     """
     Construit les DataFrames détaillés des anomalies (pour liens
     téléchargement CSV dans le plan d'action).
+    avf_approve : population AVIS APPROUVE (spec §20). Rétrocompatible.
     """
     dfp_all = dfp_toutes_dates.copy() if dfp_toutes_dates is not None else dfp
+    _avf_ap = avf_approve if avf_approve is not None else avf
 
     non_prep, non_plan, full_prep, full_plan = _backlogs_non_caracterises(dfp_all, now_ts)
 
@@ -162,18 +178,8 @@ def build_anomaly_dfs(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
     exec_filt = (dfp["Statut OT"] == "LANC") & (dfp["Contient SOPL"] == 1)
     perf_filt = (dfp["Contient SOPL"] == 1) & (~dfp["Statut OT"].isin(["CLOT", "TCLO"]))
 
-    # CORRIGÉ (bug identifié) : filtre d'exclusion ZU/Z4/ZR/ZP retiré ici
-    # aussi — avf est DÉJÀ restreint à CES MÊMES types en amont dans
-    # prepare_data.py (voir la note équivalente dans calcul_kpi.py). Ce
-    # filtre d'exclusion, laissé par erreur, VIDAIT SYSTÉMATIQUEMENT la
-    # population (148 → 0 lignes constaté sur données réelles),
-    # rendant le détail "Taux d'approbation des Avis" indisponible bien
-    # que le compte d'anomalies (ano_map) soit correct.
-    avf_filtre = avf
-
     return {
         "TAUX_REALISATION_CORRECTIF/PT": dfp[(dfp["Nº appel pl.entret."].fillna(0) == 0) & (dfp["Contient SOPL"] == 1) & (~dfp["Statut OT"].isin(["CLOT", "TCLO"]))].copy(),
-        # SYNCHRONISÉ avec calcul_kpi.py / build_ano_map : base = NON CARACTERISE.
         "OT préparation <1 mois": full_prep[full_prep["ap"] == "<1 mois"].copy(),
         "OT préparation >3 mois": full_prep[full_prep["ap"] == ">3 mois"].copy(),
         "OT préparation 1mois< <3mois": full_prep[full_prep["ap"] == "1 mois < <3 mois"].copy(),
@@ -186,10 +192,12 @@ def build_anomaly_dfs(dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
         "Performance Graissage": dfp[perf_filt & (dfp["_tw_num"] == 350)].copy(),
         "Performance Inspection": dfp[perf_filt & (dfp["_tw_num"].isin([290, 300, 310])) & (dfp["Date de début planifiée"] <= now_ts)].copy(),
         "Performance Systématiques": dfp[perf_filt & (dfp["_tw_num"] == 360) & (dfp["Date de début planifiée"] <= now_ts)].copy(),
-        "Taux d'approbation des Avis": avf_filtre[~avf_filtre["Statut utilisateur"].isin(["APRV", "APRV AVAU"])].copy(),
+        # Anomalies AVIS APPROUVE = avis en statut APRQ (spec §20)
+        "Taux d'approbation des Avis": _avf_ap[_avf_ap["Statut utilisateur"].fillna("").str.strip() == "APRQ"].copy(),
         "OT LANC ESTIME": dfp[(dfp["Statut OT"] == "LANC") & (dfp["Contient SOPL"] == 1) & (dfp["Type d'ordre"] == "ZCOR") & (dfp["OT LANC ESTIME"] == "NON")].copy(),
         "Backlog préparation caractérisé": non_prep.copy(),
         "Backlog planification caractérisé": non_plan.copy(),
         "OT CONFIME": dfp[(dfp["Statut OT"].isin(["CLOT", "TCLO"])) & (dfp["OT CONFIME"] == "NON")].copy(),
         "OT_COR_EGAL": (lambda _s: _s[pd.to_numeric(_s["Total coûts budgétés"], errors="coerce").fillna(0) == pd.to_numeric(_s["Total coûts réels"], errors="coerce").fillna(0)])(dfp[(dfp["Statut OT"].isin(["CLOT", "TCLO"])) & (dfp["Type d'ordre"] == "ZCOR")]).copy(),
     }
+
