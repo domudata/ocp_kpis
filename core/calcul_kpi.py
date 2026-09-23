@@ -54,28 +54,25 @@ def build_statut_pivot(df_sub: pd.DataFrame, posts: list) -> pd.DataFrame:
 def gscore(k: str, a, t) -> int:
     if pd.isna(a) or pd.isna(t):
         return 0
-    if k in ["OT préparation <1 mois", "OT planification <1 mois", "OT exécution <1 mois"]:
-        return 1 if a >= 75 else 0
-    if k in ["OT préparation 1mois< <3mois", "OT planification 1mois< <3mois", "OT exécution 1mois< <3mois"]:
-        return 1 if a <= 15 else 0
-    if k in ["OT préparation >3 mois", "OT planification >3 mois", "OT exécution >3 mois"]:
-        return 1 if a <= 5 else 0
-    if k == "TAUX_REALISATION_CORRECTIF/PT":
-        return 1 if a >= 80 else 0
-    if k == "Taux d'approbation des Avis":
-        return 1 if a >= 90 else 0
-    if k in ["OT LANC ESTIME", "Backlog préparation caractérisé",
-             "Backlog planification caractérisé", "OT CONFIME"]:
-        return 1 if a >= 95 else 0
-    if k == "OT_COR_EGAL":
-        # INVERSÉ (demande explicite) : ce KPI représente désormais le taux
-        # de NON-concordance (NON/Total) — plus bas est meilleur.
-        return 1 if a <= 5 else 0
-    if k in ["Performance Graissage", "Performance Inspection", "Performance Systématiques"]:
-        return 1 if a >= 95 else 0
-    if k in ["OT Fiabilité", "Total Avis de Panne"]:
-        return 1 if a >= 100 else 0
-    return 0
+    try:
+        val = float(a)
+        target = float(t)
+    except Exception:
+        return 0
+
+    if is_lb(k):
+        # Plus bas = mieux (1-3 mois cible 15, >3 mois cible 5)
+        # Vert <= target, Jaune <= target + 5, Rouge > target + 5
+        # Règle utilisateur : si rouge compte 0, sinon (vert ou jaune) compte 1
+        return 1 if val <= target + 5 else 0
+    elif k == "OT_COR_EGAL":
+        # Plus bas = mieux (taux de non-concordance cible <= 5)
+        return 1 if val <= 5 else 0
+    else:
+        # Plus haut = mieux
+        # Vert >= target, Jaune >= target - 5, Rouge < target - 5
+        # Règle utilisateur : si rouge compte 0, sinon (vert ou jaune) compte 1
+        return 1 if val >= target - 5 else 0
 
 
 def is_lb(k: str) -> bool:
