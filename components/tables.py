@@ -18,24 +18,23 @@ def get_bar_color(kpi, val) -> str:
         v = float(val)
     except Exception:
         return "#cbd5e0"
-    if kpi in ["OT préparation <1 mois", "OT planification <1 mois", "OT exécution <1 mois"]:
-        return "#38a169" if v >= 80 else ("#f59e0b" if v >= 75 else "#e53e3e")
-    if kpi in ["OT préparation 1mois< <3mois", "OT planification 1mois< <3mois", "OT exécution 1mois< <3mois"]:
-        return "#38a169" if v <= 15 else "#e53e3e"
-    if kpi in ["OT préparation >3 mois", "OT planification >3 mois", "OT exécution >3 mois"]:
+    cible = CIBLE.get(kpi, 100)
+    if is_lb(kpi):
+        # Plus bas = mieux (1-3 mois cible 15, >3 mois cible 5)
+        if v <= cible:
+            return "#38a169"
+        elif v <= cible + 5:
+            return "#f59e0b"
+        return "#e53e3e"
+    elif kpi == "OT_COR_EGAL":
         return "#38a169" if v <= 5 else "#e53e3e"
-    if kpi == "TAUX_REALISATION_CORRECTIF/PT":
-        return "#38a169" if v >= 85 else ("#f59e0b" if v >= 80 else "#e53e3e")
-    if kpi == "Taux d'approbation des Avis":
-        return "#38a169" if v >= 95 else ("#f59e0b" if v >= 90 else "#e53e3e")
-    if kpi in ["OT LANC ESTIME", "Backlog préparation caractérisé",
-               "Backlog planification caractérisé", "OT CONFIME", "OT_COR_EGAL"]:
-        return "#38a169" if v >= 100 else ("#f59e0b" if v >= 95 else "#e53e3e")
-    if kpi in ["Performance Graissage", "Performance Inspection", "Performance Systématiques"]:
-        return "#38a169" if v >= 95 else ("#f59e0b" if v > 90 else "#e53e3e")
-    if kpi in ["OT Fiabilité", "Total Avis de Panne"]:
-        return "#38a169" if v >= 100 else "#f59e0b"
-    return "#38a169" if v >= 90 else ("#f59e0b" if v >= 80 else "#e53e3e")
+    else:
+        # Plus haut = mieux
+        if v >= cible:
+            return "#38a169"
+        elif v >= cible - 5:
+            return "#f59e0b"
+        return "#e53e3e"
 
 
 def ks(v, c) -> str:
@@ -43,22 +42,31 @@ def ks(v, c) -> str:
         val = float(v)
     except Exception:
         return ""
-    if c in ["OT préparation <1 mois", "OT planification <1 mois", "OT exécution <1 mois"]:
-        return "background:#c6efce;color:#006100;font-weight:600" if val >= 80 else ("background:#ffeb9c;color:#9c6500;font-weight:600" if val >= 75 else "background:#ffc7ce;color:#9c0006;font-weight:600")
-    if c in ["OT préparation 1mois< <3mois", "OT planification 1mois< <3mois", "OT exécution 1mois< <3mois"]:
-        return "background:#c6efce;color:#006100;font-weight:600" if val <= 15 else "background:#ffc7ce;color:#9c0006;font-weight:600"
-    if c in ["OT préparation >3 mois", "OT planification >3 mois", "OT exécution >3 mois"]:
+    cible = CIBLE.get(c, 100)
+    if is_lb(c):
+        # Plus bas = mieux (age 1-3 mois cible 15, age >3 mois cible 5)
+        # Vert si val <= cible
+        # Jaune si cible < val <= cible + 5
+        # Rouge si val > cible + 5
+        if val <= cible:
+            return "background:#c6efce;color:#006100;font-weight:600"
+        elif val <= cible + 5:
+            return "background:#ffeb9c;color:#9c6500;font-weight:600"
+        else:
+            return "background:#ffc7ce;color:#9c0006;font-weight:600"
+    elif c == "OT_COR_EGAL":
         return "background:#c6efce;color:#006100;font-weight:600" if val <= 5 else "background:#ffc7ce;color:#9c0006;font-weight:600"
-    if c == "TAUX_REALISATION_CORRECTIF/PT":
-        return "background:#c6efce;color:#006100;font-weight:600" if val >= 85 else ("background:#ffeb9c;color:#9c6500;font-weight:600" if val >= 80 else "background:#ffc7ce;color:#9c0006;font-weight:600")
-    if c == "Taux d'approbation des Avis":
-        return "background:#c6efce;color:#006100;font-weight:600" if val >= 95 else ("background:#ffeb9c;color:#9c6500;font-weight:600" if val >= 90 else "background:#ffc7ce;color:#9c0006;font-weight:600")
-    if c in ["OT LANC ESTIME", "Backlog préparation caractérisé", "Backlog planification caractérisé", "OT CONFIME", "OT_COR_EGAL"]:
-        return "background:#c6efce;color:#006100;font-weight:600" if val >= 100 else ("background:#ffeb9c;color:#9c6500;font-weight:600" if val >= 95 else "background:#ffc7ce;color:#9c0006;font-weight:600")
-    if c in ["Performance Graissage", "Performance Inspection", "Performance Systématiques"]:
-        return "background:#c6efce;color:#006100;font-weight:600" if val >= 95 else ("background:#ffeb9c;color:#9c6500;font-weight:600" if val > 90 else "background:#ffc7ce;color:#9c0006;font-weight:600")
-    if c in ["OT Fiabilité", "Total Avis de Panne"]:
-        return "background:#c6efce;color:#006100;font-weight:600" if val >= 100 else "background:#ffeb9c;color:#9c6500;font-weight:600"
+    else:
+        # Plus haut = mieux
+        # Vert si val >= cible
+        # Jaune si cible - 5 <= val < cible
+        # Rouge si val < cible - 5
+        if val >= cible:
+            return "background:#c6efce;color:#006100;font-weight:600"
+        elif val >= cible - 5:
+            return "background:#ffeb9c;color:#9c6500;font-weight:600"
+        else:
+            return "background:#ffc7ce;color:#9c0006;font-weight:600"
     return ""
 
 
