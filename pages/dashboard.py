@@ -32,36 +32,15 @@ def render_dashboard_tab(vp: list, pscores: dict, qscores: dict,
 
     st.markdown("---")
 
-    # ── 1) Taux moyens par KPI — CORRIGÉ (demande explicite) : au lieu
-    # de la moyenne brute des valeurs, chaque poste est classé par KPI
-    # en 1 (vert = conforme, ou jaune = à moins de 5% de la cible) ou 0
-    # (rouge = loin de la cible) ; pa_div/qa_div = moyenne de ces 1/0 sur
-    # tous les postes de la division, pour CE KPI (taux de conformité,
-    # pas moyenne des valeurs) ─────────────────────────────────────────
-    from core.calcul_kpi import gscore
-
-    def _taux_conformite(ckdf_scope, liste_kpi):
-        resultat = {}
-        for kpi in liste_kpi:
-            if kpi not in ckdf_scope.columns or ckdf_scope.empty:
-                continue
-            classifications = []
-            for v in ckdf_scope[kpi].dropna():
-                try:
-                    fv = float(v)
-                    # Règle utilisateur : si cellule rouge -> compte 0, sinon compte 1
-                    classifications.append(gscore(kpi, fv, CIBLE.get(kpi, 100)))
-                except Exception:
-                    pass
-            if classifications:
-                resultat[kpi] = round(sum(classifications) / len(classifications) * 100, 1)
-        return resultat
-
+    # ── 1) Taux moyens par KPI — Moyenne réelle des indicateurs ───────────
+    # Règle utilisateur : sur le chart "Taux moyens", les 3 périodes d'âge
+    # affichent leur taux moyen réel (<1 mois à ~100%, et 1-3 mois / >3 mois à 0%).
+    # Les barres sont colorées selon leur cible (inférieur à cible = vert pour lower_better).
     if ckdf is not None and not ckdf.empty:
         vp_div_present = [p for p in vp_div if p in ckdf.index]
         ckdf_div = ckdf.loc[vp_div_present] if vp_div_present else ckdf.iloc[0:0]
-        pa_div = _taux_conformite(ckdf_div, QK)
-        qa_div = _taux_conformite(ckdf_div, PK)
+        pa_div = {k: round(ckdf_div[k].mean(skipna=True), 1) for k in QK if k in ckdf_div.columns}
+        qa_div = {k: round(ckdf_div[k].mean(skipna=True), 1) for k in PK if k in ckdf_div.columns}
     else:
         # Repli (si ckdf non fourni) : moyennes globales inchangées.
         pa_div, qa_div = pa, qa
@@ -72,13 +51,13 @@ def render_dashboard_tab(vp: list, pscores: dict, qscores: dict,
         labels = [k for k in QK if k in pa_div]
         values = [pa_div[k] for k in labels]
         show_hbar_thresholds(labels, values, f"Taux moyens — Performance — {division_dash}",
-                             s1=70, s2=90)
+                             cible_map=CIBLE, lower_set=LOWER_BETTER)
     with col2:
         st.markdown(f'<div class="stl q">Indicateurs de Qualité — {division_dash}</div>', unsafe_allow_html=True)
         labels = [k for k in PK if k in qa_div]
         values = [qa_div[k] for k in labels]
         show_hbar_thresholds(labels, values, f"Taux moyens — Qualité — {division_dash}",
-                             s1=70, s2=90)
+                             cible_map=CIBLE, lower_set=LOWER_BETTER)
 
     st.markdown("---")
 
