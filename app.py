@@ -365,36 +365,19 @@ def main() -> None:
         cible_q["Score Qualite"] = "100"
         qrows.append(cible_q)
 
-        _AGE_KPIS = {
-            "OT préparation <1 mois", "OT préparation 1mois< <3mois", "OT préparation >3 mois",
-            "OT planification <1 mois", "OT planification 1mois< <3mois", "OT planification >3 mois",
-            "OT exécution <1 mois", "OT exécution 1mois< <3mois", "OT exécution >3 mois",
-        }
         tot_p = {"Poste de travail": "Total general", "_t": "total"}
         for k in QK:
-            if k in _AGE_KPIS:
-                vals = []
-                for rw in prows:
-                    if k in rw and rw.get("_t") not in ("cible", "total"):
-                        try:
-                            fv = float(rw[k])
-                            if pd.notna(fv):
-                                vals.append(fv)
-                        except Exception:
-                            pass
-                tot_p[k] = ("%.1f" % (sum(vals) / len(vals))) if vals else "nan"
-            else:
-                cc = tc = 0
-                for rw in prows:
-                    if k in rw and rw.get("_t") not in ("cible", "total"):
-                        try:
-                            fv = float(rw[k])
-                            if pd.notna(fv):
-                                cc += gscore(k, fv, CIBLE.get(k, 100))
-                                tc += 1
-                        except Exception:
-                            pass
-                tot_p[k] = ("%.1f" % ((cc / tc) * 100)) if tc > 0 else "nan"
+            cc = tc = 0
+            for rw in prows:
+                if k in rw and rw.get("_t") not in ("cible", "total"):
+                    try:
+                        fv = float(rw[k])
+                        if pd.notna(fv):
+                            cc += gscore(k, fv, CIBLE.get(k, 100))
+                            tc += 1
+                    except Exception:
+                        pass
+            tot_p[k] = ("%.1f" % ((cc / tc) * 100)) if tc > 0 else "nan"
 
         tot_p["Score Performance"] = "%.2f" % calc_score_cellules(vp, QK)
         prows.append(tot_p)
