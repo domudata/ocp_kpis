@@ -227,16 +227,20 @@ def _bar_color_for(label, value, cible_map=None, lower_set=None, s1=S1_DEFAULT, 
         return C_LOW
 
     if cible_map and label in cible_map:
-        target = cible_map[label]
+        target = float(cible_map[label])
         is_lower = bool(lower_set) and label in lower_set
         if is_lower:
             # Plus bas = mieux (ex: >3 mois cible <=5%, 1-3 mois cible <=15%)
-            return C_HIGH if v <= target else C_LOW
+            if v <= target:
+                return C_HIGH
+            return C_MID if v <= target + 5 else C_LOW
+        elif label == "OT_COR_EGAL":
+            return C_HIGH if v <= 5 else C_LOW
         else:
             # Plus haut = mieux (ex: <1 mois cible >=80%)
             if v >= target:
                 return C_HIGH
-            return C_MID if v >= target * 0.9 else C_LOW
+            return C_MID if v >= target - 5 else C_LOW
 
     # Pas de cible connue (score global, poste...) → seuils generiques
     return C_HIGH if v >= s2 else (C_MID if v >= s1 else C_LOW)
