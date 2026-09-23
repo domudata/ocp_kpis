@@ -65,9 +65,6 @@ def gscore(k: str, a, t) -> int:
         # Vert <= target, Jaune <= target + 5, Rouge > target + 5
         # Règle utilisateur : si rouge compte 0, sinon (vert ou jaune) compte 1
         return 1 if val <= target + 5 else 0
-    elif k == "OT_COR_EGAL":
-        # Plus bas = mieux (taux de non-concordance cible <= 5)
-        return 1 if val <= 5 else 0
     else:
         # Plus haut = mieux
         # Vert >= target, Jaune >= target - 5, Rouge < target - 5
