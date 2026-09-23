@@ -21,87 +21,6 @@ def cpiv(df: pd.DataFrame, f, c: str, p: list) -> pd.DataFrame:
     )
 
 
-
-
-AGE_COLS = ["<1 mois", "1 mois < <3 mois", ">3 mois"]
-
-
-def _age_category_from_date(date_series: pd.Series, now_ts) -> pd.Series:
-    """Classe chaque OT dans exactement UNE des 3 tranches d'âge.
-
-    Règle :
-      - âge <= 1 mois (y compris date future) -> <1 mois
-      - 1 mois < âge <= 3 mois -> 1 mois < <3 mois
-      - âge > 3 mois -> >3 mois
-
-    Les dates manquantes sont traitées avec une valeur de repli fournie
-    par l'appelant afin qu'aucun OT éligible ne sorte du dénominateur.
-    """
-    d = pd.to_datetime(date_series, errors="coerce")
-    now = pd.Timestamp(now_ts)
-    age_days = (now - d).dt.total_seconds() / 86400.0
-
-    out = pd.Series(index=date_series.index, dtype="object")
-    out.loc[age_days.isna()] = "<1 mois"
-    out.loc[age_days <= 30.44] = "<1 mois"
-    out.loc[(age_days > 30.44) & (age_days <= 91.31)] = "1 mois < <3 mois"
-    out.loc[age_days > 91.31] = ">3 mois"
-    return out
-
-
-def _prepare_age_population(df_sub: pd.DataFrame, now_ts, primary_date: str, fallback_date: str = None) -> pd.DataFrame:
-    """Ajoute une colonne _age_calc à une population d'OT.
-
-    Toutes les lignes reçues sont conservées. Si la date principale est
-    absente, une date de repli est utilisée ; si aucune date n'est disponible,
-    l'OT est placé dans <1 mois afin que les 3 tranches couvrent 100 % de la
-    population éligible.
-    """
-    out = df_sub.copy()
-    d = pd.to_datetime(out[primary_date], errors="coerce") if primary_date in out.columns else pd.Series(pd.NaT, index=out.index)
-    if fallback_date and fallback_date in out.columns:
-        fb = pd.to_datetime(out[fallback_date], errors="coerce")
-        d = d.fillna(fb)
-    out["_age_calc"] = _age_category_from_date(d, now_ts)
-    return out
-
-
-def _age_pivot(df_sub: pd.DataFrame, posts: list) -> pd.DataFrame:
-    """Pivot âge avec dénominateur = TOUS les OT de la population."""
-    if df_sub.empty:
-        out = pd.DataFrame(index=posts)
-        for c in AGE_COLS:
-            out[c] = 0
-        out["Inconnu"] = 0
-        out["Total"] = 0
-        return out
-
-    # IMPORTANT :
-    # Ne pas utiliser values="Ordre" + aggfunc="count" ici.
-    # Si "Ordre" contient des cellules vides, pivot_table/count ignore ces
-    # lignes et peut transformer par exemple 1286 OT en seulement 33 OT.
-    # On compte donc les LIGNES de la population, indépendamment de la valeur
-    # de la colonne Ordre.
-    _tmp = df_sub[["Poste travail princ.", "_age_calc"]].copy()
-    _tmp["_nb_ot"] = 1
-
-    out = (
-        _tmp.groupby(["Poste travail princ.", "_age_calc"], dropna=False)["_nb_ot"]
-        .sum()
-        .unstack(fill_value=0)
-        .reindex(posts, fill_value=0)
-    )
-
-    for c in AGE_COLS:
-        out[c] = out.get(c, 0)
-    # Une colonne conservée pour compatibilité avec le reste de l'application.
-    # Elle doit rester à 0 car la population est obligatoirement classée dans
-    # une des 3 tranches officielles.
-    out["Inconnu"] = 0
-    out["Total"] = out[AGE_COLS].sum(axis=1)
-    return out
-
-
 def get_text_col(df: pd.DataFrame):
     for c in ["Désignation", "Designation", "Désignation OT", "Texte ordre",
               "Texte", "Description", "Libellé", "Libelle"]:
@@ -235,21 +154,21 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
         an["TOTAL_OT"] == 0, 100.0, ckpi(an["OT_CLOTURES"], an["TOTAL_OT"])
     )
 
-    # ── Exécution — population OFFICIELLE ──
-    # Tous les OT LANC + SOPL=1 sont pris en compte.
-    # L'âge est recalculé ici à partir de la date de début planifiée, avec
-    # Créé le comme repli si la date planifiée est absente. Ainsi un OT ne
-    # disparaît jamais du dénominateur à cause d'une catégorie aex vide.
-    _exec_base = df[
-        (df["Statut OT"] == "LANC") & (df["Contient SOPL"] == 1)
-    ].copy()
-    _exec_age = _prepare_age_population(
-        _exec_base, now_ts, "Date de début planifiée", "Créé le"
+    # ── Exécution — FILTRE : Statut OT == "LANC" ET Contient SOPL == 1 ──
+    # Dénominateur : somme des 3 tranches d'âge (hors "Inconnu") pour que
+    # <1 mois + 1-3 mois + >3 mois = 100%. Ex : 2+3+2 = 7 → 2/7 3/7 2/7.
+    # Règle : si Dénominateur = 0 → KPI = 100% (sz=100).
+    ex = cpiv(
+        df,
+        (df["Statut OT"] == "LANC") & (df["Contient SOPL"] == 1),
+        "aex", posts
     )
-    ex = _age_pivot(_exec_age, posts)
-    ex["OT exécution <1 mois"] = ckpi(ex["<1 mois"], ex["Total"])
-    ex["OT exécution >3 mois"] = ckpi(ex[">3 mois"], ex["Total"])
-    ex["OT exécution 1mois< <3mois"] = ckpi(ex["1 mois < <3 mois"], ex["Total"])
+    for c in ["<1 mois", ">3 mois", "1 mois < <3 mois", "Inconnu"]:
+        ex[c] = ex.get(c, 0)
+    ex["Total"] = ex[["<1 mois", "1 mois < <3 mois", ">3 mois"]].sum(axis=1)
+    ex["OT exécution <1 mois"] = ckpi(ex["<1 mois"], ex["Total"], sz=100)
+    ex["OT exécution >3 mois"] = ckpi(ex[">3 mois"], ex["Total"], sz=0)
+    ex["OT exécution 1mois< <3mois"] = ckpi(ex["1 mois < <3 mois"], ex["Total"], sz=0)
 
     # ── OT lancé estimé (inchangé) ──
     # ── OT LANC ESTIME — AJOUT SOPL + ZCOR (demande explicite) ──
@@ -268,7 +187,7 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     # Population SÉPARÉE de celle utilisée pour les KPI d'âge (voir ci-dessous).
     _zcor_all = df_all[df_all["Type d'ordre"] == "ZCOR"].copy()
     _cree_base = _zcor_all[
-        _zcor_all["Statut système"].fillna("").astype(str).str.strip().str.split().str[0] == "CRÉÉ"
+        _zcor_all["Statut système"].fillna("").astype(str).str.strip().str.split().str[0].isin(["CRÉÉ", "CREE"])
     ]
     # _zcor_cree_backlog : filtre date planifiée ≤ NOW_TS — dénominateur du Backlog carac.
     _zcor_cree_backlog = _cree_base[
@@ -304,10 +223,10 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     _zcor_lanc_backlog = _lanc_base[
         _lanc_base["Date de début planifiée"] <= now_ts
     ].copy()
-    # _zcor_lanc_age : filtre date planifiée ≤ NOW_TS également pour les KPI d'âge
-    # planification (car "alp" mesure le retard par rapport à la date planifiée ;
-    # un OT non encore planifié ou futur n'a pas de sens ici).
-    _zcor_lanc_age = _zcor_lanc_backlog  # même population pour plan
+    # _zcor_lanc_age : population pour les KPI d'âge planification (ZCOR + LANC + SOPL==0)
+    # sans filtre date planifiée (comme pour la préparation), afin que les OT planifiés
+    # soient répartis sur les tranches d'âge alp.
+    _zcor_lanc_age = _lanc_base.copy()
 
     _zcor_lanc_backlog["_plan_carac"] = np.where(
         _zcor_lanc_backlog["Statut utilisateur"].apply(lambda x: match_exact_token(x, CODES_PLAN_EXACT)),
@@ -323,29 +242,31 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     plc["Backlog planification caractérisé"] = ckpi(plc["CARACTERISE"], plc["Total"])
 
     # ── OT préparation <1/1-3/>3 mois ──
-    # Population : ZCOR + CRÉÉ.
-    # L'âge est recalculé à partir de "Créé le". Toutes les lignes sont
-    # classées dans une des 3 tranches officielles.
-    _prep_age = _prepare_age_population(
-        _zcor_cree_age, now_ts, "Créé le"
-    )
-    pr = _age_pivot(_prep_age, posts)
-    pr["OT préparation <1 mois"] = ckpi(pr["<1 mois"], pr["Total"])
-    pr["OT préparation >3 mois"] = ckpi(pr[">3 mois"], pr["Total"])
-    pr["OT préparation 1mois< <3mois"] = ckpi(pr["1 mois < <3 mois"], pr["Total"])
+    # Base = ZCOR + CRÉÉ (SANS filtre date planifiée — "ap" est calculé depuis
+    # "Créé le" et est disponible même sans date planifiée).
+    # Dénominateur = somme des 3 tranches seulement (hors "Inconnu")
+    # → garantit que la somme des 3 tranches = 100%.
+    # Si Total == 0 → <1m = 100%, 1-3m = 0%, >3m = 0% (somme = 100%).
+    pr = cpiv(_zcor_cree_age, pd.Series(True, index=_zcor_cree_age.index), "ap", posts)
+    for c in ["<1 mois", ">3 mois", "1 mois < <3 mois", "Inconnu"]:
+        pr[c] = pr.get(c, 0)
+    pr["Total"] = pr[["<1 mois", "1 mois < <3 mois", ">3 mois"]].sum(axis=1)
+    pr["OT préparation <1 mois"] = ckpi(pr["<1 mois"], pr["Total"], sz=100)
+    pr["OT préparation >3 mois"] = ckpi(pr[">3 mois"], pr["Total"], sz=0)
+    pr["OT préparation 1mois< <3mois"] = ckpi(pr["1 mois < <3 mois"], pr["Total"], sz=0)
 
     # ── OT planification <1/1-3/>3 mois ──
-    # Population conservée : ZCOR + LANC + SOPL==0 + date planifiée ≤ NOW_TS,
-    # conformément à la logique actuelle du fichier.
-    # La classification est recalculée ici et aucune ligne éligible ne tombe
-    # dans "Inconnu".
-    _plan_age = _prepare_age_population(
-        _zcor_lanc_age, now_ts, "Date de début planifiée", "Créé le"
-    )
-    pl = _age_pivot(_plan_age, posts)
-    pl["OT planification <1 mois"] = ckpi(pl["<1 mois"], pl["Total"])
-    pl["OT planification >3 mois"] = ckpi(pl[">3 mois"], pl["Total"])
-    pl["OT planification 1mois< <3mois"] = ckpi(pl["1 mois < <3 mois"], pl["Total"])
+    # Base = ZCOR + LANC + SOPL==0.
+    # Dénominateur = somme des 3 tranches (hors "Inconnu")
+    # → garantit que la somme des 3 tranches = 100%.
+    # Si Total == 0 → <1m = 100%, 1-3m = 0%, >3m = 0% (somme = 100%).
+    pl = cpiv(_zcor_lanc_age, pd.Series(True, index=_zcor_lanc_age.index), "alp", posts)
+    for c in ["<1 mois", ">3 mois", "1 mois < <3 mois", "Inconnu"]:
+        pl[c] = pl.get(c, 0)
+    pl["Total"] = pl[["<1 mois", "1 mois < <3 mois", ">3 mois"]].sum(axis=1)
+    pl["OT planification <1 mois"] = ckpi(pl["<1 mois"], pl["Total"], sz=100)
+    pl["OT planification >3 mois"] = ckpi(pl[">3 mois"], pl["Total"], sz=0)
+    pl["OT planification 1mois< <3mois"] = ckpi(pl["1 mois < <3 mois"], pl["Total"], sz=0)
 
     # ── OT confirmé / coûts égaux (inchangé) ──
     # ── OT CONFIME — CORRIGÉ (bug de colonne) ──
