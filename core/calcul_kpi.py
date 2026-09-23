@@ -155,9 +155,9 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     )
 
     # ── Exécution — FILTRE : Statut OT == "LANC" ET Contient SOPL == 1 ──
-    # Dénominateur : total OT respectant ce filtre, par Poste travail princ.
-    # Numérateur par tranche d'âge (colonne aex). Règle spec §1 :
-    # si Dénominateur = 0 → KPI = 100% (sz=100 pour toutes les tranches).
+    # Dénominateur : somme des 3 tranches d'âge (hors "Inconnu") pour que
+    # <1 mois + 1-3 mois + >3 mois = 100%. Ex : 2+3+2 = 7 → 2/7 3/7 2/7.
+    # Règle : si Dénominateur = 0 → KPI = 100% (sz=100).
     ex = cpiv(
         df,
         (df["Statut OT"] == "LANC") & (df["Contient SOPL"] == 1),
@@ -165,7 +165,7 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     )
     for c in ["<1 mois", ">3 mois", "1 mois < <3 mois", "Inconnu"]:
         ex[c] = ex.get(c, 0)
-    ex["Total"] = ex[["<1 mois", "1 mois < <3 mois", ">3 mois", "Inconnu"]].sum(axis=1)
+    ex["Total"] = ex[["<1 mois", "1 mois < <3 mois", ">3 mois"]].sum(axis=1)
     ex["OT exécution <1 mois"] = ckpi(ex["<1 mois"], ex["Total"])
     ex["OT exécution >3 mois"] = ckpi(ex[">3 mois"], ex["Total"])
     ex["OT exécution 1mois< <3mois"] = ckpi(ex["1 mois < <3 mois"], ex["Total"])
@@ -240,11 +240,11 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     # Base = POPULATION COMPLÈTE du Backlog préparation (ZCOR + CRÉÉ +
     # Date planifiée ≤ NOW_TS), CARACTERISE ET NON CARACTERISE confondus,
     # répartie selon l'âge ("ap" = depuis "Créé le").
-    # Règle spec : si Dénominateur = 0 → KPI = 100% (sz=100 pour toutes tranches).
+    # Dénominateur = somme des 3 tranches (hors "Inconnu") → <1+1-3+>3 = 100%.
     pr = cpiv(_zcor_cree_all, pd.Series(True, index=_zcor_cree_all.index), "ap", posts)
     for c in ["<1 mois", ">3 mois", "1 mois < <3 mois", "Inconnu"]:
         pr[c] = pr.get(c, 0)
-    pr["Total"] = pr[["<1 mois", "1 mois < <3 mois", ">3 mois", "Inconnu"]].sum(axis=1)
+    pr["Total"] = pr[["<1 mois", "1 mois < <3 mois", ">3 mois"]].sum(axis=1)
     pr["OT préparation <1 mois"] = ckpi(pr["<1 mois"], pr["Total"])
     pr["OT préparation >3 mois"] = ckpi(pr[">3 mois"], pr["Total"])
     pr["OT préparation 1mois< <3mois"] = ckpi(pr["1 mois < <3 mois"], pr["Total"])
@@ -254,11 +254,11 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     # SOPL==0 + Date planifiée ≤ NOW_TS — déjà appliqué dans _zcor_lanc_all),
     # CARACTERISE ET NON CARACTERISE confondus, répartie selon l'âge
     # ("alp" = depuis "Date de début planifiée").
-    # Règle spec : si Dénominateur = 0 → KPI = 100% (sz=100 pour toutes tranches).
+    # Dénominateur = somme des 3 tranches (hors "Inconnu") → <1+1-3+>3 = 100%.
     pl = cpiv(_zcor_lanc_all, pd.Series(True, index=_zcor_lanc_all.index), "alp", posts)
     for c in ["<1 mois", ">3 mois", "1 mois < <3 mois", "Inconnu"]:
         pl[c] = pl.get(c, 0)
-    pl["Total"] = pl[["<1 mois", "1 mois < <3 mois", ">3 mois", "Inconnu"]].sum(axis=1)
+    pl["Total"] = pl[["<1 mois", "1 mois < <3 mois", ">3 mois"]].sum(axis=1)
     pl["OT planification <1 mois"] = ckpi(pl["<1 mois"], pl["Total"])
     pl["OT planification >3 mois"] = ckpi(pl[">3 mois"], pl["Total"])
     pl["OT planification 1mois< <3mois"] = ckpi(pl["1 mois < <3 mois"], pl["Total"])
