@@ -39,6 +39,7 @@ try:
     from pages.plan_action import render_plan_action_tab
     from pages.frequence_maintenance import render_frequence_maintenance_tab
     from pages.suivi_hse import render_suivi_hse_tab
+    from pages.taux_realisation import render_taux_realisation_tab
     _IMPORT_ERROR = None
 except Exception as _e:
     _IMPORT_ERROR = traceback.format_exc()
@@ -504,6 +505,7 @@ def main() -> None:
             "🎯 Plan d'action",
             "🦺 Suivi HSE",
             "🔄 Fréquence Maintenance",
+            "📈 Taux de Réalisation",
         ])
 
         with tabs[0]:
@@ -726,6 +728,12 @@ def main() -> None:
                 render_suivi_hse_tab(dfp, avis_complet, vp, fichier_date)
             except Exception as _e:
                 st.error(f"Suivi HSE indisponible : {_e}")
+
+        with tabs[7]:
+            try:
+                render_taux_realisation_tab(df_full)
+            except Exception as _e:
+                st.error(f"Taux de Réalisation indisponible : {_e}")
 
     except Exception as e:
         st.error("Erreur lors du chargement des donnees : %s" % str(e))
