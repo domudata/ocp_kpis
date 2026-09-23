@@ -222,6 +222,17 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
         & raw_av["Type d'avis"].isin(["ZU", "Z4", "ZR", "ZP"])
     ].copy()
 
+    # ── avf_approve : population pour AVIS APPROUVE / Taux d'approbation
+    # des Avis — spec §20. Logique distincte de avf :
+    #   • Statut système ne contient PAS "ACLO" (insensible à la casse)
+    #   • Type d'avis n'est PAS ZU, Z4, ZR, ZP (exclusion — inverse de avf)
+    # avf est conservé intact pour ne pas casser les autres usages.
+    _types_exclus = {"ZU", "Z4", "ZR", "ZP"}
+    avf_approve = raw_av[
+        ~raw_av["Statut système"].fillna("").astype(str).str.contains("ACLO", case=False, na=False)
+        & ~raw_av["Type d'avis"].fillna("").astype(str).str.strip().str.upper().isin(_types_exclus)
+    ].copy()
+
     apm = sorted(
         df[
             df["Poste travail princ."].astype(str).str.startswith(("SF1", "SF2"), na=False)
@@ -234,4 +245,4 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
     # structurellement absents de "avf" ci-dessus.
     avis_complet = raw_av.copy()
 
-    return df, avf, apm, now_ts, avis_complet
+    return df, avf, apm, now_ts, avis_complet, avf_approve
