@@ -201,8 +201,6 @@ def _colorer_pct(colonne_pct, kpi, liste_kpi):
             continue
         if lower:
             ok, mid = (val <= cible), (val <= cible + 5)
-        elif kpi == "OT_COR_EGAL":
-            ok, mid = (val <= 5), False
         else:
             ok, mid = (val >= cible), (val >= cible - 5)
         if ok:
