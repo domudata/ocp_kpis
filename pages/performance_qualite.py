@@ -51,12 +51,16 @@ def _tableau_large(vp, ckdf, liste_kpi, nd_full, ano_map):
     tableau interactif ci-dessous (sélection d'une ligne + choix du KPI).
     Une ligne CIBLE est ajoutée en tête.
     """
-    lignes = []
+def _tableau_large(vp, ckdf, liste_kpi, nd_full, ano_map):
+    """Tableau COMPACT (une seule colonne par KPI, 'style export') :
+    Une seule colonne (%) par KPI.
+    La ligne CIBLE est placée au-dessus de TOTAL GÉNÉRAL.
+    Le TOTAL GÉNÉRAL applique la règle : si cellule rouge -> 0, sinon -> 1,
+    somme / nb_postes * 100 (taux de conformité par indicateur).
+    """
+    from core.calcul_kpi import gscore
 
-    ligne_cible = {"Poste de travail": "CIBLE"}
-    for kpi in liste_kpi:
-        ligne_cible[kpi] = int(round(CIBLE.get(kpi, 100)))
-    lignes.append(ligne_cible)
+    lignes = []
 
     for poste in vp:
         if poste not in ckdf.index:
@@ -66,14 +70,31 @@ def _tableau_large(vp, ckdf, liste_kpi, nd_full, ano_map):
         for kpi in liste_kpi:
             ligne[kpi] = int(round(float(r[kpi]))) if kpi in r.index and pd.notna(r[kpi]) else None
         lignes.append(ligne)
-    df = pd.DataFrame(lignes)
-    if len(df) > 1:
-        moyenne = {"Poste de travail": "TOTAL GÉNÉRAL"}
-        df_sans_cible = df[df["Poste de travail"] != "CIBLE"]
+
+    # Ligne CIBLE déplacée en haut de TOTAL GÉNÉRAL
+    ligne_cible = {"Poste de travail": "CIBLE"}
+    for kpi in liste_kpi:
+        ligne_cible[kpi] = int(round(CIBLE.get(kpi, 100)))
+    lignes.append(ligne_cible)
+
+    # Ligne TOTAL GÉNÉRAL : calcul conforme à la règle utilisateur
+    # (si cellule rouge -> 0, sinon -> 1, somme / nb_postes * 100)
+    if len(vp) > 0:
+        tot_general = {"Poste de travail": "TOTAL GÉNÉRAL"}
         for kpi in liste_kpi:
-            if kpi in df.columns:
-                moyenne[kpi] = int(round(df_sans_cible[kpi].mean(skipna=True)))
-        df = pd.concat([df, pd.DataFrame([moyenne])], ignore_index=True)
+            scores = []
+            for rw in lignes:
+                if rw.get("Poste de travail") not in ("CIBLE", "TOTAL GÉNÉRAL") and kpi in rw:
+                    v = rw[kpi]
+                    if v is not None and pd.notna(v):
+                        try:
+                            scores.append(gscore(kpi, float(v), CIBLE.get(kpi, 100)))
+                        except Exception:
+                            pass
+            tot_general[kpi] = int(round(sum(scores) / len(scores) * 100)) if scores else None
+        lignes.append(tot_general)
+
+    df = pd.DataFrame(lignes)
     return df
 
 
@@ -146,11 +167,11 @@ def _detail_et_telechargement(poste, kpi, ano_map, anomaly_dfs, cle_prefix):
 
 
 def _colorer_ligne_cible(row):
-    """AJOUTÉ (demande explicite) : toute la ligne CIBLE reçoit une
-    couleur de fond distincte (bleu marine), pour la distinguer
-    clairement des lignes de données."""
+    """Ligne CIBLE en bleu marine et TOTAL GÉNÉRAL en fond sombre accentué."""
     if row.get("Poste de travail") == "CIBLE":
         return ["background-color:#1e3a5f;color:white;font-weight:700;"] * len(row)
+    if row.get("Poste de travail") == "TOTAL GÉNÉRAL":
+        return ["background-color:#0f172a;color:white;font-weight:800;"] * len(row)
     return [""] * len(row)
 
 
