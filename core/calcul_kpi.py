@@ -117,7 +117,8 @@ def match_exact_token(statut, codes: set) -> bool:
 # ──────────────────────────────────────────────
 
 def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
-              df_toutes_dates: pd.DataFrame = None) -> dict:
+              df_toutes_dates: pd.DataFrame = None,
+              av_approve_i: pd.DataFrame = None) -> dict:
     """
     df_toutes_dates : DataFrame OT identique à df_i mais SANS le filtre de
     période de la barre latérale (mêmes colonnes). Utilisé UNIQUEMENT pour
@@ -126,12 +127,21 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     dont le calcul doit porter sur l'historique complet quelle que soit la
     période sélectionnée par l'utilisateur (demande explicite). Si non
     fourni, df_i est réutilisé (comportement inchangé, rétrocompatible).
+    av_approve_i : DataFrame des avis pour le KPI « AVIS APPROUVE » /
+    « Taux d'approbation des Avis », filtré selon la spec §20 :
+    - Statut système ne contient PAS « ACLO » (insensible à la casse)
+    - Type d'avis n'est pas ZU, Z4, ZR, ZP
+    Si non fourni, av_i est réutilisé (rétrocompatibilité).
     """
     res = {}
     df = df_i.copy()
     av = av_i.copy()
     res['dfp'] = df
     df_all = df_toutes_dates.copy() if df_toutes_dates is not None else df
+    # avf_approve : population pour « Taux d'approbation des Avis » / AVIS APPROUVE
+    # (spec §20 : exclut ACLO + exclut types ZU/Z4/ZR/ZP). Rétrocompatible si
+    # av_approve_i non fourni.
+    avf_approve = av_approve_i.copy() if av_approve_i is not None else av.copy()
 
     # ── Taux réalisation correctif ──
     filt_corr = (df["Nº appel pl.entret."].fillna(0) == 0) & (df["Contient SOPL"] == 1)
@@ -144,7 +154,10 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
         an["TOTAL_OT"] == 0, 100.0, ckpi(an["OT_CLOTURES"], an["TOTAL_OT"])
     )
 
-    # ── Exécution (inchangé) ──
+    # ── Exécution — FILTRE : Statut OT == "LANC" ET Contient SOPL == 1 ──
+    # Dénominateur : total OT respectant ce filtre, par Poste travail princ.
+    # Numérateur par tranche d'âge (colonne aex). Règle spec §1 :
+    # si Dénominateur = 0 → KPI = 100% (sz=100 pour toutes les tranches).
     ex = cpiv(
         df,
         (df["Statut OT"] == "LANC") & (df["Contient SOPL"] == 1),
@@ -154,8 +167,8 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
         ex[c] = ex.get(c, 0)
     ex["Total"] = ex[["<1 mois", "1 mois < <3 mois", ">3 mois", "Inconnu"]].sum(axis=1)
     ex["OT exécution <1 mois"] = ckpi(ex["<1 mois"], ex["Total"])
-    ex["OT exécution >3 mois"] = ckpi(ex[">3 mois"], ex["Total"], 0)
-    ex["OT exécution 1mois< <3mois"] = ckpi(ex["1 mois < <3 mois"], ex["Total"], 0)
+    ex["OT exécution >3 mois"] = ckpi(ex[">3 mois"], ex["Total"])
+    ex["OT exécution 1mois< <3mois"] = ckpi(ex["1 mois < <3 mois"], ex["Total"])
 
     # ── OT lancé estimé (inchangé) ──
     # ── OT LANC ESTIME — AJOUT SOPL + ZCOR (demande explicite) ──
@@ -180,8 +193,11 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     # restriction est appliquée à une COPIE dédiée (_zcor_cree_all) pour
     # ne pas restreindre _zcor_all, dont dérive aussi la population
     # Planification (ZCOR seul, puis filtrée sur LANC séparément).
+    # CORRIGÉ (spec §3) : le dénominateur est « dépêché sur la période »,
+    # c'est-à-dire restreint aux OT dont Date de début planifiée ≤ NOW_TS.
     _zcor_cree_all = _zcor_all[
-        _zcor_all["Statut système"].fillna("").astype(str).str.strip().str.split().str[0] == "CRÉÉ"
+        (_zcor_all["Statut système"].fillna("").astype(str).str.strip().str.split().str[0] == "CRÉÉ")
+        & (_zcor_all["Date de début planifiée"] <= now_ts)
     ].copy()
     _zcor_cree_all["_prep_carac"] = np.where(
         _zcor_cree_all["Statut utilisateur"].apply(lambda x: match_exact_token(x, CODES_PREP_EXACT)),
@@ -200,9 +216,12 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     # Périmètre : ZCOR ET Statut système == LANC, sur df_all.
     # Caractérisé = Statut utilisateur égal STRICTEMENT à ATEI/ATAL/ATAS/AGAR/ATHS.
     # Périmètre planification : ZCOR ET Statut système == LANC ET Contient SOPL == 0
+    # CORRIGÉ (spec §4) : le dénominateur est « dépêché sur la période »,
+    # c'est-à-dire restreint aux OT dont Date de début planifiée ≤ NOW_TS.
     _zcor_lanc_all = _zcor_all[
         (_zcor_all["Statut système"].fillna("").astype(str).str.strip().str.split().str[0] == "LANC")
         & (_zcor_all["Contient SOPL"] == 0)
+        & (_zcor_all["Date de début planifiée"] <= now_ts)
     ].copy()
     _zcor_lanc_all["_plan_carac"] = np.where(
         _zcor_lanc_all["Statut utilisateur"].apply(lambda x: match_exact_token(x, CODES_PLAN_EXACT)),
@@ -217,43 +236,32 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     plc["Total"] = plc["CARACTERISE"] + plc["NON CARACTERISE"]
     plc["Backlog planification caractérisé"] = ckpi(plc["CARACTERISE"], plc["Total"])
 
-    # ── OT préparation <1/1-3/>3 mois — NOUVELLE LOGIQUE (convenue) ──
-    # Base = OT NON CARACTERISE du Backlog préparation ci-dessus (ZCOR +
-    # Statut=CRÉÉ), répartis selon leur âge ("ap" = depuis "Créé le").
-    # ── OT préparation <1/1-3/>3 mois — CONFIRMÉ (clarification explicite) ──
-    # Base = uniquement la part NON CARACTERISE du Backlog préparation
-    # (ZCOR + CRÉÉ + non caractérisé), répartie selon l'âge ("ap" = depuis
-    # "Créé le"). La somme des 3 tranches d'âge est donc égale au nombre
-    # de NON CARACTERISE — PAS au Total (caractérisé + non caractérisé).
-    # ── OT préparation <1/1-3/>3 mois — CORRIGÉ (précision explicite) ──
-    # Base = POPULATION COMPLÈTE du Backlog préparation (ZCOR + CRÉÉ),
-    # CARACTERISE ET NON CARACTERISE confondus, répartie selon l'âge
-    # ("ap" = jours depuis "Créé le"). Ne dépend pas de "Date de début
-    # planifiée".
+    # ── OT préparation <1/1-3/>3 mois ──
+    # Base = POPULATION COMPLÈTE du Backlog préparation (ZCOR + CRÉÉ +
+    # Date planifiée ≤ NOW_TS), CARACTERISE ET NON CARACTERISE confondus,
+    # répartie selon l'âge ("ap" = depuis "Créé le").
+    # Règle spec : si Dénominateur = 0 → KPI = 100% (sz=100 pour toutes tranches).
     pr = cpiv(_zcor_cree_all, pd.Series(True, index=_zcor_cree_all.index), "ap", posts)
     for c in ["<1 mois", ">3 mois", "1 mois < <3 mois", "Inconnu"]:
         pr[c] = pr.get(c, 0)
     pr["Total"] = pr[["<1 mois", "1 mois < <3 mois", ">3 mois", "Inconnu"]].sum(axis=1)
     pr["OT préparation <1 mois"] = ckpi(pr["<1 mois"], pr["Total"])
-    pr["OT préparation >3 mois"] = ckpi(pr[">3 mois"], pr["Total"], 0)
-    pr["OT préparation 1mois< <3mois"] = ckpi(pr["1 mois < <3 mois"], pr["Total"], 0)
+    pr["OT préparation >3 mois"] = ckpi(pr[">3 mois"], pr["Total"])
+    pr["OT préparation 1mois< <3mois"] = ckpi(pr["1 mois < <3 mois"], pr["Total"])
 
-    # ── OT planification <1/1-3/>3 mois — même logique, sur "alp" ──
-    # ── OT planification <1/1-3/>3 mois — même principe, sur "alp" ──
-    # ── OT planification <1/1-3/>3 mois — CORRIGÉ (précision explicite) ──
+    # ── OT planification <1/1-3/>3 mois ──
     # Base = POPULATION COMPLÈTE du Backlog planification (ZCOR + LANC +
-    # SOPL==0), CARACTERISE ET NON CARACTERISE confondus, répartie selon
-    # l'âge ("alp" = depuis "Date de début planifiée"). NOUVEAU : restreint
-    # aux OT dont "Date de début planifiée" est déjà passée (<= aujourd'hui)
-    # — un OT planifié dans le futur n'a pas de sens à classer par "retard".
-    _zcor_lanc_age = _zcor_lanc_all[_zcor_lanc_all["Date de début planifiée"] <= now_ts]
-    pl = cpiv(_zcor_lanc_age, pd.Series(True, index=_zcor_lanc_age.index), "alp", posts)
+    # SOPL==0 + Date planifiée ≤ NOW_TS — déjà appliqué dans _zcor_lanc_all),
+    # CARACTERISE ET NON CARACTERISE confondus, répartie selon l'âge
+    # ("alp" = depuis "Date de début planifiée").
+    # Règle spec : si Dénominateur = 0 → KPI = 100% (sz=100 pour toutes tranches).
+    pl = cpiv(_zcor_lanc_all, pd.Series(True, index=_zcor_lanc_all.index), "alp", posts)
     for c in ["<1 mois", ">3 mois", "1 mois < <3 mois", "Inconnu"]:
         pl[c] = pl.get(c, 0)
     pl["Total"] = pl[["<1 mois", "1 mois < <3 mois", ">3 mois", "Inconnu"]].sum(axis=1)
     pl["OT planification <1 mois"] = ckpi(pl["<1 mois"], pl["Total"])
-    pl["OT planification >3 mois"] = ckpi(pl[">3 mois"], pl["Total"], 0)
-    pl["OT planification 1mois< <3mois"] = ckpi(pl["1 mois < <3 mois"], pl["Total"], 0)
+    pl["OT planification >3 mois"] = ckpi(pl[">3 mois"], pl["Total"])
+    pl["OT planification 1mois< <3mois"] = ckpi(pl["1 mois < <3 mois"], pl["Total"])
 
     # ── OT confirmé / coûts égaux (inchangé) ──
     # ── OT CONFIME — CORRIGÉ (bug de colonne) ──
@@ -299,29 +307,25 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     pv_cor["OT_COR_EGAL"] = ckpi(pv_cor["NON"], pv_cor["Total"])
     res["ot_cor_egal"] = pv_cor
 
-    # NOTE : le filtre d'exclusion ZU/Z4/ZR/ZP a été retiré ici. avf, tel
-    # que construit par prepare_data.py, est DÉJÀ restreint à ces mêmes
-    # types (avec Ordre vide) — un filtre d'exclusion supplémentaire ici
-    # viderait la population presque entièrement (107 → 0 lignes constaté
-    # sur données réelles). Voir prepare_data.py pour la définition d'avf.
-    avf = av.copy()
-    res['avf'] = avf
+    # ── AVIS APPROUVE / Taux d'approbation des Avis — spec §20 ──
+    # Population : avf_approve (filtré en amont : exclut ACLO dans Statut
+    # système + exclut types ZU/Z4/ZR/ZP — voir prepare_data.py).
+    # Numérateur : Statut utilisateur == "APRV" OU "REJET" (spec §20).
+    # Anomalie  : Statut utilisateur == "APRQ" (spec §20 - gérée dans anomalies.py).
+    # Dénominateur total via groupby direct (évite l'exclusion silencieuse
+    # des NaN par pivot_table).
+    res['avf'] = av.copy()                 # conservé pour compatibilité
+    res['avf_approve'] = avf_approve       # nouvelle population approb.
     tca = pd.pivot_table(
-        avf, index="Poste travail princ.", columns="Statut utilisateur",
+        avf_approve, index="Poste travail princ.", columns="Statut utilisateur",
         values="Avis", aggfunc="count", fill_value=0
     ).reindex(posts, fill_value=0)
-    for c in ["APRQ", "APRV", "APRV AVAU", "REJT"]:
+    for c in ["APRQ", "APRV", "REJET"]:
         tca[c] = tca.get(c, 0)
-    # CORRIGÉ (2e bug identifié) : pd.pivot_table(columns="Statut
-    # utilisateur", ...) EXCLUT SILENCIEUSEMENT les lignes où ce champ
-    # est NaN — ces avis disparaissaient du dénominateur, gonflant le
-    # taux d'approbation. Total calculé via groupby DIRECT sur avf (qui
-    # ne fait AUCUNE distinction de statut, donc n'exclut rien), comme
-    # le fait déjà anomalies.py (avf_tot) — les deux sont maintenant
-    # cohérents.
-    total_reel = avf.groupby("Poste travail princ.")["Avis"].count().reindex(posts, fill_value=0)
+    total_reel = avf_approve.groupby("Poste travail princ.")["Avis"].count().reindex(posts, fill_value=0)
     tca["Total"] = total_reel
-    tca["Taux d'approbation des Avis"] = ckpi(tca["APRV"], tca["Total"])
+    tca["_num_approve"] = tca["APRV"] + tca["REJET"]
+    tca["Taux d'approbation des Avis"] = ckpi(tca["_num_approve"], tca["Total"])
 
     # ── Performance Graissage — CORRIGÉ (2 bugs détectés lors de l'audit) ──
     # Bug 1 : le numérateur (Statut CLOT/TCLO) n'était pas contraint à
@@ -419,7 +423,7 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
         "Performance Graissage": (g_df["_n"], g_df["_d"]),
         "Performance Inspection": (ins_df["_n"], ins_df["_d"]),
         "Performance Systématiques": (sys_df["_n"], sys_df["_d"]),
-        "Taux d'approbation des Avis": (tca["APRV"], tca["Total"]),
+        "Taux d'approbation des Avis": (tca["_num_approve"], tca["Total"]),
         "OT LANC ESTIME": (la["OUI"], la["Total"]),
         "Backlog préparation caractérisé": (pc["CARACTERISE"], pc["Total"]),
         "Backlog planification caractérisé": (plc["CARACTERISE"], plc["Total"]),
