@@ -1,4 +1,4 @@
-
+# -*- coding: utf-8 -*-
 import numpy as np
 import pandas as pd
 
@@ -76,10 +76,21 @@ def _age_pivot(df_sub: pd.DataFrame, posts: list) -> pd.DataFrame:
         out["Total"] = 0
         return out
 
-    out = pd.pivot_table(
-        df_sub, index="Poste travail princ.", columns="_age_calc",
-        values="Ordre", aggfunc="count", fill_value=0
-    ).reindex(posts, fill_value=0)
+    # IMPORTANT :
+    # Ne pas utiliser values="Ordre" + aggfunc="count" ici.
+    # Si "Ordre" contient des cellules vides, pivot_table/count ignore ces
+    # lignes et peut transformer par exemple 1286 OT en seulement 33 OT.
+    # On compte donc les LIGNES de la population, indépendamment de la valeur
+    # de la colonne Ordre.
+    _tmp = df_sub[["Poste travail princ.", "_age_calc"]].copy()
+    _tmp["_nb_ot"] = 1
+
+    out = (
+        _tmp.groupby(["Poste travail princ.", "_age_calc"], dropna=False)["_nb_ot"]
+        .sum()
+        .unstack(fill_value=0)
+        .reindex(posts, fill_value=0)
+    )
 
     for c in AGE_COLS:
         out[c] = out.get(c, 0)
