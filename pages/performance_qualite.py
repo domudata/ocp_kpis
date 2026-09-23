@@ -176,9 +176,17 @@ def _colorer_ligne_cible(row):
 
 
 def _colorer_pct(colonne_pct, kpi, liste_kpi):
-    """AJOUTÉ (demande explicite, comme la version précédente) : couleur
-    de fond vert/jaune/rouge pour une colonne '{KPI} (%)', selon la
-    VRAIE cible et le sens (lower/higher-is-better) de ce KPI précis."""
+    """Couleur de fond vert/jaune/rouge pour une colonne '{KPI} (%)', selon la
+    cible et le sens (LOWER_BETTER ou non) avec tolérance de 5% :
+    - LOWER_BETTER (1-3m cible 15, >3m cible 5) :
+        <= cible -> Vert
+        <= cible + 5 -> Jaune
+        > cible + 5 -> Rouge
+    - KPIs normaux :
+        >= cible -> Vert
+        >= cible - 5 -> Jaune
+        < cible - 5 -> Rouge
+    """
     cible = CIBLE.get(kpi, 100)
     lower = is_lb(kpi)
     styles = []
@@ -186,10 +194,17 @@ def _colorer_pct(colonne_pct, kpi, liste_kpi):
         if pd.isna(v):
             styles.append("")
             continue
+        try:
+            val = float(v)
+        except Exception:
+            styles.append("")
+            continue
         if lower:
-            ok, mid = v <= cible, v <= cible * 1.3
+            ok, mid = (val <= cible), (val <= cible + 5)
+        elif kpi == "OT_COR_EGAL":
+            ok, mid = (val <= 5), False
         else:
-            ok, mid = v >= cible, v >= cible * 0.7
+            ok, mid = (val >= cible), (val >= cible - 5)
         if ok:
             styles.append("background-color:#10b98133;color:#065f46;font-weight:600;")
         elif mid:
