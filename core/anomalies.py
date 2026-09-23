@@ -9,53 +9,62 @@ def _backlogs_non_caracterises(dfp_all: pd.DataFrame, now_ts=None):
     """Reconstruit les populations Backlog préparation/planification.
 
     Retourne un tuple (non_prep, non_plan, full_prep, full_plan) :
-      - non_prep / non_plan : uniquement la part NON CARACTERISE (pour
-        l'indicateur Backlog préparation/planification caractérisé) ;
-      - full_prep / full_plan : la population COMPLÈTE (CARACTERISE ET
-        NON CARACTERISE confondus), pour les indicateurs OT préparation/
-        planification <1/1-3/>3 mois.
-    CORRIGÉ (spec §3/§4) : le dénominateur est « dépêché sur la période »,
-    c'est-à-dire restreint aux OT dont Date de début planifiée ≤ now_ts,
-    cohérent avec calcul_kpi.py."""
+      - non_prep / non_plan : partie NON CARACTERISE (pour Backlog carac KPI).
+        Utilise le filtre Date planifiée ≤ now_ts (spec §3/§4).
+      - full_prep : TOUS les ZCOR+CRÉÉ SANS filtre date planifiée — pour les
+        KPI d'âge préparation ("ap" = depuis "Créé le", disponible même sans
+        date planifiée). Sans ce split, les OT sans date planifiée sont exclus
+        et tous les KPI d'âge préparation reviennent à 100%.
+      - full_plan : ZCOR+LANC+SOPL==0 + Date planifiée ≤ now_ts — pour les
+        KPI d'âge planification ("alp" mesure le retard vs date planifiée ;
+        seuls les OT dont la date est passée ont un retard calculable).
+    """
     zcor = dfp_all[dfp_all["Type d'ordre"] == "ZCOR"].copy()
 
-    # Préparation : ZCOR + CRÉÉ + Date de début planifiée ≤ now_ts
-    _cree_filt = (
+    # ── Préparation base (CRÉÉ) ──
+    _cree_base_filt = (
         zcor["Statut système"].fillna("").astype(str).str.strip().str.split().str[0] == "CRÉÉ"
     )
+    _cree_base = zcor[_cree_base_filt]
+
+    # Backlog prep caractérisé : + filtre date planifiée
     if now_ts is not None:
-        _cree_filt = _cree_filt & (zcor["Date de début planifiée"] <= now_ts)
-    zcor_cree = zcor[_cree_filt]
-
-    # CORRIGÉ (bug pandas identifié et reproduit) : sur un DataFrame déjà
-    # VIDE (0 ligne), `~df["col"].apply(fonction)` peut renvoyer un
-    # résultat mal typé qui, une fois utilisé pour indexer le DataFrame,
-    # produit un DataFrame de forme (0, 0) — TOUTES les colonnes
-    # disparaissent, provoquant un KeyError plus loin (ex. sur "Poste
-    # travail princ.") dans le calcul filtré sur une période étroite
-    # (ex. une seule semaine) où aucun ZCOR ne tombe dans la fenêtre.
-    if zcor_cree.empty:
-        non_prep = zcor_cree
+        _zcor_cree_backlog = _cree_base[_cree_base["Date de début planifiée"] <= now_ts]
     else:
-        non_prep = zcor_cree[~zcor_cree["Statut utilisateur"].apply(lambda x: match_exact_token(x, CODES_PREP_EXACT))]
+        _zcor_cree_backlog = _cree_base
 
-    # Planification : ZCOR + LANC + SOPL==0 + Date de début planifiée ≤ now_ts
+    if _zcor_cree_backlog.empty:
+        non_prep = _zcor_cree_backlog
+    else:
+        non_prep = _zcor_cree_backlog[~_zcor_cree_backlog["Statut utilisateur"].apply(
+            lambda x: match_exact_token(x, CODES_PREP_EXACT)
+        )]
+
+    # KPI âge préparation : SANS filtre date planifiée
+    full_prep = _cree_base
+
+    # ── Planification base (LANC + SOPL==0) ──
     _lanc_filt = (
         (zcor["Statut système"].fillna("").astype(str).str.strip().str.split().str[0] == "LANC")
         & (zcor["Contient SOPL"] == 0)
     )
+    _lanc_base = zcor[_lanc_filt]
+
+    # Backlog plan caractérisé ET KPI âge plan : + filtre date planifiée
     if now_ts is not None:
-        _lanc_filt = _lanc_filt & (zcor["Date de début planifiée"] <= now_ts)
-    zcor_lanc = zcor[_lanc_filt]
-
-    if zcor_lanc.empty:
-        non_plan = zcor_lanc
+        _zcor_lanc_filt = _lanc_base[_lanc_base["Date de début planifiée"] <= now_ts]
     else:
-        non_plan = zcor_lanc[~zcor_lanc["Statut utilisateur"].apply(lambda x: match_exact_token(x, CODES_PLAN_EXACT))]
+        _zcor_lanc_filt = _lanc_base
 
-    full_prep = zcor_cree
-    # Le filtre date est déjà appliqué dans zcor_lanc ; full_plan = zcor_lanc.
-    full_plan = zcor_lanc
+    if _zcor_lanc_filt.empty:
+        non_plan = _zcor_lanc_filt
+    else:
+        non_plan = _zcor_lanc_filt[~_zcor_lanc_filt["Statut utilisateur"].apply(
+            lambda x: match_exact_token(x, CODES_PLAN_EXACT)
+        )]
+
+    # KPI âge planification : SANS filtre date planifiée (synchronisé avec calcul_kpi.py)
+    full_plan = _lanc_base
 
     return non_prep, non_plan, full_prep, full_plan
 
