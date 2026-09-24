@@ -1532,6 +1532,29 @@ def main():
 
 
         # ═══════════════════════════════════════════════════════════════════
+        # EXPORT SUIVI DATE SIDEBAR
+        # ═══════════════════════════════════════════════════════════════════
+
+        from core.export_excel import render_sidebar_suivi_date_export
+
+        render_sidebar_suivi_date_export(
+            fichier_date=fichier_date,
+            prows=prows,
+            pcols=pcols,
+            qrows=qrows,
+            qcols=qcols,
+            ano_p_r=ano_p_rows,
+            ano_p_c=ano_p_cols,
+            ano_q_r=ano_q_rows,
+            ano_q_c=ano_q_cols,
+            hist_df=hist_df,
+            var_df=var_df,
+            sdt=sdt,
+            edt=edt,
+        )
+
+
+        # ═══════════════════════════════════════════════════════════════════
         # SYNTHESE
         # ═══════════════════════════════════════════════════════════════════
 
@@ -2030,15 +2053,9 @@ def main():
 
                 try:
 
-                    from core.github_publish import (
-                        download_file as _gh_dl
-                    )
+                    from core.export_excel import get_historique_bytes
 
-
-                    _bytes_hist, _err_hist = _gh_dl(
-                        "kpis/indicateurs_kpis.xlsx"
-                    )
-
+                    _bytes_hist, _dates_hist = get_historique_bytes()
 
                     if _bytes_hist:
 
@@ -2054,6 +2071,7 @@ def main():
                                 "officedocument.spreadsheetml.sheet"
                             ),
                             use_container_width=True,
+                            key="dl_hist_complet_tab3",
                         )
 
 
@@ -2286,6 +2304,8 @@ def main():
                         postes=list(vp),
                         dry_run=_launch_dry,
                         progress_callback=_on_progress,
+                        dfp_toutes_dates=df_period,
+                        hist_df=hist_df,
                     )
                 )
 
