@@ -189,14 +189,20 @@ def save_kpis_to_excel(prows, pcols, qrows, qcols,
     except Exception as e:
         diag.append(f"Erreur mise à jour date.txt : {e}")
 
-    # 2) Publication sur GitHub si configuré
+    # 2) Publication sur GitHub si configuré et mise en mémoire
     publie_gh = False
+    buf = io.BytesIO()
+    wb.save(buf)
+    contenu = buf.getvalue()
+    try:
+        st.session_state["_dernier_historique_bytes"] = contenu
+        st.session_state["_historique_dates_list"] = dates_apres
+    except Exception:
+        pass
+
     try:
         from core.github_publish import upload_file, is_configured
         if is_configured():
-            buf = io.BytesIO()
-            wb.save(buf)
-            contenu = buf.getvalue()
             ok, msg_up = upload_file(CHEMIN_HISTORIQUE_GITHUB, contenu,
                                       f"Historique KPI — {sheet_name}")
             publie_gh = ok
@@ -303,3 +309,238 @@ def export_btn(df: pd.DataFrame, filename: str) -> None:
         "📥 Exporter Excel", data=buf, file_name=filename,
         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
+
+
+def get_historique_bytes():
+    """
+    Récupère le contenu binaire (.xlsx) et la liste des feuilles (dates)
+    du classeur historique.
+    Vérifie dans l'ordre :
+      1. st.session_state["_dernier_historique_bytes"]
+      2. Le fichier kpis/indicateurs_kpis.xlsx local
+      3. Le fichier kpis.xlsx local
+      4. Téléchargement depuis GitHub via download_file
+    Retourne : (bytes_data: bytes | None, sheetnames: list[str])
+    """
+    # 1. En mémoire de session si tout juste enregistré
+    try:
+        if "_dernier_historique_bytes" in st.session_state and st.session_state["_dernier_historique_bytes"]:
+            b = st.session_state["_dernier_historique_bytes"]
+            dates = st.session_state.get("_historique_dates_list", [])
+            return b, dates
+    except Exception:
+        pass
+
+    # 2. Local kpis/indicateurs_kpis.xlsx
+    if os.path.exists(CHEMIN_HISTORIQUE_KPIS_DIR):
+        try:
+            with open(CHEMIN_HISTORIQUE_KPIS_DIR, "rb") as f:
+                content = f.read()
+            wb = load_workbook(io.BytesIO(content), read_only=True)
+            dates = [s for s in wb.sheetnames if s != "Sheet"]
+            wb.close()
+            return content, dates
+        except Exception:
+            pass
+
+    # 3. Local kpis.xlsx
+    if os.path.exists(CHEMIN_HISTORIQUE_LOCAL):
+        try:
+            with open(CHEMIN_HISTORIQUE_LOCAL, "rb") as f:
+                content = f.read()
+            wb = load_workbook(io.BytesIO(content), read_only=True)
+            dates = [s for s in wb.sheetnames if s != "Sheet"]
+            wb.close()
+            return content, dates
+        except Exception:
+            pass
+
+    # 4. GitHub si configuré
+    try:
+        from core.github_publish import download_file, is_configured
+        if is_configured():
+            content, err = download_file(CHEMIN_HISTORIQUE_GITHUB)
+            if content:
+                wb = load_workbook(io.BytesIO(content), read_only=True)
+                dates = [s for s in wb.sheetnames if s != "Sheet"]
+                wb.close()
+                return content, dates
+    except Exception:
+        pass
+
+    return None, []
+
+
+def build_date_suivi_workbook(
+    prows: list, pcols: list,
+    qrows: list, qcols: list,
+    ano_p_r: list = None, ano_p_c: list = None,
+    ano_q_r: list = None, ano_q_c: list = None,
+    date_str: str = "",
+    sdt=None, edt=None,
+) -> bytes:
+    """
+    Construit un classeur Excel pour la date active avec 4 onglets :
+      - Indicateurs Performance
+      - Anomalies Performance
+      - Indicateurs Qualité
+      - Anomalies Qualité
+    """
+    wb = Workbook()
+    if "Sheet" in wb.sheetnames:
+        del wb["Sheet"]
+
+    hf = Font(bold=True, color="FFFFFF", size=10)
+    hfl = PatternFill(start_color="1E3A5F", end_color="1E3A5F", fill_type="solid")
+    tb = Border(left=Side(style="thin", color="CBD5E1"), right=Side(style="thin", color="CBD5E1"),
+                top=Side(style="thin", color="CBD5E1"), bottom=Side(style="thin", color="CBD5E1"))
+    center_align = Alignment(horizontal="center", vertical="center")
+    left_align = Alignment(horizontal="left", vertical="center")
+
+    def _add_sheet(titre_feuille, cols, rows):
+        if not cols or not rows:
+            return
+        ws = wb.create_sheet(titre_feuille[:31])
+        # Entêtes
+        for j, c in enumerate(cols, 1):
+            cell = ws.cell(row=1, column=j, value=c)
+            cell.font, cell.fill, cell.border = hf, hfl, tb
+            cell.alignment = center_align
+        # Lignes
+        for i, r in enumerate(rows, 2):
+            is_special = r.get("_t") in ("cible", "total") or str(r.get(cols[0], "")).upper() in ("CIBLE", "TOTAL GENERAL")
+            for j, c in enumerate(cols, 1):
+                val = r.get(c, "")
+                cell = ws.cell(row=i, column=j, value="" if val is None or pd.isna(val) else str(val))
+                cell.border = tb
+                if is_special:
+                    cell.font = Font(bold=True, color="1E3A5F" if r.get("_t") == "total" else "059669")
+                cell.alignment = left_align if j == 1 else center_align
+        # Ajustement largeur colonnes
+        for col in ws.columns:
+            max_len = max(len(str(cell.value or "")) for cell in col)
+            col_letter = col[0].column_letter
+            ws.column_dimensions[col_letter].width = min(40, max(12, max_len + 3))
+
+    _add_sheet("Indicateurs Performance", pcols, prows)
+    if ano_p_c and ano_p_r:
+        _add_sheet("Anomalies Performance", ano_p_c, ano_p_r)
+    _add_sheet("Indicateurs Qualité", qcols, qrows)
+    if ano_q_c and ano_q_r:
+        _add_sheet("Anomalies Qualité", ano_q_c, ano_q_r)
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    return buf.getvalue()
+
+
+def build_variations_workbook(var_df: pd.DataFrame) -> bytes:
+    """Exporte le tableau des variations entre dates dans un fichier Excel formaté."""
+    if var_df is None or var_df.empty:
+        return b""
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        var_df.to_excel(writer, sheet_name="Variations KPI", index=False)
+        ws = writer.sheets["Variations KPI"]
+        hf = Font(bold=True, color="FFFFFF", size=10)
+        hfl = PatternFill(start_color="1E3A5F", end_color="1E3A5F", fill_type="solid")
+        for cell in ws[1]:
+            cell.font = hf
+            cell.fill = hfl
+            cell.alignment = Alignment(horizontal="center")
+        for col in ws.columns:
+            max_len = max(len(str(cell.value or "")) for cell in col)
+            ws.column_dimensions[col[0].column_letter].width = min(40, max(12, max_len + 3))
+    return buf.getvalue()
+
+
+def render_sidebar_suivi_date_export(
+    fichier_date: str,
+    prows: list, pcols: list,
+    qrows: list, qcols: list,
+    ano_p_r: list = None, ano_p_c: list = None,
+    ano_q_r: list = None, ano_q_c: list = None,
+    hist_df: pd.DataFrame = None,
+    var_df: pd.DataFrame = None,
+    sdt=None, edt=None,
+) -> None:
+    """
+    Affiche dans la barre latérale (st.sidebar) un expander dédié à l'export
+    du suivi de date et de l'historique :
+      1. Suivi complet (Toutes les dates — indicateurs_kpis.xlsx)
+      2. Suivi de la date active ({fichier_date})
+      3. Variations entre dates (si disponibles)
+    """
+    clean_date = str(fichier_date).strip().replace("/", "-")
+
+    with st.sidebar:
+        with st.expander("📅 Export Suivi Date & Historique", expanded=True):
+            st.markdown(
+                f"<div style='font-size:12px;color:#cbd5e1;margin-bottom:6px;'>"
+                f"Date active : <strong style='color:#38bdf8;'>{fichier_date}</strong>"
+                f"</div>",
+                unsafe_allow_html=True,
+            )
+            if sdt and edt:
+                try:
+                    s_str = sdt.strftime('%d/%m/%Y')
+                    e_str = edt.strftime('%d/%m/%Y')
+                    st.caption(f"Période analysée : {s_str} ➔ {e_str}")
+                except Exception:
+                    pass
+
+            # ── 1. Suivi de la date active ──
+            try:
+                date_bytes = build_date_suivi_workbook(
+                    prows, pcols, qrows, qcols,
+                    ano_p_r, ano_p_c, ano_q_r, ano_q_c,
+                    date_str=fichier_date, sdt=sdt, edt=edt
+                )
+                if date_bytes:
+                    st.download_button(
+                        f"⬇️ Suivi de la date ({fichier_date})",
+                        data=date_bytes,
+                        file_name=f"suivi_kpis_{clean_date}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        use_container_width=True,
+                        key=f"dl_suivi_date_active_{clean_date}",
+                        help="Classeur Excel complet pour cette date : Performance, Qualité et Anomalies.",
+                    )
+            except Exception as e_date:
+                st.caption(f"Export date active indisponible : {e_date}")
+
+            st.markdown("<hr style='margin:8px 0;border-color:rgba(255,255,255,0.15);'>", unsafe_allow_html=True)
+
+            # ── 2. Suivi complet de toutes les dates (Historique) ──
+            hist_bytes, dates_list = get_historique_bytes()
+            if hist_bytes:
+                nb = len(dates_list) if dates_list else (hist_df["Date"].nunique() if hist_df is not None and not hist_df.empty and "Date" in hist_df.columns else 1)
+                st.caption(f"📂 Suivi historique : **{nb} date(s)**")
+                st.download_button(
+                    "⬇️ Suivi complet — Toutes dates (.xlsx)",
+                    data=hist_bytes,
+                    file_name="indicateurs_kpis.xlsx",
+                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                    use_container_width=True,
+                    key="dl_suivi_dates_complet_sb",
+                    help="Classeur complet indicateurs_kpis.xlsx avec une feuille par date d'extraction.",
+                )
+            else:
+                st.caption("ℹ️ Aucun historique multi-dates disponible.")
+
+            # ── 3. Variations entre dates (si disponibles) ──
+            if var_df is not None and not var_df.empty:
+                try:
+                    var_bytes = build_variations_workbook(var_df)
+                    if var_bytes:
+                        st.download_button(
+                            "⬇️ Variations & Évolution (.xlsx)",
+                            data=var_bytes,
+                            file_name=f"variations_kpis_{clean_date}.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            use_container_width=True,
+                            key="dl_var_dates_sb",
+                            help="Évolution et écarts de chaque KPI par poste entre les dates d'extraction.",
+                        )
+                except Exception:
+                    pass
