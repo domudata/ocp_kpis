@@ -2350,15 +2350,12 @@ def main():
                 with _status_area.container():
 
                     if _launch_dry:
-
                         st.success(
                             f"✅ Génération test terminée : "
                             f"{_ok_pdf}/{len(_results)} PDF, "
-                            f"{_ok_xlsx}/{len(_results)} Excel."
+                            f"{_ok_xlsx}/{len(_results)} Excel générés."
                         )
-
-                    else:
-
+                    elif _ok_pub > 0:
                         st.success(
                             f"✅ {_ok_pub}/{len(_results)} "
                             "postes publiés sur GitHub "
@@ -2366,37 +2363,29 @@ def main():
                             f"{_ok_pdf} PDF, "
                             f"{_ok_xlsx} Excel générés."
                         )
-
-
-                    with st.expander(
-                        "Détail par poste"
-                    ):
-
-                        for r in _results:
-
-                            _icons = "".join(
-                                [
-                                    "📄"
-                                    if r.get("pdf")
-                                    else "❌",
-
-                                    "📈"
-                                    if r.get("xlsx")
-                                    else "❌",
-                                ]
+                    else:
+                        st.success(
+                            f"✅ Fichiers enregistrés localement dans 'presentation/' : "
+                            f"{_ok_pdf} PDF, {_ok_xlsx} Excel générés pour {len(_results)} postes/synthèses."
+                        )
+                        if not _github_configured():
+                            st.info(
+                                "ℹ️ Publication GitHub non configurée (secrets GITHUB_TOKEN / GITHUB_REPO absents). "
+                                "Les fichiers sont enregistrés sur votre disque local dans `presentation/<poste>/`."
                             )
 
+                    with st.expander("Détail par poste"):
+                        for r in _results:
+                            _pdf_icon = "📄 PDF" if r.get("pdf") else "❌ Pas de PDF"
+                            if r.get("est_division"):
+                                _icons = f"{_pdf_icon} (Synthèse)"
+                            else:
+                                _xlsx_icon = "📊 Excel" if r.get("xlsx") else "❌ Pas d'Excel"
+                                _icons = f"{_pdf_icon} | {_xlsx_icon}"
 
                             st.caption(
-                                f"{_icons}  "
-                                f"**{r['poste']}** — "
-                                +
-                                " / ".join(
-                                    r.get(
-                                        "messages",
-                                        []
-                                    )
-                                )
+                                f"**{r['poste']}** [{_icons}] — "
+                                + " / ".join(r.get("messages", []))
                             )
 
 
