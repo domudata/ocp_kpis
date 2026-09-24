@@ -2291,6 +2291,17 @@ def main():
                     )
 
 
+                _kwargs_pub = {}
+                try:
+                    import inspect
+                    _sig = inspect.signature(generate_and_publish_all_postes)
+                    if "dfp_toutes_dates" in _sig.parameters:
+                        _kwargs_pub["dfp_toutes_dates"] = df_period
+                    if "hist_df" in _sig.parameters:
+                        _kwargs_pub["hist_df"] = hist_df
+                except Exception:
+                    pass
+
                 _results = (
                     generate_and_publish_all_postes(
                         ckdf,
@@ -2304,8 +2315,7 @@ def main():
                         postes=list(vp),
                         dry_run=_launch_dry,
                         progress_callback=_on_progress,
-                        dfp_toutes_dates=df_period,
-                        hist_df=hist_df,
+                        **_kwargs_pub,
                     )
                 )
 
