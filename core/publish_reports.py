@@ -64,6 +64,8 @@ def generate_and_publish_poste_report(
     ano_map: dict, dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
     date_str: str, dry_run: bool = False,
     dfp_toutes_dates: pd.DataFrame = None,
+    hist_df: pd.DataFrame = None,
+    **kwargs,
 ):
     """
     Génère et publie (si dry_run=False) les fichiers pour UN poste.
@@ -109,6 +111,7 @@ def generate_and_publish_poste_report(
             anomalies=anomalies, total_anomalies=total_anomalies,
             plan_action=plan_action, date_str=date_str,
             short_labels=SHORT_LABELS,
+            hist_df=hist_df, vp=[poste],
         )
         status["pdf"] = True
     except Exception as e:
@@ -173,7 +176,8 @@ def generate_and_publish_poste_report(
 def generate_and_publish_division_report(
     division: str, postes_division: list, ckdf: pd.DataFrame,
     pscores: dict, qscores: dict, ano_map: dict, date_str: str,
-    dry_run: bool = False,
+    dry_run: bool = False, hist_df: pd.DataFrame = None,
+    **kwargs,
 ):
     """
     Génère et publie UN rapport consolidé pour une division entière
@@ -266,7 +270,10 @@ def generate_and_publish_division_report(
         })
     plan_action.sort(key=lambda x: -x["nb_anom"])
 
-    titre = f"{division} — Synthèse division ({len(postes_valides)} postes)"
+    # Nom lisible de la division (SF01 = Maroc Chimie, SF02 = FEEDS)
+    _noms_division = {"SF01": "Maroc Chimie", "SF02": "FEEDS"}
+    nom_div = _noms_division.get(division, division)
+    titre = f"{nom_div} — Synthèse division"
     try:
         pdf_bytes = build_poste_report_pdf(
             poste=titre, pscore=pscore_div, qscore=qscore_div,
@@ -274,6 +281,7 @@ def generate_and_publish_division_report(
             anomalies=anomalies, total_anomalies=total_anomalies,
             plan_action=plan_action, date_str=date_str,
             short_labels=SHORT_LABELS, mode_conformite=True,
+            hist_df=hist_df, vp=postes_valides,
         )
         status["pdf"] = True
     except Exception as e:
@@ -314,18 +322,20 @@ def generate_and_publish_all_postes(
     dfp: pd.DataFrame, avf: pd.DataFrame, now_ts, date_str: str,
     postes: list = None, dry_run: bool = False, progress_callback=None,
     dfp_toutes_dates: pd.DataFrame = None,
+    hist_df: pd.DataFrame = None,
+    **kwargs,
 ):
     """
     Boucle sur tous les postes (ou la liste fournie) et publie leur
     rapport, PUIS génère deux rapports de synthèse supplémentaires —
-    un par division (SF01 et SF02) — sans fichier Excel associé.
+    un par division (SF01 = Maroc Chimie, SF02 = FEEDS) — sans fichier Excel.
     progress_callback(i, n, poste) est appelé avant chaque poste.
     Retourne la liste des status.
     """
     postes = postes if postes is not None else list(ckdf.index)
     results = []
 
-    # ── Rapports par poste (inchangés : PDF + Excel d'anomalies) ──
+    # ── Rapports par poste (PDF + Excel d'anomalies) ──
     for i, poste in enumerate(postes):
         if progress_callback:
             progress_callback(i, len(postes), poste)
@@ -338,10 +348,11 @@ def generate_and_publish_all_postes(
             ano_map=ano_map, dfp=dfp, avf=avf, now_ts=now_ts,
             date_str=date_str, dry_run=dry_run,
             dfp_toutes_dates=dfp_toutes_dates,
+            hist_df=hist_df,
         )
         results.append(res)
 
-    # ── Deux rapports de synthèse par division, SANS Excel ──
+    # ── Deux rapports de synthèse par division ──
     for division, prefixe in [("SF01", "SF1"), ("SF02", "SF2")]:
         postes_div = [p for p in postes if str(p).startswith(prefixe)]
         if not postes_div:
@@ -352,6 +363,7 @@ def generate_and_publish_all_postes(
             division=division, postes_division=postes_div, ckdf=ckdf,
             pscores=pscores, qscores=qscores, ano_map=ano_map,
             date_str=date_str, dry_run=dry_run,
+            hist_df=hist_df,
         )
         results.append(res)
 
