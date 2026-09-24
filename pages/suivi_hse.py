@@ -20,9 +20,12 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
+try:
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+except Exception:
+    plt = None
 
 TYPE_TRAVAIL_SECURITE = 320
 STATUTS_CLOTURE = ["TCLO", "CLOT"]
