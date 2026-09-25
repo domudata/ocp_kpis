@@ -72,11 +72,8 @@ def show_simple_pie(piv_df: pd.DataFrame, title: str, keep_non_carac: bool = Fal
             height=450, showlegend=True,
             legend=dict(orientation="h", yanchor="bottom", y=-0.12, x=0.5, xanchor="center"),
             margin=dict(t=60, b=70, l=40, r=40),
-            # CORRIGÉ : masque proprement les labels qui ne rentrent pas
-            # (tranches minuscules) au lieu de les laisser se chevaucher.
             uniformtext_minsize=9, uniformtext_mode='hide',
         )
-        # Reduire le domaine du pie pour laisser la place au titre en haut
         fig.update_traces(domain=dict(y=[0.0, 0.82]))
         st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
         return
@@ -91,13 +88,11 @@ def show_simple_pie(piv_df: pd.DataFrame, title: str, keep_non_carac: bool = Fal
         subplot_titles=("Répartition principale", f"Détail « Autres » ({small.sum():.0f} OT)"),
         vertical_spacing=0.0,
     )
-    # Abaisser les sous-titres pour les separer du titre principal
     for ann in fig.layout.annotations:
         ann.y = 0.95
         ann.font.size = 11
         ann.font.color = "#64748B"
 
-    # Camembert principal ("Autres" en gris) — domaine reduit vers le bas
     main_colors = _colors_for(big.index) + ["#94a3b8"]
     fig.add_trace(go.Pie(
         labels=main_counts.index, values=main_counts.values,
@@ -109,7 +104,6 @@ def show_simple_pie(piv_df: pd.DataFrame, title: str, keep_non_carac: bool = Fal
         domain=dict(y=[0.0, 0.76]),
     ), 1, 1)
 
-    # Camembert secondaire : detail des secteurs minces
     small_colors = (TYPE_PALETTE[len(big):] + TYPE_PALETTE)[:len(small)]
     fig.add_trace(go.Pie(
         labels=small.index, values=small.values,
@@ -130,7 +124,6 @@ def show_simple_pie(piv_df: pd.DataFrame, title: str, keep_non_carac: bool = Fal
         height=470, showlegend=True,
         legend=dict(orientation="h", yanchor="bottom", y=-0.12, x=0.5, xanchor="center"),
         margin=dict(t=80, b=70, l=30, r=30),
-        # CORRIGÉ : masque proprement les labels qui ne rentrent pas.
         uniformtext_minsize=9, uniformtext_mode='hide',
     )
     st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
@@ -155,18 +148,11 @@ def show_pie_pair(piv_df: pd.DataFrame, title_prefix: str) -> None:
             f"{title_prefix} — Réalisés vs Non Réalisés",
         ),
     )
-    # CORRIGÉ : sous-titres remontés (y=0.97 au lieu de 0.93) ET domaine
-    # des camemberts réduit (0.72 au lieu de 0.82) pour créer un vrai
-    # espace tampon entre le titre et les labels "outside" des tranches
-    # minuscules (ex: CRÉÉ à 0.1%, LANC à 1.6%), qui remontaient jusque
-    # dans la zone du titre et se chevauchaient avec lui.
     for ann in fig.layout.annotations:
         ann.y = 0.97
         ann.font.size = 12
         ann.font.color = "#334155"
 
-    # Style unifie avec show_simple_pie : hole 0.4, labels exterieurs,
-    # bord blanc fin, hover normalise — domaine reduit vers le bas
     fig.add_trace(go.Pie(
         labels=global_counts.index, values=global_counts.values,
         hole=0.4, sort=False,
@@ -197,10 +183,6 @@ def show_pie_pair(piv_df: pd.DataFrame, title_prefix: str) -> None:
         height=500, showlegend=True,
         legend=dict(orientation="h", yanchor="bottom", y=-0.10, x=0.5, xanchor="center"),
         margin=dict(t=55, b=70, l=40, r=40),
-        # CORRIGÉ : c'est le fix principal — Plotly masque proprement tout
-        # label qui ne rentre pas dans l'espace disponible plutôt que de
-        # les laisser se superposer/chevaucher. Les tranches minuscules
-        # sans label visible restent lisibles via la légende et le hover.
         uniformtext_minsize=9, uniformtext_mode='hide',
     )
     st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG)
@@ -210,16 +192,11 @@ def show_pie_pair(piv_df: pd.DataFrame, title_prefix: str) -> None:
 # Rose < seuil1 | Orange >= seuil1 | Vert >= seuil2
 # ═══════════════════════════════════════════════════════════════════════════
 S1_DEFAULT, S2_DEFAULT = 70, 90
-# Couleurs identiques aux cellules Total des tableaux :
-# rouge < s1 | jaune s1-s2 | vert >= s2
 C_LOW, C_MID, C_HIGH = "#ef4444", "#f59e0b", "#10b981"
 
 def _bar_color_for(label, value, cible_map=None, lower_set=None, s1=S1_DEFAULT, s2=S2_DEFAULT):
     """
-    Couleur d'une barre cohérente avec le coloriage des cellules du tableau :
-    - Si `label` est un KPI connu (present dans cible_map) : utilise sa VRAIE
-      cible et son sens (LOWER_BETTER ou non), comme dans components/tables.py.
-    - Sinon (ex: nom de poste, score) : utilise les seuils generiques s1/s2.
+    Couleur d'une barre cohérente avec le coloriage des cellules du tableau.
     """
     try:
         v = float(value)
@@ -230,29 +207,20 @@ def _bar_color_for(label, value, cible_map=None, lower_set=None, s1=S1_DEFAULT, 
         target = float(cible_map[label])
         is_lower = bool(lower_set) and label in lower_set
         if is_lower:
-            # Plus bas = mieux (ex: >3 mois cible <=5%, 1-3 mois cible <=15%)
             if v <= target:
                 return C_HIGH
             return C_MID if v <= target + 5 else C_LOW
         else:
-            # Plus haut = mieux (ex: <1 mois cible >=80%)
             if v >= target:
                 return C_HIGH
             return C_MID if v >= target - 5 else C_LOW
 
-    # Pas de cible connue (score global, poste...) → seuils generiques
     return C_HIGH if v >= s2 else (C_MID if v >= s1 else C_LOW)
 
 def show_hbar_thresholds(labels, values, title, s1=S1_DEFAULT, s2=S2_DEFAULT,
                           suffix="%", cible_map=None, lower_set=None) -> None:
     """
-    Barres horizontales par element avec 2 lignes de seuil pointillees
-    (s1 orange, s2 vert) — meme presentation que le rapport SAP PM OCP.
-
-    Si `cible_map` (ex: core.constants.CIBLE) et `lower_set` (ex: LOWER_BETTER)
-    sont fournis, la couleur de CHAQUE barre suit sa propre cible (coherent
-    avec le coloriage des cellules du tableau KPI), au lieu des seuils
-    generiques s1/s2 appliques uniformement.
+    Barres horizontales par element avec 2 lignes de seuil pointillees.
     """
     if len(labels) == 0:
         st.markdown('<div style="padding:20px;color:#94a3b8;">Aucune donnée</div>', unsafe_allow_html=True)
@@ -272,7 +240,6 @@ def show_hbar_thresholds(labels, values, title, s1=S1_DEFAULT, s2=S2_DEFAULT,
         hovertemplate="<b>%{y}</b><br>%{x:.1f}" + suffix + "<extra></extra>",
     ))
 
-    # Lignes de seuil pointillees + marqueurs (reperes visuels génériques)
     fig.add_vline(x=s1, line_dash="dash", line_color=C_MID, line_width=2)
     fig.add_vline(x=s2, line_dash="dash", line_color=C_HIGH, line_width=2)
     fig.add_annotation(x=s1, y=1.04, yref="paper", text=f"▼ {s1}{suffix}",
@@ -294,8 +261,7 @@ def show_hbar_thresholds(labels, values, title, s1=S1_DEFAULT, s2=S2_DEFAULT,
 def show_statut_hbar(piv_df: pd.DataFrame, title: str,
                       s1=S1_DEFAULT, s2=S2_DEFAULT) -> None:
     """
-    Taux de realisation (CLOT+TCLO / total) PAR POSTE de travail,
-    en barres horizontales avec seuils — remplace les camemberts globaux.
+    Taux de realisation (CLOT+TCLO / total) PAR POSTE de travail.
     """
     for c in ["CRÉÉ", "LANC", "CLOT", "TCLO"]:
         if c not in piv_df.columns:
@@ -316,16 +282,7 @@ def show_statut_hbar(piv_df: pd.DataFrame, title: str,
 def show_grouped_hbar(vp, pscores: dict, qscores: dict, title: str,
                        s1=S1_DEFAULT, s2=S2_DEFAULT, thin: bool = False) -> None:
     """
-    Comparaison Performance / Qualite PAR POSTE en barres horizontales
-    groupees, avec lignes de seuil s1/s2 (style rapport OCP).
-
-    CORRIGÉ (retour utilisateur) : les barres précédentes, une fois
-    étirées sur toute la largeur du conteneur, paraissaient trop longues
-    et trop fines. Deux changements :
-      - bargap/bargroupgap réduits (barres plus ÉPAISSES) ;
-      - le graphique n'est plus étiré sur toute la largeur de l'écran
-        (use_container_width=False, largeur fixe raisonnable), pour que
-        des barres courtes restent visuellement courtes.
+    Comparaison Performance / Qualite PAR POSTE en barres horizontales.
     """
     postes = [p for p in vp if p in pscores or p in qscores]
     if not postes:
@@ -384,10 +341,9 @@ def show_grouped_hbar(vp, pscores: dict, qscores: dict, title: str,
 def show_butterfly_single_domain(postes: list, valeurs_prec: list, valeurs_act: list,
                                   titre: str, label_prec: str, label_act: str,
                                   couleur_prec: str, couleur_act: str) -> None:
-    """AJOUTÉ (demande explicite) : graphique papillon pour UN SEUL
-    domaine (Performance OU Qualité), destiné à être affiché à côté de
-    l'autre domaine (2 graphiques séparés, l'un à côté de l'autre) au
-    lieu de les fusionner sur un même graphique."""
+    """
+    Graphique papillon pour UN SEUL domaine (Performance OU Qualité).
+    """
     if not postes:
         st.markdown('<div style="padding:20px;color:#94a3b8;">Aucune donnée</div>', unsafe_allow_html=True)
         return
@@ -431,13 +387,6 @@ def show_butterfly_comparison(postes: list,
                                titre: str, label_prec: str, label_act: str) -> None:
     """
     Graphique papillon Performance/Qualité fusionnées.
-    CORRIGÉ (demande explicite) :
-      - texte des pourcentages À L'EXTÉRIEUR des barres, en NOIR (retour
-        en arrière sur le "inside/blanc" précédent) ;
-      - barres plus ÉPAISSES (bargap réduit) ;
-      - palette harmonisée par PAIRES de teintes (clair=précédente,
-        foncé=actuelle) au lieu de couleurs disparates : bleu pour
-        Performance, vert pour Qualité.
     """
     if not postes:
         st.markdown('<div style="padding:20px;color:#94a3b8;">Aucune donnée</div>', unsafe_allow_html=True)
@@ -495,9 +444,7 @@ def show_butterfly_comparison(postes: list,
 
 def show_scores_hbar(vp, scores: dict, title, s1=S1_DEFAULT, s2=S2_DEFAULT):
     """
-    Barres horizontales des scores PAR POSTE (une seule serie),
-    colorees selon le score (rouge/jaune/vert). Pour afficher
-    Performance et Qualite separement cote a cote.
+    Barres horizontales des scores PAR POSTE (une seule serie).
     """
     postes = [p for p in vp if p in scores]
     if not postes:
@@ -509,9 +456,7 @@ def show_scores_hbar(vp, scores: dict, title, s1=S1_DEFAULT, s2=S2_DEFAULT):
 
 def _dessiner_barre_horizontale_semaine_division(postes_div, par_poste, detail_par_poste,
                                                    key_prefix) -> None:
-    """Dessine UN graphique bar HORIZONTAL (système hebdomadaire par
-    semaine calendaire, page Suivi Évolution) pour une division (SF1 ou
-    SF2), avec le nombre traité affiché à l'extérieur de la barre."""
+    """Dessine UN graphique bar HORIZONTAL (système hebdomadaire) pour une division."""
     sous = par_poste[par_poste["Poste"].isin(postes_div)] if not par_poste.empty else par_poste
     if sous.empty:
         st.markdown('<div style="padding:12px;color:#94a3b8;">Aucun poste.</div>', unsafe_allow_html=True)
@@ -571,12 +516,9 @@ def _dessiner_barre_horizontale_semaine_division(postes_div, par_poste, detail_p
 
 def _dessiner_suivi_anomalies(res: dict, key_prefix: str) -> None:
     """
-    CORRIGÉ (demande explicite) : SÉPARÉ en 2 graphiques bar HORIZONTAUX
-    côte à côte — SF1 = « Maroc Chimie » à gauche, SF2 = « FEEDS » à
-    droite — au lieu d'un seul graphique vertical mélangeant les 2
-    divisions. Cycle hebdomadaire : compte les anomalies de la semaine
-    en cours ; au 1er jour de la semaine suivante, compare pour afficher
-    combien ont été traitées durant la semaine précédente."""
+    SÉPARÉ en 2 graphiques bar HORIZONTAUX côte à côte — SF1 à gauche,
+    SF2 à droite — au lieu d'un seul graphique vertical mélangeant les 2 divisions.
+    """
     par_poste = res["par_poste"]
     if par_poste.empty:
         st.markdown(
@@ -617,10 +559,7 @@ def _dessiner_suivi_anomalies(res: dict, key_prefix: str) -> None:
 def _dessiner_barre_horizontale_division(postes_div, total_actuel, total_reference,
                                           reference_disponible, tous_kpi, ano_map_actuel,
                                           key_prefix) -> None:
-    """Dessine UN graphique bar HORIZONTAL pour une division (SF1 ou SF2),
-    avec le pourcentage traité affiché À L'EXTÉRIEUR de la barre — sauf
-    si la valeur est 100% ET qu'il s'agit du mode référence (rien à
-    afficher de significatif dans ce cas précis)."""
+    """Dessine UN graphique bar HORIZONTAL pour une division (SF1 ou SF2)."""
     if not postes_div:
         st.markdown('<div style="padding:12px;color:#94a3b8;">Aucun poste.</div>', unsafe_allow_html=True)
         return
@@ -696,13 +635,8 @@ def _dessiner_barre_horizontale_division(postes_div, total_actuel, total_referen
 def render_suivi_anomalies_semaine(vp: list, hist_df, now_ts, key_prefix: str,
                                     ano_map_actuel: dict = None, division: str = None) -> None:
     """
-    Suivi des anomalies sous le filtre période actif (sidebar).
-    CORRIGÉ (demande explicite) : si `division` est fourni ("SF1" ou
-    "SF2"), un SEUL graphique bar horizontal est affiché pour cette
-    division uniquement (respecte le bouton bascule Maroc Chimie/FEEDS
-    de la page). Sans `division`, affiche les 2 côte à côte comme avant.
-    Comparaison contre le dernier instantané historique enregistré ;
-    pourcentage traité affiché à l'extérieur de la barre.
+    Suivi des anomalies sous le filtre période actif. Si division est
+    fourni, un SEUL graphique est affiché pour cette division uniquement.
     """
     from core.constants import QK, PK
 
@@ -776,20 +710,28 @@ def render_suivi_anomalies_semaine(vp: list, hist_df, now_ts, key_prefix: str,
         )
 
 
-
-
 def render_suivi_anomalies_semaine_filtrable(vp: list, hist_df, now_ts, key_prefix: str) -> None:
     """
-    CORRIGÉ (demande explicite) : pour la semaine sélectionnée, compare
-    DÉSORMAIS le début de CETTE semaine à sa dernière extraction connue
-    (se met à jour au fil des extractions de la semaine), au lieu de la
-    comparer à la semaine précédente. Filtre par numéro de semaine
-    (ex. "Semaine 38"), n'affecte que ce graphique.
+    Suivi PAR SEMAINE ISO, indépendant du filtre de période de la barre
+    latérale. RÉFÉRENCE = 1ère extraction enregistrée cette semaine-là,
+    ÉTAT ACTUEL = dernière extraction connue de cette même semaine — se
+    met donc à jour automatiquement à chaque nouvelle extraction reçue
+    DANS LA SEMAINE choisie (pas de comparaison avec une autre semaine).
+
+    Répartie en 2 graphiques BARRES HORIZONTALES empilées (traité en
+    vert / restant en orange), un pour Maroc Chimie (SF1), un pour
+    FEEDS (SF2), avec le nombre ET le pourcentage traité annotés
+    directement sur chaque barre.
     """
     from core.historique import calculate_suivi_semaine_intra
     from core.constants import QK, PK
 
     st.markdown('<div class="stl a">🎯 Suivi hebdomadaire des anomalies</div>', unsafe_allow_html=True)
+    st.caption(
+        "Référence = 1ère extraction reçue cette semaine · État actuel = dernière extraction "
+        "de cette même semaine · le % traité se met à jour à chaque nouvelle extraction, sans "
+        "attendre le changement de semaine."
+    )
 
     if hist_df is None or hist_df.empty or "_section" not in hist_df.columns:
         st.markdown('<div style="padding:12px;color:#94a3b8;">Historique indisponible pour le moment.</div>',
@@ -810,21 +752,66 @@ def render_suivi_anomalies_semaine_filtrable(vp: list, hist_df, now_ts, key_pref
     labels_semaines = [f"Semaine {num} ({annee})" for annee, num in semaines_vues]
 
     choix = st.selectbox(
-        "🔎 Filtrer ce graphique par semaine (n'affecte que ce graphique)",
+        "🔎 Semaine à afficher",
         labels_semaines, index=0, key=f"{key_prefix}_filtre_semaine",
     )
     idx_choisi = labels_semaines.index(choix)
     annee_choisie, num_choisi = semaines_vues[idx_choisi]
 
     res = calculate_suivi_semaine_intra(hist_df, int(annee_choisie), int(num_choisi), QK, PK)
-    _dessiner_suivi_anomalies(res, f"{key_prefix}_{annee_choisie}_{num_choisi}")
+    par_poste = res["par_poste"]
+
+    if par_poste.empty:
+        st.markdown(
+            f'<div style="padding:12px;color:#94a3b8;">Aucune extraction enregistrée pour la '
+            f'semaine {num_choisi} ({annee_choisie}) pour le moment.</div>',
+            unsafe_allow_html=True,
+        )
+        return
+
+    total_rest = int(par_poste["Anomalies semaine"].sum())
+    total_trait = int(par_poste["Anomalies traitees"].sum())
+    baseline_tot = total_rest + total_trait
+    pct_tot = round(total_trait / baseline_tot * 100) if baseline_tot else 0
+
+    if res["date_prec"] is not None:
+        bandeau = (
+            f'📅 <b>Semaine {num_choisi} ({annee_choisie})</b> — '
+            f'<b>{baseline_tot}</b> anomalie(s) au début de la semaine '
+            f'(extraction du {res["date_prec"]:%d/%m}) &nbsp;→&nbsp; '
+            f'<b style="color:#10b981;">{total_trait} traitée(s)</b> '
+            f'(<b style="color:#10b981;">{pct_tot}%</b>) &nbsp;|&nbsp; '
+            f'<b style="color:#f97316;">{total_rest} restante(s)</b> '
+            f'à la dernière extraction du {res["date_act"]:%d/%m}.'
+        )
+    else:
+        bandeau = (
+            f'📅 <b>Semaine {num_choisi} ({annee_choisie})</b> — '
+            f'<b style="color:#f97316;">{total_rest}</b> anomalie(s) relevées à la première '
+            f'extraction de la semaine (du {res["date_act"]:%d/%m}). Cette valeur sert de '
+            f'référence : le % traité apparaîtra à la prochaine extraction reçue cette même semaine.'
+        )
+    st.markdown(f'<div style="margin-bottom:8px;font-size:13px;color:#334155;">{bandeau}</div>',
+                unsafe_allow_html=True)
+
+    tous_postes = par_poste["Poste"].tolist()
+    postes_sf1 = [p for p in tous_postes if str(p).startswith("SF1")]
+    postes_sf2 = [p for p in tous_postes if str(p).startswith("SF2")]
+
+    label_periode = f"la semaine {num_choisi} ({annee_choisie})"
+    col_sf1, col_sf2 = st.columns(2)
+    with col_sf1:
+        st.markdown("**🏭 Maroc Chimie (SF1)**")
+        _dessiner_barre_empilee_reference(res, label_periode, f"{key_prefix}_sf1", postes_sf1)
+    with col_sf2:
+        st.markdown("**🏭 FEEDS (SF2)**")
+        _dessiner_barre_empilee_reference(res, label_periode, f"{key_prefix}_sf2", postes_sf2)
 
 
 def _dessiner_barre_empilee_reference(res: dict, label_periode: str, key_prefix: str,
                                         vp: list = None) -> None:
-    """Helper partagé : dessine la barre empilée (traité/restant) + % +
-    détail au clic, à partir d'un résultat calculate_suivi_*_intra
-    (semaine OU période) — logique de dessin identique dans les 2 cas."""
+    """Helper partagé : dessine la barre empilée (traité/restant) à partir
+    d'un résultat calculate_suivi_*_intra (semaine OU période)."""
     par_poste = res["par_poste"]
     if par_poste.empty:
         st.markdown(
@@ -844,6 +831,10 @@ def _dessiner_barre_empilee_reference(res: dict, label_periode: str, key_prefix:
 
     sous = par_poste[par_poste["Poste"].isin(vp)].copy() if vp else par_poste.copy()
     if sous.empty:
+        if vp:
+            st.markdown('<div style="padding:12px;color:#94a3b8;">Aucun poste de cette division pour cette période.</div>',
+                        unsafe_allow_html=True)
+            return
         sous = par_poste.copy()
     sous["Baseline"] = sous["Anomalies semaine"] + sous["Anomalies traitees"]
     sous = sous.sort_values("Baseline", ascending=False)
@@ -877,18 +868,18 @@ def _dessiner_barre_empilee_reference(res: dict, label_periode: str, key_prefix:
         ))
         for p, b, t in zip(postes, baseline, traite):
             pct = round(t / b * 100) if b > 0 else 0
-            fig.add_annotation(x=b, y=p, text=f"  {b} total — {pct}% traité", showarrow=False,
+            fig.add_annotation(x=b, y=p, text=f"  {b} anomalie(s) — {pct}% traité", showarrow=False,
                                xanchor='left', font=dict(size=12, color='black'))
         barmode = 'stack'
 
     fig.update_layout(
-        barmode=barmode, height=max(400, 42 * len(postes) + 100),
+        barmode=barmode, height=max(340, 42 * len(postes) + 100),
         yaxis=dict(autorange="reversed", tickfont=dict(size=12, family='Inter'),
                    fixedrange=True, automargin=True),
         xaxis=dict(showgrid=True, gridcolor="#F1F5F9", fixedrange=True, title="Nombre d'anomalies"),
         plot_bgcolor='white', paper_bgcolor='white',
-        legend=dict(orientation="h", yanchor="bottom", y=-0.12, x=0.5, xanchor="center"),
-        margin=dict(t=30, b=60, l=20, r=140),
+        legend=dict(orientation="h", yanchor="bottom", y=-0.14, x=0.5, xanchor="center"),
+        margin=dict(t=20, b=60, l=20, r=140),
     )
     event = st.plotly_chart(
         fig, use_container_width=True, config=PLOTLY_CONFIG,
@@ -941,9 +932,7 @@ def _dessiner_barre_empilee_reference(res: dict, label_periode: str, key_prefix:
 def _calc_semaine_live(_df_full, _avf_full, now_ts, apm_tuple, annee: int, numero_semaine: int,
                         qk_tuple, pk_tuple):
     """Calcul EN DIRECT (pas de dépendance à un fichier historique),
-    correctement filtré sur [lundi, dimanche] de la semaine ISO donnée
-    — corrige le problème où le fichier historique reflétait le filtre
-    période de la sidebar au lieu du périmètre exact de la semaine."""
+    correctement filtré sur [lundi, dimanche] de la semaine ISO donnée."""
     from core.calcul_kpi import calc_kpis
     from core.anomalies import build_ano_map
 
@@ -980,15 +969,13 @@ def _calc_semaine_live(_df_full, _avf_full, now_ts, apm_tuple, annee: int, numer
 def render_suivi_anomalies_semaine_live(vp: list, df_full: pd.DataFrame, avf_full: pd.DataFrame,
                                           now_ts, apm: list, key_prefix: str) -> None:
     """
-    CORRIGÉ (bug identifié : le fichier historique reflétait le filtre
-    période de la sidebar, pas le périmètre exact de la semaine) :
-    calcul EN DIRECT filtré précisément sur les dates de la semaine
-    choisie. Filtre par NUMÉRO DE SEMAINE réintroduit (régression
-    corrigée) — permet de choisir S39, S40... librement, indépendamment
-    de la semaine calendaire réelle.
-    « Traité » = comparaison avec la semaine précédente (calculée EN
-    DIRECT de la même façon), faute de pouvoir figer une référence
-    intra-semaine sans nouvelle infrastructure de sauvegarde dédiée.
+    Calcul EN DIRECT filtré précisément sur les dates de la semaine choisie.
+    Filtre par NUMÉRO DE SEMAINE réintroduit — permet de choisir S39, S40... librement.
+    « Traité » = comparaison avec la semaine précédente (calculée EN DIRECT).
+
+    NOTE : cette fonction compare 2 semaines ISO DIFFÉRENTES (S vs S-1).
+    Pour un suivi intra-semaine (référence = 1ère extraction de LA MÊME
+    semaine), utiliser render_suivi_anomalies_semaine_filtrable à la place.
     """
     from core.constants import QK, PK
 
@@ -1085,11 +1072,8 @@ def render_suivi_anomalies_semaine_live(vp: list, df_full: pd.DataFrame, avf_ful
 
 def render_suivi_anomalies_periode(vp: list, hist_df, sdt, edt, key_prefix: str) -> None:
     """
-    NOUVEAU (demande explicite, page Tableau de Bord) : même principe
-    que render_suivi_anomalies_semaine_live, mais suit le FILTRE PÉRIODE
-    de la sidebar (sdt/edt) au lieu d'une semaine ISO — la RÉFÉRENCE est
-    la 1ère extraction connue dans [sdt, edt], mise à jour à chaque
-    nouvelle extraction tant que le filtre période ne change pas.
+    Suit le FILTRE PÉRIODE de la sidebar (sdt/edt) au lieu d'une semaine
+    ISO — RÉFÉRENCE est la 1ère extraction connue dans [sdt, edt].
     """
     from core.historique import calculate_suivi_periode_intra
     from core.constants import QK, PK
