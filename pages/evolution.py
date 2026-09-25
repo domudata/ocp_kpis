@@ -5,7 +5,7 @@ import pandas as pd
 from core.constants import QK, PK
 from components.sparklines import get_sparkline_html, get_comparison_html
 from components.tables import html_synthese_table
-from components.charts import render_suivi_anomalies_semaine_live
+from components.charts import render_suivi_anomalies_semaine_filtrable
 
 
 def render_evolution_tab(hist_df: pd.DataFrame, var_df: pd.DataFrame,
@@ -16,12 +16,13 @@ def render_evolution_tab(hist_df: pd.DataFrame, var_df: pd.DataFrame,
                           df_full: pd.DataFrame = None,
                           av_full: pd.DataFrame = None,
                           apm: list = None) -> None:
-    # ── Anomalies par semaine — REFAIT (demande explicite finale) :
-    # référence FIXE prise à la 1ère extraction de la semaine ISO en
-    # cours, mise à jour à chaque nouvelle extraction DANS LA MÊME
-    # semaine (pas de comparaison avec une autre semaine). Barre
-    # empilée 2 couleurs + % de traitement.
-    render_suivi_anomalies_semaine_live(vp, df_full, av_full, now_ts, apm or vp, "evol")
+    # ── Anomalies par semaine (demande explicite du 25/09) :
+    # PAS de comparaison entre deux semaines différentes. Référence FIXE =
+    # 1ère extraction enregistrée dans la semaine ISO choisie, mise à jour
+    # à chaque nouvelle extraction reçue DANS LA MÊME semaine → nombre
+    # traité + % traité. Scindé Maroc Chimie (SF1) / FEEDS (SF2), barres
+    # horizontales empilées (traité / restant).
+    render_suivi_anomalies_semaine_filtrable(vp, hist_df, now_ts, "evol")
     st.markdown("---")
 
     # NOTE : journal_df, top5_df, bot5_df restent acceptés en paramètres
