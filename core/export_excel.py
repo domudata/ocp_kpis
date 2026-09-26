@@ -22,6 +22,13 @@ n'a plus aucun effet sur l'historique.
 L'enregistrement est déclenché par la date lue dans date.txt : une
 nouvelle date crée une nouvelle feuille, une date déjà présente met à
 jour la feuille existante.
+
+AJOUT (26/09) : 2 nouvelles sections optionnelles par feuille —
+"BACKLOG CARACT PREP" et "BACKLOG CARACT PLANIF" — pour permettre le
+suivi du taux de traitement du Backlog Caractérisation par code
+(ATPD, ATMR, ... / ATEI, ATAL, ...) d'une extraction à l'autre. Tous
+les paramètres liés sont optionnels (None par défaut) pour rester
+rétro-compatible avec les appels existants.
 """
 import io
 import os
@@ -91,7 +98,8 @@ def _telecharger_historique():
     return _charger_historique_classeur()
 
 
-def _ecrire_feuille(wb, nom, prows, pcols, qrows, qcols, ano_p_r, ano_p_c, ano_q_r, ano_q_c):
+def _ecrire_feuille(wb, nom, prows, pcols, qrows, qcols, ano_p_r, ano_p_c, ano_q_r, ano_q_c,
+                     bc_prep_r=None, bc_prep_c=None, bc_plan_r=None, bc_plan_c=None):
     """Écrit (ou réécrit) la feuille d'une date dans le classeur."""
     hf = Font(bold=True, color="FFFFFF", size=10)
     hfl = PatternFill(start_color="1E3A5F", end_color="1E3A5F", fill_type="solid")
@@ -128,6 +136,10 @@ def _ecrire_feuille(wb, nom, prows, pcols, qrows, qcols, ano_p_r, ano_p_c, ano_q
     n = section("INDICATEURS DE QUALITE", qcols, qrows, n)
     if ano_q_c and ano_q_r:
         n = section("ANOMALIES QUALITE", ano_q_c, ano_q_r, n)
+    if bc_prep_c and bc_prep_r:
+        n = section("BACKLOG CARACT PREP", bc_prep_c, bc_prep_r, n)
+    if bc_plan_c and bc_plan_r:
+        n = section("BACKLOG CARACT PLANIF", bc_plan_c, bc_plan_r, n)
 
     if "Sheet" in wb.sheetnames and len(wb.sheetnames) > 1:
         del wb["Sheet"]
@@ -136,11 +148,18 @@ def _ecrire_feuille(wb, nom, prows, pcols, qrows, qcols, ano_p_r, ano_p_c, ano_q
 
 def save_kpis_to_excel(prows, pcols, qrows, qcols,
                         ano_p_r, ano_p_c, ano_q_r, ano_q_c,
-                        sheet_name: str) -> None:
+                        sheet_name: str,
+                        bc_prep_r=None, bc_prep_c=None,
+                        bc_plan_r=None, bc_plan_c=None) -> None:
     """
     Enregistre les KPI de la date courante dans l'historique :
       - Sauvegarde en local dans kpis.xlsx (racine) ET kpis/indicateurs_kpis.xlsx
       - Si GitHub est configuré, publie également sur GitHub
+
+    bc_prep_r/bc_prep_c/bc_plan_r/bc_plan_c (optionnels, 26/09) : lignes et
+    colonnes du Backlog Caractérisation (Préparation / Planification) par
+    code, pour permettre le suivi du taux de traitement d'une extraction
+    à l'autre. Si omis, le comportement est strictement identique à avant.
     """
     diag = []
     nom = _nom_feuille(sheet_name)
@@ -156,7 +175,9 @@ def save_kpis_to_excel(prows, pcols, qrows, qcols,
     deja_presente = nom in dates_avant
 
     wb = _ecrire_feuille(wb, nom, prows, pcols, qrows, qcols,
-                          ano_p_r, ano_p_c, ano_q_r, ano_q_c)
+                          ano_p_r, ano_p_c, ano_q_r, ano_q_c,
+                          bc_prep_r=bc_prep_r, bc_prep_c=bc_prep_c,
+                          bc_plan_r=bc_plan_r, bc_plan_c=bc_plan_c)
     dates_apres = [s for s in wb.sheetnames if s != "Sheet"]
     diag.append(f"{'Mise à jour' if deja_presente else 'Ajout'} de la date → "
                 f"{len(dates_apres)} date(s) au total : {dates_apres}")
@@ -240,6 +261,10 @@ def charger_historique_depuis_github():
     Lit l'historique complet (depuis GitHub si configuré, ou depuis
     kpis.xlsx / kpis/indicateurs_kpis.xlsx en local) et le convertit en
     DataFrame standard exploitable (avec Date, Poste de travail, _section, KPIs...).
+
+    AJOUT (26/09) : reconnaît aussi les 2 nouvelles sections
+    "BACKLOG CARACT PREP" (_section = "backlog_carac_prep") et
+    "BACKLOG CARACT PLANIF" (_section = "backlog_carac_planif").
     """
     wb, msg = _charger_historique_classeur()
     if wb is None:
@@ -267,6 +292,10 @@ def charger_historique_depuis_github():
                     section = "perf"; headers = None; continue
                 elif "INDICATEURS DE QUALITE" in up:
                     section = "qual"; headers = None; continue
+                elif "BACKLOG CARACT PREP" in up:
+                    section = "backlog_carac_prep"; headers = None; continue
+                elif "BACKLOG CARACT PLANIF" in up:
+                    section = "backlog_carac_planif"; headers = None; continue
                 if section and headers is None and cell0:
                     headers = [str(c).strip() if c is not None else "" for c in row]; continue
                 if section and headers and cell0 and cell0 not in ("Cible", "Total general", "Total", ""):
