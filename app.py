@@ -1990,7 +1990,8 @@ def main():
 
             render_backlog_page(
                 dfp,
-                vp
+                vp,
+                df_toutes_dates=df_full
             )
 
 
