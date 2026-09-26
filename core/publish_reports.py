@@ -14,8 +14,8 @@ indépendamment via reportlab (core/generate_report_pdf.py), sans
 aucune dépendance système. Le PPTX continue d'être généré et publié
 séparément, pour ceux qui préfèrent l'éditer.
 """
+import gc
 import io
-import os
 import pandas as pd
 import streamlit as st
 
@@ -43,7 +43,7 @@ SHORT_LABELS = {
     "Backlog préparation caractérisé": "Backlog prépa",
     "Backlog planification caractérisé": "Backlog planif",
     "OT CONFIME": "OT confirmés",
-    "OT_COR_EGAL": "Cohérence coûts",
+    "OT_COR_EGAL": "Coûts égaux",
     "OT Fiabilité": "Fiabilité",
     "Total Avis de Panne": "Avis panne",
 }
@@ -63,9 +63,6 @@ def generate_and_publish_poste_report(
     poste: str, ckdf_row: pd.Series, pscore: float, qscore: float,
     ano_map: dict, dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
     date_str: str, dry_run: bool = False,
-    dfp_toutes_dates: pd.DataFrame = None,
-    hist_df: pd.DataFrame = None,
-    **kwargs,
 ):
     """
     Génère et publie (si dry_run=False) les fichiers pour UN poste.
@@ -111,7 +108,6 @@ def generate_and_publish_poste_report(
             anomalies=anomalies, total_anomalies=total_anomalies,
             plan_action=plan_action, date_str=date_str,
             short_labels=SHORT_LABELS,
-            hist_df=hist_df, vp=[poste],
         )
         status["pdf"] = True
     except Exception as e:
@@ -122,42 +118,22 @@ def generate_and_publish_poste_report(
     try:
         dfp_poste = dfp[dfp["Poste travail princ."] == poste].copy()
         avf_poste = avf[avf["Poste travail princ."] == poste].copy() if "Poste travail princ." in avf.columns else avf.iloc[0:0]
-        dfp_all_poste = dfp_toutes_dates[dfp_toutes_dates["Poste travail princ."] == poste].copy() if dfp_toutes_dates is not None else None
-        anomaly_dfs = build_anomaly_dfs(dfp_poste, avf_poste, now_ts, dfp_toutes_dates=dfp_all_poste)
+        anomaly_dfs = build_anomaly_dfs(dfp_poste, avf_poste, now_ts)
         xlsx_bytes = build_anomalies_workbook(anomaly_dfs, KPI_RESP_MAP, ACT_MAP)
         status["xlsx"] = True
     except Exception as e:
         status["messages"].append(f"Échec génération Excel anomalies : {e}")
         xlsx_bytes = None
 
-    # ── 5) Sauvegarde locale sur disque dans presentation/<folder>/ ──
-    dossier_local = os.path.join("presentation", folder)
-    try:
-        os.makedirs(dossier_local, exist_ok=True)
-        if pdf_bytes:
-            pdf_path = os.path.join(dossier_local, "rapport.pdf")
-            with open(pdf_path, "wb") as f:
-                f.write(pdf_bytes)
-            status["pdf_saved"] = True
-            status["messages"].append(f"PDF enregistré localement ({pdf_path})")
-        if xlsx_bytes:
-            xlsx_path = os.path.join(dossier_local, "anomalies.xlsx")
-            with open(xlsx_path, "wb") as f:
-                f.write(xlsx_bytes)
-            status["xlsx_saved"] = True
-            status["messages"].append(f"Excel anomalies enregistré localement ({xlsx_path})")
-    except Exception as e:
-        status["messages"].append(f"Échec sauvegarde locale presentation/{folder} : {e}")
-
     if dry_run:
-        status["messages"].append("Mode test (dry_run) : fichiers enregistrés localement mais NON publiés sur GitHub.")
+        status["messages"].append("Mode test (dry_run) : fichiers générés mais NON publiés sur GitHub.")
         status["_pdf_bytes"] = pdf_bytes
         status["_xlsx_bytes"] = xlsx_bytes
         return status
 
-    # ── 6) Publication sur GitHub (PDF + Excel) si configuré ──
+    # ── 5) Publication sur GitHub (PDF + Excel) ──
     if not is_configured():
-        status["messages"].append("GitHub non configuré — fichiers enregistrés localement dans presentation/.")
+        status["messages"].append("GITHUB_TOKEN / GITHUB_REPO non configurés — fichiers générés mais non publiés.")
         return status
 
     if pdf_bytes:
@@ -176,8 +152,7 @@ def generate_and_publish_poste_report(
 def generate_and_publish_division_report(
     division: str, postes_division: list, ckdf: pd.DataFrame,
     pscores: dict, qscores: dict, ano_map: dict, date_str: str,
-    dry_run: bool = False, hist_df: pd.DataFrame = None,
-    **kwargs,
+    dry_run: bool = False,
 ):
     """
     Génère et publie UN rapport consolidé pour une division entière
@@ -270,10 +245,7 @@ def generate_and_publish_division_report(
         })
     plan_action.sort(key=lambda x: -x["nb_anom"])
 
-    # Nom lisible de la division (SF01 = Maroc Chimie, SF02 = FEEDS)
-    _noms_division = {"SF01": "Maroc Chimie", "SF02": "FEEDS"}
-    nom_div = _noms_division.get(division, division)
-    titre = f"{nom_div} — Synthèse division"
+    titre = f"{division} — Synthèse division ({len(postes_valides)} postes)"
     try:
         pdf_bytes = build_poste_report_pdf(
             poste=titre, pscore=pscore_div, qscore=qscore_div,
@@ -281,33 +253,19 @@ def generate_and_publish_division_report(
             anomalies=anomalies, total_anomalies=total_anomalies,
             plan_action=plan_action, date_str=date_str,
             short_labels=SHORT_LABELS, mode_conformite=True,
-            hist_df=hist_df, vp=postes_valides,
         )
         status["pdf"] = True
     except Exception as e:
         status["messages"].append(f"Échec génération PDF division : {e}")
         return status
 
-    # Sauvegarde locale sur disque dans presentation/<folder>/
-    dossier_local = os.path.join("presentation", folder)
-    try:
-        os.makedirs(dossier_local, exist_ok=True)
-        if pdf_bytes:
-            pdf_path = os.path.join(dossier_local, "rapport.pdf")
-            with open(pdf_path, "wb") as f:
-                f.write(pdf_bytes)
-            status["pdf_saved"] = True
-            status["messages"].append(f"PDF division enregistré localement ({pdf_path})")
-    except Exception as e:
-        status["messages"].append(f"Échec sauvegarde locale division {folder} : {e}")
-
     if dry_run:
-        status["messages"].append("Mode test (dry_run) : rapport division enregistré localement mais NON publié.")
+        status["messages"].append("Mode test (dry_run) : rapport généré mais NON publié.")
         status["_pdf_bytes"] = pdf_bytes
         return status
 
     if not is_configured():
-        status["messages"].append("GitHub non configuré — rapport division enregistré localement dans presentation/.")
+        status["messages"].append("GitHub non configuré — rapport généré mais non publié.")
         return status
 
     ok, msg = upload_file(f"presentation/{folder}/rapport.pdf", pdf_bytes,
@@ -321,21 +279,18 @@ def generate_and_publish_all_postes(
     ckdf: pd.DataFrame, pscores: dict, qscores: dict, ano_map: dict,
     dfp: pd.DataFrame, avf: pd.DataFrame, now_ts, date_str: str,
     postes: list = None, dry_run: bool = False, progress_callback=None,
-    dfp_toutes_dates: pd.DataFrame = None,
-    hist_df: pd.DataFrame = None,
-    **kwargs,
 ):
     """
     Boucle sur tous les postes (ou la liste fournie) et publie leur
     rapport, PUIS génère deux rapports de synthèse supplémentaires —
-    un par division (SF01 = Maroc Chimie, SF02 = FEEDS) — sans fichier Excel.
+    un par division (SF01 et SF02) — sans fichier Excel associé.
     progress_callback(i, n, poste) est appelé avant chaque poste.
     Retourne la liste des status.
     """
     postes = postes if postes is not None else list(ckdf.index)
     results = []
 
-    # ── Rapports par poste (PDF + Excel d'anomalies) ──
+    # ── Rapports par poste (inchangés : PDF + Excel d'anomalies) ──
     for i, poste in enumerate(postes):
         if progress_callback:
             progress_callback(i, len(postes), poste)
@@ -347,12 +302,21 @@ def generate_and_publish_all_postes(
             pscore=pscores.get(poste, 0), qscore=qscores.get(poste, 0),
             ano_map=ano_map, dfp=dfp, avf=avf, now_ts=now_ts,
             date_str=date_str, dry_run=dry_run,
-            dfp_toutes_dates=dfp_toutes_dates,
-            hist_df=hist_df,
         )
+        # CORRIGÉ : libération explicite de la mémoire après chaque poste.
+        # Sur Streamlit Cloud (limite ~1 Go), générer PDF+Excel pour de
+        # nombreux postes à la suite, dans la même requête, sans jamais
+        # relâcher la mémoire intermédiaire (bytes PDF/Excel, DataFrames
+        # filtrés) peut faire dépasser le quota et tuer le process entier
+        # (l'app "bloque" sans message d'erreur Python visible, car ce
+        # n'est pas une exception mais un arrêt brutal du serveur).
+        if not dry_run:
+            res.pop("_pdf_bytes", None)
+            res.pop("_xlsx_bytes", None)
         results.append(res)
+        gc.collect()
 
-    # ── Deux rapports de synthèse par division ──
+    # ── Deux rapports de synthèse par division, SANS Excel ──
     for division, prefixe in [("SF01", "SF1"), ("SF02", "SF2")]:
         postes_div = [p for p in postes if str(p).startswith(prefixe)]
         if not postes_div:
@@ -363,7 +327,6 @@ def generate_and_publish_all_postes(
             division=division, postes_division=postes_div, ckdf=ckdf,
             pscores=pscores, qscores=qscores, ano_map=ano_map,
             date_str=date_str, dry_run=dry_run,
-            hist_df=hist_df,
         )
         results.append(res)
 
