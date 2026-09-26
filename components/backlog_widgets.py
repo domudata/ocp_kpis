@@ -9,45 +9,64 @@ from components.charts import show_pie_pair, show_simple_pie
 from components.tables import html_generic_pivot, html_statut_pivot
 from core.calcul_kpi import build_statut_pivot, get_text_col
 
+# Codes officiels (alignés sur core/calcul_kpi.py — source unique de
+# vérité) : ATPL a été retiré de la liste Planif, elle n'a jamais fait
+# partie de la spécification officielle.
 CODES_PREP_EXACT = {'ATPD', 'ATMR', 'ATER', 'ATRS', 'ATMO'}
-CODES_PLAN_EXACT = {'ATPL', 'ATEI', 'ATAL', 'ATAS', 'AGAR', 'ATHS'}
+CODES_PLAN_EXACT = {'ATEI', 'ATAL', 'ATAS', 'AGAR', 'ATHS'}
 ALL_CARAC_EXACT = CODES_PREP_EXACT | CODES_PLAN_EXACT
 
 
 def match_exact_token(statut, codes: set) -> bool:
+    """
+    Un OT correspond dès que l'un des codes apparaît N'IMPORTE OÙ dans le
+    champ (contains pur, insensible à la casse) — pas de découpage par mot,
+    pas de contrainte de position (début/milieu/fin).
+    """
     if statut is None or (isinstance(statut, float) and pd.isna(statut)):
         return False
-    words = set(re.findall(r'[A-Za-z0-9]+', str(statut).upper()))
-    return bool(words & codes)
+    t = str(statut).upper()
+    return any(code in t for code in codes)
 
 
-def _contient_mot(texte, mot: str) -> bool:
+def _position_premier_code(texte, codes) -> int:
     """
-    Vérifie que 'mot' apparaît n'importe où dans le texte (insensible à la
-    casse, quelle que soit sa position — pas seulement au début).
-    """
-    if texte is None or (isinstance(texte, float) and pd.isna(texte)):
-        return False
-    return mot in str(texte).upper()
-
-
-def _est_caracterise(texte) -> bool:
-    """
-    Détecte un marqueur de caractérisation dans le texte : 'CARAC' (couvre
-    CARACT, CARACTERISE, CARACTERISATION...) ou la variante 'CARCT' (faute
-    de frappe fréquente), n'importe où dans le texte, quel que soit l'ordre
-    des mots. Compte une seule fois par OT même si le marqueur apparaît
-    plusieurs fois dans le champ (test booléen, pas un comptage
-    d'occurrences).
+    Renvoie la position (index) du premier caractère du code trouvé le plus
+    tôt dans le texte, parmi 'codes' — ou None si aucun de ces codes n'est
+    présent. Sert à départager un OT qui contient à la fois un code Prep et
+    un code Planif (demande explicite : compté une seule fois, dans la
+    catégorie dont le code apparaît en premier dans le texte).
     """
     if texte is None or (isinstance(texte, float) and pd.isna(texte)):
-        return False
+        return None
     s = str(texte).upper()
-    return ('CARAC' in s) or ('CARCT' in s)
+    positions = [s.find(c) for c in codes if c in s]
+    return min(positions) if positions else None
+
+
+def _categorie_caract(texte) -> str:
+    """
+    Classe l'OT en 'PREP' ou 'PLANIF' selon la présence (n'importe où dans
+    le texte, "contains" pur — pas obligatoirement au début) de l'un des
+    codes ATPD/ATMR/ATER/ATRS/ATMO (Prep) ou ATEI/ATAL/ATAS/AGAR/ATHS
+    (Planif). Si le champ contient à la fois un code Prep ET un code
+    Planif, l'OT n'est compté qu'UNE SEULE FOIS : dans la catégorie dont le
+    code apparaît en premier (position la plus petite) dans le texte.
+    Renvoie None si aucun des deux types de code n'est présent.
+    """
+    pos_prep = _position_premier_code(texte, CODES_PREP_EXACT)
+    pos_plan = _position_premier_code(texte, CODES_PLAN_EXACT)
+    if pos_prep is None and pos_plan is None:
+        return None
+    if pos_plan is None:
+        return 'PREP'
+    if pos_prep is None:
+        return 'PLANIF'
+    return 'PREP' if pos_prep <= pos_plan else 'PLANIF'
 
 
 CRPR_KW = ['ATPD', 'ATMR', 'ATRS', 'ATMO', 'ATER']
-ATPL_KW = ['ATPL', 'ATEI', 'ATAL', 'ATAS', 'AGAR', 'ATHS']
+ATPL_KW = ['ATEI', 'ATAL', 'ATAS', 'AGAR', 'ATHS']
 TW_PREV = [350, 290, 300, 310, 360]
 
 
@@ -262,74 +281,78 @@ def render_backlog_tab(dfp: pd.DataFrame, vp: list, df_toutes_dates: pd.DataFram
     _zcor = df_all[df_all["Type d'ordre"] == "ZCOR"].copy()
 
     # ── Backlog Caractérisation Préparation / Planification ────────────
-    # NOUVEAU (demande explicite du 26/09) — remplace l'ancienne logique :
+    # REDÉFINI (demande explicite du 26/09) — remplace l'ancienne logique,
+    # UNIQUEMENT pour ces deux sections de la page Backlog :
     #   - Indépendant du filtre "Période" : calculé sur df_toutes_dates
-    #     (toutes les dates), jamais sur dfp filtré par période.
-    #   - Population = tout OT ZCOR dont le champ "Statut utilisateur"
-    #     mentionne "PREP" (pour le backlog Préparation) ou "PLANIF"
-    #     (pour le backlog Planification), n'importe où dans le texte —
-    #     l'ancien filtre sur "Statut système" (CRÉÉ / LANC) et la
-    #     condition "Contient SOPL" sont retirés.
-    #   - Caractérisé / Non Caractérisé = présence d'un marqueur
-    #     "CARAC"/"CARCT" n'importe où dans "Statut utilisateur" (peu
-    #     importe la position), au lieu de la liste de codes exacts
-    #     ATPD/ATMR/... — compté une seule fois par OT.
-    df_prep = _zcor[
-        _zcor['Statut utilisateur'].apply(lambda x: _contient_mot(x, 'PREP'))
-    ].copy()
-    df_prep['Carac Prep'] = np.where(
-        df_prep['Statut utilisateur'].apply(_est_caracterise),
-        'CARACTERISE', 'NON CARACTERISE'
+    #     (TOUTES les dates), jamais sur dfp filtré par période.
+    #   - Population = TOUT OT, quel que soit son "Type d'ordre" (plus de
+    #     filtre ZCOR pour ces 2 sections) et quelle que soit sa date, à la
+    #     SEULE condition qu'il ne soit pas CLOT ni TCLO.
+    #   - Caractérisé Prep = "Statut utilisateur" contient (n'importe où
+    #     dans le texte, pas forcément en premier) l'un des codes ATPD,
+    #     ATMR, ATER, ATRS, ATMO.
+    #   - Caractérisé Planif = contient l'un des codes ATEI, ATAL, ATAS,
+    #     AGAR, ATHS.
+    #   - Si l'OT contient à la fois un code Prep ET un code Planif, il
+    #     n'est compté qu'UNE SEULE FOIS : dans la catégorie dont le code
+    #     apparaît en premier (position la plus petite) dans le texte.
+    if "Statut OT" in df_all.columns:
+        df_univers = df_all[~df_all["Statut OT"].isin(["CLOT", "TCLO"])].copy()
+    else:
+        _premier_mot_sys = df_all["Statut système"].fillna("").astype(str).str.strip().str.split().str[0]
+        df_univers = df_all[~_premier_mot_sys.isin(["CLOT", "TCLO"])].copy()
+
+    df_univers['Categorie Caract'] = df_univers['Statut utilisateur'].apply(_categorie_caract)
+    df_univers['Carac Prep'] = np.where(
+        df_univers['Categorie Caract'] == 'PREP', 'CARACTERISE', 'NON CARACTERISE'
+    )
+    df_univers['Carac Plan'] = np.where(
+        df_univers['Categorie Caract'] == 'PLANIF', 'CARACTERISE', 'NON CARACTERISE'
     )
 
     def _extract_kw(statut, kw_list):
         if statut is None or (isinstance(statut, float) and pd.isna(statut)):
             return 'NON CARACTERISE'
-        words = set(re.findall(r'[A-Za-z0-9]+', str(statut).upper()))
+        s = str(statut).upper()
         for kw in kw_list:
-            if kw in words:
+            if kw in s:
                 return kw
         return 'NON CARACTERISE'
 
-    df_prep['Type Carac Prep'] = df_prep['Statut utilisateur'].apply(
+    df_prep = df_univers  # même univers pour les 2 sections (voir note ci-dessus)
+    df_plan = df_univers
+
+    df_carac_prep = df_univers[df_univers['Carac Prep'] == 'CARACTERISE'].copy()
+    df_carac_prep['Type Carac Prep'] = df_carac_prep['Statut utilisateur'].apply(
         lambda x: _extract_kw(x, CRPR_KW)
     )
 
     piv_prep_stat = pd.pivot_table(
-        df_prep, index='Poste travail princ.', columns='Carac Prep',
+        df_univers, index='Poste travail princ.', columns='Carac Prep',
         values='Ordre', aggfunc='count', fill_value=0
     ).reindex(vp, fill_value=0)
     for c in ['CARACTERISE', 'NON CARACTERISE']:
         if c not in piv_prep_stat.columns:
             piv_prep_stat[c] = 0
 
-    df_carac_prep = df_prep[df_prep['Carac Prep'] == 'CARACTERISE']
     piv_prep_type = pd.pivot_table(
         df_carac_prep, index='Poste travail princ.', columns='Type Carac Prep',
         values='Ordre', aggfunc='count', fill_value=0
     ).reindex(vp, fill_value=0)
 
-    df_plan = _zcor[
-        _zcor['Statut utilisateur'].apply(lambda x: _contient_mot(x, 'PLANIF'))
-    ].copy()
-    df_plan['Carac Plan'] = np.where(
-        df_plan['Statut utilisateur'].apply(_est_caracterise),
-        'CARACTERISE', 'NON CARACTERISE'
-    )
-
-    df_plan['Type Carac Plan'] = df_plan['Statut utilisateur'].apply(
+    df_carac_plan = df_univers[df_univers['Carac Plan'] == 'CARACTERISE'].copy()
+    df_carac_plan['Type Carac Plan'] = df_carac_plan['Statut utilisateur'].apply(
         lambda x: _extract_kw(x, ATPL_KW)
     )
 
     piv_plan_stat = pd.pivot_table(
-        df_plan, index='Poste travail princ.', columns='Carac Plan',
+        df_univers, index='Poste travail princ.', columns='Carac Plan',
         values='Ordre', aggfunc='count', fill_value=0
     ).reindex(vp, fill_value=0)
     for c in ['CARACTERISE', 'NON CARACTERISE']:
         if c not in piv_plan_stat.columns:
             piv_plan_stat[c] = 0
 
-    df_carac_plan = df_plan[df_plan['Carac Plan'] == 'CARACTERISE']
     piv_plan_type = pd.pivot_table(
         df_carac_plan, index='Poste travail princ.', columns='Type Carac Plan',
         values='Ordre', aggfunc='count', fill_value=0
@@ -363,9 +386,10 @@ def render_backlog_tab(dfp: pd.DataFrame, vp: list, df_toutes_dates: pd.DataFram
         unsafe_allow_html=True
     )
     st.caption(
-        "🔓 Indépendant du filtre Période (calculé sur toutes les dates) — "
-        "Population = OT ZCOR dont « Statut utilisateur » mentionne PREP · "
-        "Caractérisé = présence de CARAC/CARCT n'importe où dans le champ."
+        "🔓 Indépendant du filtre Période (calculé sur toutes les dates, tous types d'OT) — "
+        "Population = tout OT non CLOT/TCLO · Caractérisé = « Statut utilisateur » contient "
+        "ATPD/ATMR/ATER/ATRS/ATMO (n'importe où) · un OT contenant aussi un code Planif n'est "
+        "compté ici que si le code Prep apparaît en premier."
     )
 
     recap_prep = []
@@ -457,9 +481,10 @@ def render_backlog_tab(dfp: pd.DataFrame, vp: list, df_toutes_dates: pd.DataFram
         unsafe_allow_html=True
     )
     st.caption(
-        "🔓 Indépendant du filtre Période (calculé sur toutes les dates) — "
-        "Population = OT ZCOR dont « Statut utilisateur » mentionne PLANIF · "
-        "Caractérisé = présence de CARAC/CARCT n'importe où dans le champ."
+        "🔓 Indépendant du filtre Période (calculé sur toutes les dates, tous types d'OT) — "
+        "Population = tout OT non CLOT/TCLO · Caractérisé = « Statut utilisateur » contient "
+        "ATEI/ATAL/ATAS/AGAR/ATHS (n'importe où) · un OT contenant aussi un code Prep n'est "
+        "compté ici que si le code Planif apparaît en premier."
     )
 
     recap_plan = []
@@ -530,7 +555,6 @@ def render_backlog_tab(dfp: pd.DataFrame, vp: list, df_toutes_dates: pd.DataFram
         type_counts = df_carac_plan['Type Carac Plan'].value_counts()
         h = '<table class="tw omt"><thead><tr><th>Type</th><th>Description</th><th>Nb OT</th><th>%</th></tr></thead><tbody>'
         desc_map = {
-            'ATPL': 'Attente planification',
             'ATEI': 'Attente arrêt équipement ou Installation',
             'ATAL': 'Attente arrêt ligne',
             'ATAS': 'Attente arrêt site',
