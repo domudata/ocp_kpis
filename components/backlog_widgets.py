@@ -650,6 +650,21 @@ def render_backlog_tab(dfp: pd.DataFrame, vp: list, df_toutes_dates: pd.DataFram
     c1, c2 = st.columns([0.5, 0.5], vertical_alignment='top')
     with c1:
         st.markdown(_html_backlog_caract_table(prep_rows, prep_cols, DESC_PREP, "#065f46"), unsafe_allow_html=True)
+
+        # DÉPLACÉ (26/09) — mis dans la colonne de gauche, sous le tableau
+        # principal, pour combler l'espace vide laissé par la colonne de
+        # droite plus longue (pie + 2 graphiques)
+        st.markdown('<hr style="margin:14px 0;border-color:#e2e8f0;">', unsafe_allow_html=True)
+        st.markdown('<div class="stl s">Types de caractérisation — Préparation</div>', unsafe_allow_html=True)
+        h = '<table class="tw omt"><thead><tr><th>Type</th><th>Description</th><th>Nb OT</th><th>%</th></tr></thead><tbody>'
+        total_prep_codes = sum(prep_rows[-1][c] for c in CRPR_KW)
+        for typ in CRPR_KW:
+            cnt = prep_rows[-1][typ]
+            pct = round(cnt / total_prep_codes * 100, 1) if total_prep_codes else 0.0
+            desc = DESC_PREP.get(typ, typ)
+            h += f'<tr><td style="font-weight:700;color:#059669">{typ}</td><td>{desc}</td><td style="text-align:center;font-weight:600">{cnt}</td><td style="text-align:center">{pct}%</td></tr>'
+        h += '</tbody></table>'
+        st.markdown(h, unsafe_allow_html=True)
     with c2:
         if not piv_prep_type.empty and piv_prep_type.sum().sum() > 0:
             show_simple_pie(piv_prep_type, 'Répartition par Type de Caractérisation (Prep)', keep_non_carac=False)
@@ -670,20 +685,6 @@ def render_backlog_tab(dfp: pd.DataFrame, vp: list, df_toutes_dates: pd.DataFram
                                  "LANC / CRÉÉ par code — Préparation", key="bar_lanc_cree_prep")
         st.markdown(_legende_codes(CRPR_KW, DESC_PREP), unsafe_allow_html=True)
 
-        # DÉPLACÉ (26/09) — mis à la place du graphique LANC/CRÉÉ, dans la
-        # même colonne, au lieu d'un bloc pleine largeur séparé
-        st.markdown('<hr style="margin:14px 0;border-color:#e2e8f0;">', unsafe_allow_html=True)
-        st.markdown('<div class="stl s">Types de caractérisation — Préparation</div>', unsafe_allow_html=True)
-        h = '<table class="tw omt"><thead><tr><th>Type</th><th>Description</th><th>Nb OT</th><th>%</th></tr></thead><tbody>'
-        total_prep_codes = sum(prep_rows[-1][c] for c in CRPR_KW)
-        for typ in CRPR_KW:
-            cnt = prep_rows[-1][typ]
-            pct = round(cnt / total_prep_codes * 100, 1) if total_prep_codes else 0.0
-            desc = DESC_PREP.get(typ, typ)
-            h += f'<tr><td style="font-weight:700;color:#059669">{typ}</td><td>{desc}</td><td style="text-align:center;font-weight:600">{cnt}</td><td style="text-align:center">{pct}%</td></tr>'
-        h += '</tbody></table>'
-        st.markdown(h, unsafe_allow_html=True)
-
     st.markdown('---')
 
     # ═══ Backlog Caractérisation Planification ═══
@@ -701,6 +702,21 @@ def render_backlog_tab(dfp: pd.DataFrame, vp: list, df_toutes_dates: pd.DataFram
     c3, c4 = st.columns([0.5, 0.5], vertical_alignment='top')
     with c3:
         st.markdown(_html_backlog_caract_table(plan_rows, plan_cols, DESC_PLAN, "#1e40af"), unsafe_allow_html=True)
+
+        # DÉPLACÉ (26/09) — mis dans la colonne de gauche, sous le tableau
+        # principal, pour combler l'espace vide laissé par la colonne de
+        # droite plus longue (pie + 2 graphiques)
+        st.markdown('<hr style="margin:14px 0;border-color:#e2e8f0;">', unsafe_allow_html=True)
+        st.markdown('<div class="stl s">Types de caractérisation — Planification</div>', unsafe_allow_html=True)
+        h = '<table class="tw omt"><thead><tr><th>Type</th><th>Description</th><th>Nb OT</th><th>%</th></tr></thead><tbody>'
+        total_plan_codes = sum(plan_rows[-1][c] for c in ATPL_KW)
+        for typ in ATPL_KW:
+            cnt = plan_rows[-1][typ]
+            pct = round(cnt / total_plan_codes * 100, 1) if total_plan_codes else 0.0
+            desc = DESC_PLAN.get(typ, typ)
+            h += f'<tr><td style="font-weight:700;color:#2563eb">{typ}</td><td>{desc}</td><td style="text-align:center;font-weight:600">{cnt}</td><td style="text-align:center">{pct}%</td></tr>'
+        h += '</tbody></table>'
+        st.markdown(h, unsafe_allow_html=True)
     with c4:
         if not piv_plan_type.empty and piv_plan_type.sum().sum() > 0:
             show_simple_pie(piv_plan_type, 'Répartition par Type de Caractérisation (Plan)', keep_non_carac=False)
@@ -720,20 +736,6 @@ def render_backlog_tab(dfp: pd.DataFrame, vp: list, df_toutes_dates: pd.DataFram
         _bar_lanc_cree_par_code(counts_lanc_cree_plan, ATPL_KW,
                                  "LANC / CRÉÉ par code — Planification", key="bar_lanc_cree_planif")
         st.markdown(_legende_codes(ATPL_KW, DESC_PLAN), unsafe_allow_html=True)
-
-        # DÉPLACÉ (26/09) — mis à la place du graphique LANC/CRÉÉ, dans la
-        # même colonne, au lieu d'un bloc pleine largeur séparé
-        st.markdown('<hr style="margin:14px 0;border-color:#e2e8f0;">', unsafe_allow_html=True)
-        st.markdown('<div class="stl s">Types de caractérisation — Planification</div>', unsafe_allow_html=True)
-        h = '<table class="tw omt"><thead><tr><th>Type</th><th>Description</th><th>Nb OT</th><th>%</th></tr></thead><tbody>'
-        total_plan_codes = sum(plan_rows[-1][c] for c in ATPL_KW)
-        for typ in ATPL_KW:
-            cnt = plan_rows[-1][typ]
-            pct = round(cnt / total_plan_codes * 100, 1) if total_plan_codes else 0.0
-            desc = DESC_PLAN.get(typ, typ)
-            h += f'<tr><td style="font-weight:700;color:#2563eb">{typ}</td><td>{desc}</td><td style="text-align:center;font-weight:600">{cnt}</td><td style="text-align:center">{pct}%</td></tr>'
-        h += '</tbody></table>'
-        st.markdown(h, unsafe_allow_html=True)
 
     # ── Téléchargement du backlog Caractérisation (Prep + Planif) ──────
     st.markdown("")
