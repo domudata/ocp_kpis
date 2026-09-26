@@ -466,6 +466,84 @@ def _bar_traitement_par_code(res_cat: dict, codes: list, titre: str, key: str) -
     st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG, key=key)
 
 
+def _counts_lanc_cree_par_code(df_univers: pd.DataFrame, categorie: str, kw_list: list) -> dict:
+    """
+    NOUVEAU (26/09) — pour chaque code (Prep ou Planif), compte combien
+    d'OT caractérisés avec ce code sont au statut LANC et combien sont au
+    statut CRÉÉ (les deux seuls statuts possibles ici puisque df_univers
+    exclut déjà CLOT/TCLO). Sert au nouveau graphique demandé montrant la
+    répartition LANC/CRÉÉ par type de code.
+    """
+    resultat = {}
+    if df_univers is None or df_univers.empty:
+        return {c: {"LANC": 0, "CREE": 0} for c in kw_list}
+
+    sub = df_univers[df_univers['Categorie Caract'] == categorie].copy()
+    if sub.empty:
+        return {c: {"LANC": 0, "CREE": 0} for c in kw_list}
+
+    sub['Code'] = sub['Statut utilisateur'].apply(
+        lambda x: next((k for k in kw_list if k in str(x).upper()), None)
+    )
+
+    if 'Statut OT' in sub.columns:
+        statut_simple = sub['Statut OT'].fillna('').astype(str).str.strip().str.upper()
+    else:
+        statut_simple = sub['Statut système'].fillna('').astype(str).str.strip().str.split().str[0].str.upper()
+
+    for code in kw_list:
+        mask = sub['Code'] == code
+        resultat[code] = {
+            "LANC": int((mask & (statut_simple == 'LANC')).sum()),
+            "CREE": int((mask & (statut_simple == 'CRÉÉ')).sum()),
+        }
+    return resultat
+
+
+def _bar_lanc_cree_par_code(counts: dict, codes: list, titre: str, key: str) -> None:
+    """
+    NOUVEAU (26/09) — bar chart horizontal empilé montrant, pour chaque
+    code, combien d'OT sont au statut LANC (bleu) et combien sont au
+    statut CRÉÉ (violet).
+    """
+    codes_dispo = [c for c in codes if c in counts]
+    if not codes_dispo or all((counts[c]["LANC"] + counts[c]["CREE"]) == 0 for c in codes_dispo):
+        st.markdown('<div style="padding:12px;color:#94a3b8;">Aucune donnée</div>', unsafe_allow_html=True)
+        return
+
+    lanc = [counts[c]["LANC"] for c in codes_dispo]
+    cree = [counts[c]["CREE"] for c in codes_dispo]
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        y=codes_dispo, x=lanc, orientation='h', name="LANC",
+        marker=dict(color="#3b82f6", line=dict(color='white', width=1)),
+        text=[str(v) if v > 0 else "" for v in lanc], textposition='inside',
+        textfont=dict(color='white', size=12),
+    ))
+    fig.add_trace(go.Bar(
+        y=codes_dispo, x=cree, orientation='h', name="CRÉÉ",
+        marker=dict(color="#8b5cf6", line=dict(color='white', width=1)),
+        text=[str(v) if v > 0 else "" for v in cree], textposition='inside',
+        textfont=dict(color='white', size=12),
+    ))
+    for c, l, r in zip(codes_dispo, lanc, cree):
+        tot = l + r
+        fig.add_annotation(x=tot + max(tot, 1) * 0.02, y=c, text=f"  {tot} OT",
+                            showarrow=False, xanchor='left', font=dict(size=12, color='black'))
+
+    fig.update_layout(
+        barmode='stack', title=titre, height=max(260, 46 * len(codes_dispo) + 90),
+        yaxis=dict(autorange="reversed", tickfont=dict(size=12, family='Inter'),
+                   fixedrange=True, automargin=True),
+        xaxis=dict(showgrid=True, gridcolor="#F1F5F9", fixedrange=True, title="Nombre d'OT"),
+        plot_bgcolor='white', paper_bgcolor='white',
+        legend=dict(orientation="h", yanchor="bottom", y=-0.22, x=0.5, xanchor="center"),
+        margin=dict(t=40, b=60, l=20, r=110),
+    )
+    st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG, key=key)
+
+
 def _build_backlog_download(prep_rows: list, prep_cols: list, plan_rows: list, plan_cols: list) -> bytes:
     """
     Construit un classeur Excel (2 feuilles) pour le téléchargement du
@@ -512,6 +590,18 @@ def render_backlog_tab(dfp: pd.DataFrame, vp: list, df_toutes_dates: pd.DataFram
     piv_prep_type = _piv_type('PREP', CRPR_KW)
     piv_plan_type = _piv_type('PLANIF', ATPL_KW)
 
+    # ── % de traitement (26/09) — comparé à l'avant-dernière extraction ──
+    try:
+        from core.backlog_caract_history import calculate_traitement_backlog_caract
+        res_traitement = calculate_traitement_backlog_caract(
+            hist_df, list(CRPR_KW), list(ATPL_KW)
+        )
+    except Exception:
+        res_traitement = {"prep": {}, "planif": {}, "date_prec": None, "date_act": None}
+
+    counts_lanc_cree_prep = _counts_lanc_cree_par_code(df_univers, 'PREP', CRPR_KW)
+    counts_lanc_cree_plan = _counts_lanc_cree_par_code(df_univers, 'PLANIF', ATPL_KW)
+
     _statut_lanc_ex = (
         (_zcor["Statut système"].fillna("").astype(str).str.strip().str.split().str[0] == "LANC")
         | (_zcor["Statut système"].fillna("").astype(str).str.contains("LANC", na=False)
@@ -556,6 +646,19 @@ def render_backlog_tab(dfp: pd.DataFrame, vp: list, df_toutes_dates: pd.DataFram
         else:
             st.markdown('<div style="padding:20px;color:#94a3b8;">Aucune donnée</div>', unsafe_allow_html=True)
 
+        # NOUVEAU (26/09) — placé directement sous le pie de cette catégorie
+        st.markdown('<div class="stl s">📈 Taux de traitement — Préparation</div>', unsafe_allow_html=True)
+        st.caption(
+            "Référence = avant-dernière extraction enregistrée · État actuel = dernière extraction. "
+            "Se remplit à partir de la 2ᵉ extraction suivant l'activation de ce suivi."
+        )
+        _bar_traitement_par_code(res_traitement.get("prep", {}), CRPR_KW,
+                                  "Taux de traitement — Préparation", key="bar_traite_prep")
+
+        st.markdown('<div class="stl s">🔵 Répartition LANC / CRÉÉ — Préparation</div>', unsafe_allow_html=True)
+        _bar_lanc_cree_par_code(counts_lanc_cree_prep, CRPR_KW,
+                                 "LANC / CRÉÉ par code — Préparation", key="bar_lanc_cree_prep")
+
     st.markdown('<div class="stl s">Types de caractérisation — Préparation</div>', unsafe_allow_html=True)
     h = '<table class="tw omt"><thead><tr><th>Type</th><th>Description</th><th>Nb OT</th><th>%</th></tr></thead><tbody>'
     total_prep_codes = sum(prep_rows[-1][c] for c in CRPR_KW)
@@ -590,6 +693,19 @@ def render_backlog_tab(dfp: pd.DataFrame, vp: list, df_toutes_dates: pd.DataFram
         else:
             st.markdown('<div style="padding:20px;color:#94a3b8;">Aucune donnée</div>', unsafe_allow_html=True)
 
+        # NOUVEAU (26/09) — placé directement sous le pie de cette catégorie
+        st.markdown('<div class="stl s">📈 Taux de traitement — Planification</div>', unsafe_allow_html=True)
+        st.caption(
+            "Référence = avant-dernière extraction enregistrée · État actuel = dernière extraction. "
+            "Se remplit à partir de la 2ᵉ extraction suivant l'activation de ce suivi."
+        )
+        _bar_traitement_par_code(res_traitement.get("planif", {}), ATPL_KW,
+                                  "Taux de traitement — Planification", key="bar_traite_planif")
+
+        st.markdown('<div class="stl s">🔵 Répartition LANC / CRÉÉ — Planification</div>', unsafe_allow_html=True)
+        _bar_lanc_cree_par_code(counts_lanc_cree_plan, ATPL_KW,
+                                 "LANC / CRÉÉ par code — Planification", key="bar_lanc_cree_planif")
+
     st.markdown('<div class="stl s">Types de caractérisation — Planification</div>', unsafe_allow_html=True)
     h = '<table class="tw omt"><thead><tr><th>Type</th><th>Description</th><th>Nb OT</th><th>%</th></tr></thead><tbody>'
     total_plan_codes = sum(plan_rows[-1][c] for c in ATPL_KW)
@@ -614,33 +730,6 @@ def render_backlog_tab(dfp: pd.DataFrame, vp: list, df_toutes_dates: pd.DataFram
         )
     except Exception as e:
         st.caption(f"⚠️ Téléchargement indisponible ({e}).")
-
-    st.markdown('---')
-
-    # ═══ NOUVEAU (26/09) — % de traitement du Backlog Caract, par code ═══
-    # Compare l'avant-dernière extraction enregistrée dans l'historique
-    # GitHub (référence) à la dernière (état actuel) : un OT caractérisé
-    # qui a été traité (résolu / ne correspond plus à ce code) fait
-    # baisser le compteur de ce code, ce qui fait monter le % traité.
-    st.markdown('<div class="stl p">📈 Taux de traitement du Backlog Caractérisation</div>', unsafe_allow_html=True)
-    st.caption(
-        "Référence = avant-dernière extraction enregistrée · État actuel = dernière extraction. "
-        "Se remplit à partir de la 2ᵉ extraction suivant l'activation de ce suivi."
-    )
-    try:
-        from core.backlog_caract_history import calculate_traitement_backlog_caract
-        res_traitement = calculate_traitement_backlog_caract(
-            hist_df, list(CRPR_KW), list(ATPL_KW)
-        )
-        c5, c6 = st.columns([0.5, 0.5], vertical_alignment='top')
-        with c5:
-            _bar_traitement_par_code(res_traitement["prep"], CRPR_KW,
-                                      "Taux de traitement — Préparation", key="bar_traite_prep")
-        with c6:
-            _bar_traitement_par_code(res_traitement["planif"], ATPL_KW,
-                                      "Taux de traitement — Planification", key="bar_traite_planif")
-    except Exception as e:
-        st.caption(f"⚠️ Suivi du taux de traitement indisponible ({e}).")
 
     st.markdown('---')
 
