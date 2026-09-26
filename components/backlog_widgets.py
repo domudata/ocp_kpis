@@ -4,8 +4,9 @@ import io
 import streamlit as st
 import pandas as pd
 import numpy as np
+import plotly.graph_objects as go
 
-from components.charts import show_pie_pair, show_simple_pie
+from components.charts import show_pie_pair, show_simple_pie, PLOTLY_CONFIG
 from components.tables import html_generic_pivot, html_statut_pivot
 from core.calcul_kpi import build_statut_pivot, get_text_col
 
@@ -68,6 +69,21 @@ def _categorie_caract(texte) -> str:
 CRPR_KW = ['ATPD', 'ATMR', 'ATRS', 'ATMO', 'ATER']
 ATPL_KW = ['ATEI', 'ATAL', 'ATAS', 'AGAR', 'ATHS']
 TW_PREV = [350, 290, 300, 310, 360]
+
+DESC_PREP = {
+    'ATPD': 'Attente PDR',
+    'ATMR': 'Attente marché',
+    'ATRS': 'Attente ressources',
+    'ATMO': 'Attente moyens ou Outillage',
+    'ATER': 'Attente équipement de rechange',
+}
+DESC_PLAN = {
+    'ATEI': 'Attente arrêt équipement ou Installation',
+    'ATAL': 'Attente arrêt ligne',
+    'ATAS': 'Attente arrêt site',
+    'AGAR': 'Attente grand arrêt de révision',
+    'ATHS': 'Attente HSE',
+}
 
 
 def html_age_dispatch_table(rows, include_exec=False):
@@ -258,44 +274,31 @@ def build_age_table_rows(postes, df_prep, df_plan, df_exec=None, label_total="TO
     return rows
 
 
-def _build_backlog_download(recap_prep: list, recap_plan: list) -> bytes:
+def calc_backlog_caract_rows(df_all: pd.DataFrame, vp: list):
     """
-    Construit un classeur Excel (2 feuilles) pour le téléchargement du
-    nouveau backlog Caractérisation Préparation / Planification —
-    indépendant du filtre période (demande explicite).
+    NOUVEAU (26/09) — remplace l'ancienne comparaison Caractérisé / Non
+    Caractérisé. Calcule directement le nombre d'OT par poste et par CODE
+    (pas de colonne Non Caractérisé) pour le Backlog Caractérisation
+    Préparation et Planification.
+
+    Population (identique pour les 2, indépendante du filtre Période) :
+    tout OT non CLOT/TCLO, quel que soit son type ou sa date. Un OT
+    contenant à la fois un code Prep et un code Planif n'est compté
+    qu'une seule fois, dans la catégorie dont le code apparaît en premier
+    dans "Statut utilisateur" (voir _categorie_caract).
+
+    Retourne (prep_rows, prep_cols, plan_rows, plan_cols, df_univers) :
+      - prep_cols = ['Poste de travail', 'Total', 'ATPD', 'ATMR', 'ATRS', 'ATMO', 'ATER']
+      - plan_cols = ['Poste de travail', 'Total', 'ATEI', 'ATAL', 'ATAS', 'AGAR', 'ATHS']
+      - prep_rows / plan_rows : liste de dicts, un par poste de vp + une
+        ligne finale de synthèse avec 'Poste de travail' == 'Total' (et
+        non 'TOTAL' — libellé choisi pour rester cohérent avec le filtre
+        d'exclusion utilisé par core.export_excel.charger_historique_
+        depuis_github lors de la relecture de l'historique, qui exclut
+        les lignes "Cible" / "Total general" / "Total").
+      - df_univers : DataFrame de la population complète (avec la colonne
+        'Categorie Caract'), réutilisable pour l'affichage.
     """
-    buf = io.BytesIO()
-    df_prep_export = pd.DataFrame(recap_prep)
-    df_plan_export = pd.DataFrame(recap_plan)
-    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
-        df_prep_export.to_excel(writer, sheet_name="Backlog Preparation", index=False)
-        df_plan_export.to_excel(writer, sheet_name="Backlog Planification", index=False)
-    buf.seek(0)
-    return buf.getvalue()
-
-
-def render_backlog_tab(dfp: pd.DataFrame, vp: list, df_toutes_dates: pd.DataFrame = None) -> None:
-    """Rendu complet de l'onglet Backlog."""
-
-    df_all = df_toutes_dates.copy() if df_toutes_dates is not None else dfp.copy()
-    _zcor = df_all[df_all["Type d'ordre"] == "ZCOR"].copy()
-
-    # ── Backlog Caractérisation Préparation / Planification ────────────
-    # REDÉFINI (demande explicite du 26/09) — remplace l'ancienne logique,
-    # UNIQUEMENT pour ces deux sections de la page Backlog :
-    #   - Indépendant du filtre "Période" : calculé sur df_toutes_dates
-    #     (TOUTES les dates), jamais sur dfp filtré par période.
-    #   - Population = TOUT OT, quel que soit son "Type d'ordre" (plus de
-    #     filtre ZCOR pour ces 2 sections) et quelle que soit sa date, à la
-    #     SEULE condition qu'il ne soit pas CLOT ni TCLO.
-    #   - Caractérisé Prep = "Statut utilisateur" contient (n'importe où
-    #     dans le texte, pas forcément en premier) l'un des codes ATPD,
-    #     ATMR, ATER, ATRS, ATMO.
-    #   - Caractérisé Planif = contient l'un des codes ATEI, ATAL, ATAS,
-    #     AGAR, ATHS.
-    #   - Si l'OT contient à la fois un code Prep ET un code Planif, il
-    #     n'est compté qu'UNE SEULE FOIS : dans la catégorie dont le code
-    #     apparaît en premier (position la plus petite) dans le texte.
     if "Statut OT" in df_all.columns:
         df_univers = df_all[~df_all["Statut OT"].isin(["CLOT", "TCLO"])].copy()
     else:
@@ -303,60 +306,211 @@ def render_backlog_tab(dfp: pd.DataFrame, vp: list, df_toutes_dates: pd.DataFram
         df_univers = df_all[~_premier_mot_sys.isin(["CLOT", "TCLO"])].copy()
 
     df_univers['Categorie Caract'] = df_univers['Statut utilisateur'].apply(_categorie_caract)
-    df_univers['Carac Prep'] = np.where(
-        df_univers['Categorie Caract'] == 'PREP', 'CARACTERISE', 'NON CARACTERISE'
-    )
-    df_univers['Carac Plan'] = np.where(
-        df_univers['Categorie Caract'] == 'PLANIF', 'CARACTERISE', 'NON CARACTERISE'
-    )
 
     def _extract_kw(statut, kw_list):
         if statut is None or (isinstance(statut, float) and pd.isna(statut)):
-            return 'NON CARACTERISE'
+            return None
         s = str(statut).upper()
         for kw in kw_list:
             if kw in s:
                 return kw
-        return 'NON CARACTERISE'
+        return None
 
-    df_prep = df_univers  # même univers pour les 2 sections (voir note ci-dessus)
-    df_plan = df_univers
+    prep_codes = list(CRPR_KW)   # ATPD, ATMR, ATRS, ATMO, ATER
+    plan_codes = list(ATPL_KW)   # ATEI, ATAL, ATAS, AGAR, ATHS
 
-    df_carac_prep = df_univers[df_univers['Carac Prep'] == 'CARACTERISE'].copy()
-    df_carac_prep['Type Carac Prep'] = df_carac_prep['Statut utilisateur'].apply(
-        lambda x: _extract_kw(x, CRPR_KW)
+    df_prep_c = df_univers[df_univers['Categorie Caract'] == 'PREP'].copy()
+    df_prep_c['Code'] = df_prep_c['Statut utilisateur'].apply(lambda x: _extract_kw(x, prep_codes))
+
+    df_plan_c = df_univers[df_univers['Categorie Caract'] == 'PLANIF'].copy()
+    df_plan_c['Code'] = df_plan_c['Statut utilisateur'].apply(lambda x: _extract_kw(x, plan_codes))
+
+    piv_prep = pd.pivot_table(
+        df_prep_c, index='Poste travail princ.', columns='Code',
+        values='Ordre', aggfunc='count', fill_value=0
+    ).reindex(vp, fill_value=0)
+    for c in prep_codes:
+        if c not in piv_prep.columns:
+            piv_prep[c] = 0
+
+    piv_plan = pd.pivot_table(
+        df_plan_c, index='Poste travail princ.', columns='Code',
+        values='Ordre', aggfunc='count', fill_value=0
+    ).reindex(vp, fill_value=0)
+    for c in plan_codes:
+        if c not in piv_plan.columns:
+            piv_plan[c] = 0
+
+    prep_cols = ['Poste de travail', 'Total'] + prep_codes
+    plan_cols = ['Poste de travail', 'Total'] + plan_codes
+
+    prep_rows = []
+    for poste in vp:
+        row = {'Poste de travail': poste}
+        tot = 0
+        for c in prep_codes:
+            v = int(piv_prep.loc[poste, c]) if poste in piv_prep.index else 0
+            row[c] = v
+            tot += v
+        row['Total'] = tot
+        prep_rows.append(row)
+    tot_row = {'Poste de travail': 'Total', '_t': 'total'}
+    tot_all = 0
+    for c in prep_codes:
+        s = sum(r[c] for r in prep_rows)
+        tot_row[c] = s
+        tot_all += s
+    tot_row['Total'] = tot_all
+    prep_rows.append(tot_row)
+
+    plan_rows = []
+    for poste in vp:
+        row = {'Poste de travail': poste}
+        tot = 0
+        for c in plan_codes:
+            v = int(piv_plan.loc[poste, c]) if poste in piv_plan.index else 0
+            row[c] = v
+            tot += v
+        row['Total'] = tot
+        plan_rows.append(row)
+    tot_row2 = {'Poste de travail': 'Total', '_t': 'total'}
+    tot_all2 = 0
+    for c in plan_codes:
+        s = sum(r[c] for r in plan_rows)
+        tot_row2[c] = s
+        tot_all2 += s
+    tot_row2['Total'] = tot_all2
+    plan_rows.append(tot_row2)
+
+    return prep_rows, prep_cols, plan_rows, plan_cols, df_univers
+
+
+def _html_backlog_caract_table(rows, cols, desc_map, accent_color):
+    """Rendu HTML du nouveau tableau Poste de travail | Total | <codes>."""
+    h = '<table class="tw omt"><thead><tr>'
+    for col in cols:
+        h += f'<th>{col}</th>'
+    h += '</tr></thead><tbody>'
+    for row in rows:
+        is_total = row.get('_t') == 'total'
+        style = 'font-weight:800;background:#e2e8f0' if is_total else ''
+        h += f'<tr style="{style}">'
+        for col in cols:
+            v = row.get(col, 0)
+            cell_style = ''
+            if col == 'Total':
+                cell_style = f'background:#e0f2fe;color:{accent_color};font-weight:700'
+            elif col != 'Poste de travail' and not is_total and v not in (0, "0"):
+                cell_style = 'font-weight:600'
+            h += f'<td style="text-align:center;{cell_style}">{v}</td>'
+        h += '</tr>'
+    h += '</tbody></table>'
+    return h
+
+
+def _bar_traitement_par_code(res_cat: dict, codes: list, titre: str, key: str) -> None:
+    """
+    NOUVEAU (26/09) — bar chart horizontal 2 couleurs (vert = Traité,
+    orange = Restant) montrant le % de traitement du Backlog Caract, par
+    code, entre l'avant-dernière et la dernière extraction enregistrée
+    dans l'historique GitHub.
+
+    res_cat : dict {code: {"precedent": int|None, "actuel": int,
+                            "traite": int, "pct_traite": float}}
+    (sous-dict "prep" ou "planif" du retour de
+    calculate_traitement_backlog_caract).
+    """
+    codes_dispo = [c for c in codes if c in res_cat]
+    if not codes_dispo:
+        st.markdown('<div style="padding:12px;color:#94a3b8;">Données insuffisantes pour ce graphique.</div>',
+                    unsafe_allow_html=True)
+        return
+
+    pas_de_reference = all(res_cat[c].get("precedent") is None for c in codes_dispo)
+    if pas_de_reference:
+        st.caption("📅 Première extraction enregistrée pour ce suivi : pas encore de référence "
+                    "pour calculer un taux de traitement. Le graphique se remplira à la prochaine extraction.")
+
+    actuel = [res_cat[c]["actuel"] for c in codes_dispo]
+    traite = [res_cat[c]["traite"] for c in codes_dispo]
+    precedent = [res_cat[c]["precedent"] if res_cat[c]["precedent"] is not None else res_cat[c]["actuel"] for c in codes_dispo]
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        y=codes_dispo, x=traite, orientation='h', name="Traité",
+        marker=dict(color="#10b981", line=dict(color='white', width=1)),
+        text=[str(v) if v > 0 else "" for v in traite], textposition='inside',
+        textfont=dict(color='white', size=12),
+    ))
+    fig.add_trace(go.Bar(
+        y=codes_dispo, x=actuel, orientation='h', name="Restant",
+        marker=dict(color="#f97316", line=dict(color='white', width=1)),
+        text=[str(v) for v in actuel], textposition='inside',
+        textfont=dict(color='white', size=12),
+    ))
+    for c, p, a, t in zip(codes_dispo, precedent, actuel, traite):
+        pct = res_cat[c]["pct_traite"]
+        base = p if p else a
+        fig.add_annotation(x=base + max(base, 1) * 0.02, y=c, text=f"  {pct}% traité",
+                            showarrow=False, xanchor='left', font=dict(size=12, color='black'))
+
+    fig.update_layout(
+        barmode='stack', title=titre, height=max(260, 46 * len(codes_dispo) + 90),
+        yaxis=dict(autorange="reversed", tickfont=dict(size=12, family='Inter'),
+                   fixedrange=True, automargin=True),
+        xaxis=dict(showgrid=True, gridcolor="#F1F5F9", fixedrange=True, title="Nombre d'OT"),
+        plot_bgcolor='white', paper_bgcolor='white',
+        legend=dict(orientation="h", yanchor="bottom", y=-0.22, x=0.5, xanchor="center"),
+        margin=dict(t=40, b=60, l=20, r=110),
     )
+    st.plotly_chart(fig, use_container_width=True, config=PLOTLY_CONFIG, key=key)
 
-    piv_prep_stat = pd.pivot_table(
-        df_univers, index='Poste travail princ.', columns='Carac Prep',
-        values='Ordre', aggfunc='count', fill_value=0
-    ).reindex(vp, fill_value=0)
-    for c in ['CARACTERISE', 'NON CARACTERISE']:
-        if c not in piv_prep_stat.columns:
-            piv_prep_stat[c] = 0
 
-    piv_prep_type = pd.pivot_table(
-        df_carac_prep, index='Poste travail princ.', columns='Type Carac Prep',
-        values='Ordre', aggfunc='count', fill_value=0
-    ).reindex(vp, fill_value=0)
+def _build_backlog_download(prep_rows: list, prep_cols: list, plan_rows: list, plan_cols: list) -> bytes:
+    """
+    Construit un classeur Excel (2 feuilles) pour le téléchargement du
+    backlog Caractérisation Préparation / Planification — indépendant du
+    filtre période, nouveau format Total + par code (demande explicite).
+    """
+    buf = io.BytesIO()
+    df_prep_export = pd.DataFrame(prep_rows)[prep_cols]
+    df_plan_export = pd.DataFrame(plan_rows)[plan_cols]
+    with pd.ExcelWriter(buf, engine="openpyxl") as writer:
+        df_prep_export.to_excel(writer, sheet_name="Backlog Preparation", index=False)
+        df_plan_export.to_excel(writer, sheet_name="Backlog Planification", index=False)
+    buf.seek(0)
+    return buf.getvalue()
 
-    df_carac_plan = df_univers[df_univers['Carac Plan'] == 'CARACTERISE'].copy()
-    df_carac_plan['Type Carac Plan'] = df_carac_plan['Statut utilisateur'].apply(
-        lambda x: _extract_kw(x, ATPL_KW)
-    )
 
-    piv_plan_stat = pd.pivot_table(
-        df_univers, index='Poste travail princ.', columns='Carac Plan',
-        values='Ordre', aggfunc='count', fill_value=0
-    ).reindex(vp, fill_value=0)
-    for c in ['CARACTERISE', 'NON CARACTERISE']:
-        if c not in piv_plan_stat.columns:
-            piv_plan_stat[c] = 0
+def render_backlog_tab(dfp: pd.DataFrame, vp: list, df_toutes_dates: pd.DataFrame = None,
+                        hist_df: pd.DataFrame = None) -> None:
+    """Rendu complet de l'onglet Backlog."""
 
-    piv_plan_type = pd.pivot_table(
-        df_carac_plan, index='Poste travail princ.', columns='Type Carac Plan',
-        values='Ordre', aggfunc='count', fill_value=0
-    ).reindex(vp, fill_value=0)
+    df_all = df_toutes_dates.copy() if df_toutes_dates is not None else dfp.copy()
+    _zcor = df_all[df_all["Type d'ordre"] == "ZCOR"].copy()
+
+    # ── Backlog Caractérisation Préparation / Planification ────────────
+    # REDÉFINI (demande explicite du 26/09) — supprime toute comparaison
+    # Caractérisé / Non Caractérisé. Nouveau format de tableau :
+    #   Poste de travail | Total | <une colonne par code>
+    # Population : indépendante du filtre Période (calculée sur
+    # df_toutes_dates) — tout OT non CLOT/TCLO, quel que soit son type ou
+    # sa date. Voir calc_backlog_caract_rows pour le détail des règles.
+    prep_rows, prep_cols, plan_rows, plan_cols, df_univers = calc_backlog_caract_rows(df_all, vp)
+
+    def _piv_type(categorie, kw_list):
+        sub = df_univers[df_univers['Categorie Caract'] == categorie].copy() if not df_univers.empty else pd.DataFrame()
+        if sub.empty:
+            return pd.DataFrame()
+        sub['Code'] = sub['Statut utilisateur'].apply(
+            lambda x: next((k for k in kw_list if k in str(x).upper()), None)
+        )
+        piv = pd.pivot_table(sub, index='Poste travail princ.', columns='Code',
+                              values='Ordre', aggfunc='count', fill_value=0)
+        return piv.reindex(vp, fill_value=0)
+
+    piv_prep_type = _piv_type('PREP', CRPR_KW)
+    piv_plan_type = _piv_type('PLANIF', ATPL_KW)
 
     _statut_lanc_ex = (
         (_zcor["Statut système"].fillna("").astype(str).str.strip().str.split().str[0] == "LANC")
@@ -381,6 +535,7 @@ def render_backlog_tab(dfp: pd.DataFrame, vp: list, df_toutes_dates: pd.DataFram
     piv_thm = build_statut_pivot(thm_df, vp)
     piv_all = build_statut_pivot(dfp, vp)
 
+    # ═══ Backlog Caractérisation Préparation ═══
     st.markdown(
         '<div class="stl c">📋 Caractérisation Backlog Préparation</div>',
         unsafe_allow_html=True
@@ -392,90 +547,29 @@ def render_backlog_tab(dfp: pd.DataFrame, vp: list, df_toutes_dates: pd.DataFram
         "compté ici que si le code Prep apparaît en premier."
     )
 
-    recap_prep = []
-    for poste in vp:
-        carac = int(piv_prep_stat.loc[poste, 'CARACTERISE']) if poste in piv_prep_stat.index else 0
-        non = int(piv_prep_stat.loc[poste, 'NON CARACTERISE']) if poste in piv_prep_stat.index else 0
-        tot = carac + non
-        taux = round(carac / tot * 100, 1) if tot > 0 else 0.0
-        recap_prep.append({
-            'Poste de travail': poste,
-            'Caractérisé': carac,
-            'Non Caractérisé (Anomalies)': non,
-            'Total': tot,
-            'Taux Carac %': f'{taux}%'
-        })
-
-    total_carac = sum(r['Caractérisé'] for r in recap_prep)
-    total_non = sum(r['Non Caractérisé (Anomalies)'] for r in recap_prep)
-    total_tot = total_carac + total_non
-    recap_prep.append({
-        'Poste de travail': 'TOTAL',
-        'Caractérisé': total_carac,
-        'Non Caractérisé (Anomalies)': total_non,
-        'Total': total_tot,
-        'Taux Carac %': f'{round(total_carac/total_tot*100,1) if total_tot>0 else 0}%'
-    })
-
     c1, c2 = st.columns([0.5, 0.5], vertical_alignment='top')
     with c1:
-        h = '<table class="tw omt"><thead><tr>'
-        for col in ['Poste de travail', 'Caractérisé', 'Non Caractérisé (Anomalies)', 'Total', 'Taux Carac %']:
-            h += f'<th>{col}</th>'
-        h += '</tr></thead><tbody>'
-        for row in recap_prep:
-            is_total = row['Poste de travail'] == 'TOTAL'
-            style = 'font-weight:800;background:#e2e8f0' if is_total else ''
-            h += f'<tr style="{style}">'
-            for col in ['Poste de travail', 'Caractérisé', 'Non Caractérisé (Anomalies)', 'Total', 'Taux Carac %']:
-                v = row[col]
-                cell_style = ''
-                if col == 'Caractérisé':
-                    cell_style = 'background:#d1fae5;color:#065f46;font-weight:600'
-                elif col == 'Non Caractérisé (Anomalies)':
-                    cell_style = 'background:#fee2e2;color:#991b1b;font-weight:600'
-                elif col == 'Taux Carac %':
-                    try:
-                        pct = float(str(v).replace('%', ''))
-                        if pct >= 80:
-                            cell_style = 'background:#c6efce;color:#006100;font-weight:700'
-                        elif pct >= 50:
-                            cell_style = 'background:#ffeb9c;color:#9c6500;font-weight:700'
-                        else:
-                            cell_style = 'background:#ffc7ce;color:#9c0006;font-weight:700'
-                    except:
-                        pass
-                h += f'<td style="text-align:center;{cell_style}">{v}</td>'
-            h += '</tr>'
-        h += '</tbody></table>'
-        st.markdown(h, unsafe_allow_html=True)
-
+        st.markdown(_html_backlog_caract_table(prep_rows, prep_cols, DESC_PREP, "#065f46"), unsafe_allow_html=True)
     with c2:
-        show_simple_pie(piv_prep_stat, 'Répartition Caractérisé / Non Caractérisé (Prep)', keep_non_carac=True)
         if not piv_prep_type.empty and piv_prep_type.sum().sum() > 0:
             show_simple_pie(piv_prep_type, 'Répartition par Type de Caractérisation (Prep)', keep_non_carac=False)
+        else:
+            st.markdown('<div style="padding:20px;color:#94a3b8;">Aucune donnée</div>', unsafe_allow_html=True)
 
-    if not df_carac_prep.empty:
-        st.markdown('<div class="stl s">Types de caractérisation — Préparation</div>', unsafe_allow_html=True)
-        type_counts = df_carac_prep['Type Carac Prep'].value_counts()
-        h = '<table class="tw omt"><thead><tr><th>Type</th><th>Description</th><th>Nb OT</th><th>%</th></tr></thead><tbody>'
-        desc_map = {
-            'ATPD': 'Attente PDR',
-            'ATMR': 'Attente marché',
-            'ATRS': 'Attente ressources',
-            'ATMO': 'Attente moyens ou Outillage',
-            'ATER': 'Attente équipement de rechange',
-            'NON CARACTERISE': 'Autre marqueur de caractérisation (hors codes connus)',
-        }
-        for typ, cnt in type_counts.items():
-            pct = round(cnt / type_counts.sum() * 100, 1)
-            desc = desc_map.get(typ, typ)
-            h += f'<tr><td style="font-weight:700;color:#059669">{typ}</td><td>{desc}</td><td style="text-align:center;font-weight:600">{cnt}</td><td style="text-align:center">{pct}%</td></tr>'
-        h += '</tbody></table>'
-        st.markdown(h, unsafe_allow_html=True)
+    st.markdown('<div class="stl s">Types de caractérisation — Préparation</div>', unsafe_allow_html=True)
+    h = '<table class="tw omt"><thead><tr><th>Type</th><th>Description</th><th>Nb OT</th><th>%</th></tr></thead><tbody>'
+    total_prep_codes = sum(prep_rows[-1][c] for c in CRPR_KW)
+    for typ in CRPR_KW:
+        cnt = prep_rows[-1][typ]
+        pct = round(cnt / total_prep_codes * 100, 1) if total_prep_codes else 0.0
+        desc = DESC_PREP.get(typ, typ)
+        h += f'<tr><td style="font-weight:700;color:#059669">{typ}</td><td>{desc}</td><td style="text-align:center;font-weight:600">{cnt}</td><td style="text-align:center">{pct}%</td></tr>'
+    h += '</tbody></table>'
+    st.markdown(h, unsafe_allow_html=True)
 
     st.markdown('---')
 
+    # ═══ Backlog Caractérisation Planification ═══
     st.markdown(
         '<div class="stl c">📋 Caractérisation Backlog Planification</div>',
         unsafe_allow_html=True
@@ -487,92 +581,30 @@ def render_backlog_tab(dfp: pd.DataFrame, vp: list, df_toutes_dates: pd.DataFram
         "compté ici que si le code Planif apparaît en premier."
     )
 
-    recap_plan = []
-    for poste in vp:
-        carac = int(piv_plan_stat.loc[poste, 'CARACTERISE']) if poste in piv_plan_stat.index else 0
-        non = int(piv_plan_stat.loc[poste, 'NON CARACTERISE']) if poste in piv_plan_stat.index else 0
-        tot = carac + non
-        taux = round(carac / tot * 100, 1) if tot > 0 else 0.0
-        recap_plan.append({
-            'Poste de travail': poste,
-            'Caractérisé': carac,
-            'Non Caractérisé (Anomalies)': non,
-            'Total': tot,
-            'Taux Carac %': f'{taux}%'
-        })
-
-    total_carac = sum(r['Caractérisé'] for r in recap_plan)
-    total_non = sum(r['Non Caractérisé (Anomalies)'] for r in recap_plan)
-    total_tot = total_carac + total_non
-    recap_plan.append({
-        'Poste de travail': 'TOTAL',
-        'Caractérisé': total_carac,
-        'Non Caractérisé (Anomalies)': total_non,
-        'Total': total_tot,
-        'Taux Carac %': f'{round(total_carac/total_tot*100,1) if total_tot>0 else 0}%'
-    })
-
     c3, c4 = st.columns([0.5, 0.5], vertical_alignment='top')
     with c3:
-        h = '<table class="tw omt"><thead><tr>'
-        for col in ['Poste de travail', 'Caractérisé', 'Non Caractérisé (Anomalies)', 'Total', 'Taux Carac %']:
-            h += f'<th>{col}</th>'
-        h += '</tr></thead><tbody>'
-        for row in recap_plan:
-            is_total = row['Poste de travail'] == 'TOTAL'
-            style = 'font-weight:800;background:#e2e8f0' if is_total else ''
-            h += f'<tr style="{style}">'
-            for col in ['Poste de travail', 'Caractérisé', 'Non Caractérisé (Anomalies)', 'Total', 'Taux Carac %']:
-                v = row[col]
-                cell_style = ''
-                if col == 'Caractérisé':
-                    cell_style = 'background:#d1fae5;color:#065f46;font-weight:600'
-                elif col == 'Non Caractérisé (Anomalies)':
-                    cell_style = 'background:#fee2e2;color:#991b1b;font-weight:600'
-                elif col == 'Taux Carac %':
-                    try:
-                        pct = float(str(v).replace('%', ''))
-                        if pct >= 80:
-                            cell_style = 'background:#c6efce;color:#006100;font-weight:700'
-                        elif pct >= 50:
-                            cell_style = 'background:#ffeb9c;color:#9c6500;font-weight:700'
-                        else:
-                            cell_style = 'background:#ffc7ce;color:#9c0006;font-weight:700'
-                    except:
-                        pass
-                h += f'<td style="text-align:center;{cell_style}">{v}</td>'
-            h += '</tr>'
-        h += '</tbody></table>'
-        st.markdown(h, unsafe_allow_html=True)
-
+        st.markdown(_html_backlog_caract_table(plan_rows, plan_cols, DESC_PLAN, "#1e40af"), unsafe_allow_html=True)
     with c4:
-        show_simple_pie(piv_plan_stat, 'Répartition Caractérisé / Non Caractérisé (Plan)', keep_non_carac=True)
         if not piv_plan_type.empty and piv_plan_type.sum().sum() > 0:
             show_simple_pie(piv_plan_type, 'Répartition par Type de Caractérisation (Plan)', keep_non_carac=False)
+        else:
+            st.markdown('<div style="padding:20px;color:#94a3b8;">Aucune donnée</div>', unsafe_allow_html=True)
 
-    if not df_carac_plan.empty:
-        st.markdown('<div class="stl s">Types de caractérisation — Planification</div>', unsafe_allow_html=True)
-        type_counts = df_carac_plan['Type Carac Plan'].value_counts()
-        h = '<table class="tw omt"><thead><tr><th>Type</th><th>Description</th><th>Nb OT</th><th>%</th></tr></thead><tbody>'
-        desc_map = {
-            'ATEI': 'Attente arrêt équipement ou Installation',
-            'ATAL': 'Attente arrêt ligne',
-            'ATAS': 'Attente arrêt site',
-            'AGAR': 'Attente grand arrêt de révision',
-            'ATHS': 'Attente HSE',
-            'NON CARACTERISE': 'Autre marqueur de caractérisation (hors codes connus)',
-        }
-        for typ, cnt in type_counts.items():
-            pct = round(cnt / type_counts.sum() * 100, 1)
-            desc = desc_map.get(typ, typ)
-            h += f'<tr><td style="font-weight:700;color:#2563eb">{typ}</td><td>{desc}</td><td style="text-align:center;font-weight:600">{cnt}</td><td style="text-align:center">{pct}%</td></tr>'
-        h += '</tbody></table>'
-        st.markdown(h, unsafe_allow_html=True)
+    st.markdown('<div class="stl s">Types de caractérisation — Planification</div>', unsafe_allow_html=True)
+    h = '<table class="tw omt"><thead><tr><th>Type</th><th>Description</th><th>Nb OT</th><th>%</th></tr></thead><tbody>'
+    total_plan_codes = sum(plan_rows[-1][c] for c in ATPL_KW)
+    for typ in ATPL_KW:
+        cnt = plan_rows[-1][typ]
+        pct = round(cnt / total_plan_codes * 100, 1) if total_plan_codes else 0.0
+        desc = DESC_PLAN.get(typ, typ)
+        h += f'<tr><td style="font-weight:700;color:#2563eb">{typ}</td><td>{desc}</td><td style="text-align:center;font-weight:600">{cnt}</td><td style="text-align:center">{pct}%</td></tr>'
+    h += '</tbody></table>'
+    st.markdown(h, unsafe_allow_html=True)
 
     # ── Téléchargement du backlog Caractérisation (Prep + Planif) ──────
     st.markdown("")
     try:
-        xlsx_bytes = _build_backlog_download(recap_prep, recap_plan)
+        xlsx_bytes = _build_backlog_download(prep_rows, prep_cols, plan_rows, plan_cols)
         st.download_button(
             label="⬇️ Télécharger ce backlog (Excel)",
             data=xlsx_bytes,
@@ -585,25 +617,52 @@ def render_backlog_tab(dfp: pd.DataFrame, vp: list, df_toutes_dates: pd.DataFram
 
     st.markdown('---')
 
+    # ═══ NOUVEAU (26/09) — % de traitement du Backlog Caract, par code ═══
+    # Compare l'avant-dernière extraction enregistrée dans l'historique
+    # GitHub (référence) à la dernière (état actuel) : un OT caractérisé
+    # qui a été traité (résolu / ne correspond plus à ce code) fait
+    # baisser le compteur de ce code, ce qui fait monter le % traité.
+    st.markdown('<div class="stl p">📈 Taux de traitement du Backlog Caractérisation</div>', unsafe_allow_html=True)
+    st.caption(
+        "Référence = avant-dernière extraction enregistrée · État actuel = dernière extraction. "
+        "Se remplit à partir de la 2ᵉ extraction suivant l'activation de ce suivi."
+    )
+    try:
+        from core.backlog_caract_history import calculate_traitement_backlog_caract
+        res_traitement = calculate_traitement_backlog_caract(
+            hist_df, list(CRPR_KW), list(ATPL_KW)
+        )
+        c5, c6 = st.columns([0.5, 0.5], vertical_alignment='top')
+        with c5:
+            _bar_traitement_par_code(res_traitement["prep"], CRPR_KW,
+                                      "Taux de traitement — Préparation", key="bar_traite_prep")
+        with c6:
+            _bar_traitement_par_code(res_traitement["planif"], ATPL_KW,
+                                      "Taux de traitement — Planification", key="bar_traite_planif")
+    except Exception as e:
+        st.caption(f"⚠️ Suivi du taux de traitement indisponible ({e}).")
+
+    st.markdown('---')
+
     st.markdown('<div class="stl p">📊 Statuts OT par Poste de Travail</div>', unsafe_allow_html=True)
 
     st.markdown('<div class="stl s">OT OMS par Poste et Statut OT</div>', unsafe_allow_html=True)
-    c5, c6 = st.columns([0.5, 0.5], vertical_alignment='top')
-    with c5:
+    c7, c8 = st.columns([0.5, 0.5], vertical_alignment='top')
+    with c7:
         st.markdown(html_statut_pivot(piv_oms, 'omt'), unsafe_allow_html=True)
-    with c6:
+    with c8:
         show_pie_pair(piv_oms, 'OT OMS')
 
     st.markdown('<div class="stl s">OT Thermographie par Poste et Statut OT</div>', unsafe_allow_html=True)
-    c7, c8 = st.columns([0.5, 0.5], vertical_alignment='top')
-    with c7:
+    c9, c10 = st.columns([0.5, 0.5], vertical_alignment='top')
+    with c9:
         st.markdown(html_statut_pivot(piv_thm, 'tht'), unsafe_allow_html=True)
-    with c8:
+    with c10:
         show_pie_pair(piv_thm, 'OT Thermographie')
 
     st.markdown('<div class="stl s">Tous les OT par Poste et Statut OT</div>', unsafe_allow_html=True)
-    c9, c10 = st.columns([0.5, 0.5], vertical_alignment='top')
-    with c9:
+    c11, c12 = st.columns([0.5, 0.5], vertical_alignment='top')
+    with c11:
         st.markdown(html_statut_pivot(piv_all, 'pt'), unsafe_allow_html=True)
-    with c10:
+    with c12:
         show_pie_pair(piv_all, 'Tous les OT')
