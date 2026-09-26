@@ -1489,6 +1489,21 @@ def main():
         # SAUVEGARDE HISTORIQUE EXCEL
         # ═══════════════════════════════════════════════════════════════════
 
+        # NOUVEAU (26/09) — Backlog Caractérisation (Prep/Planif) par code,
+        # calculé sur df_full (toutes dates, indépendant du filtre
+        # Période — même règle que l'affichage de l'onglet Backlog), pour
+        # alimenter l'historique et permettre le suivi du taux de
+        # traitement d'une extraction à l'autre.
+        from components.backlog_widgets import calc_backlog_caract_rows
+
+        (
+            bc_prep_rows,
+            bc_prep_cols,
+            bc_plan_rows,
+            bc_plan_cols,
+            _bc_df_univers,
+        ) = calc_backlog_caract_rows(df_full, vp)
+
         save_kpis_to_excel(
             prows,
             pcols,
@@ -1499,6 +1514,10 @@ def main():
             ano_q_rows,
             ano_q_cols,
             fichier_date,
+            bc_prep_r=bc_prep_rows,
+            bc_prep_c=bc_prep_cols,
+            bc_plan_r=bc_plan_rows,
+            bc_plan_c=bc_plan_cols,
         )
 
 
@@ -1991,7 +2010,8 @@ def main():
             render_backlog_page(
                 dfp,
                 vp,
-                df_toutes_dates=df_full
+                df_toutes_dates=df_full,
+                hist_df=hist_df
             )
 
 
