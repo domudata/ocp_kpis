@@ -86,6 +86,21 @@ DESC_PLAN = {
 }
 
 
+def _legende_codes(codes: list, desc_map: dict) -> str:
+    """
+    NOUVEAU (26/09) — légende compacte "CODE = signification" affichée
+    sous les graphiques qui n'utilisent que les codes bruts (ATPD, ATMR,
+    ...) sur leurs axes, pour que le poste/technicien qui lit le graphique
+    sache ce que chaque code représente sans devoir chercher ailleurs.
+    """
+    items = " · ".join(
+        f"<b>{c}</b> = {desc_map.get(c, c)}" for c in codes
+    )
+    return (
+        f'<div style="font-size:12px;color:#64748b;padding:4px 0 10px 0;line-height:1.6;">{items}</div>'
+    )
+
+
 def html_age_dispatch_table(rows, include_exec=False):
     cols = [
         ("Poste de travail", "left", "Poste de travail"),
@@ -426,11 +441,6 @@ def _bar_traitement_par_code(res_cat: dict, codes: list, titre: str, key: str) -
                     unsafe_allow_html=True)
         return
 
-    pas_de_reference = all(res_cat[c].get("precedent") is None for c in codes_dispo)
-    if pas_de_reference:
-        st.caption("📅 Première extraction enregistrée pour ce suivi : pas encore de référence "
-                    "pour calculer un taux de traitement. Le graphique se remplira à la prochaine extraction.")
-
     actuel = [res_cat[c]["actuel"] for c in codes_dispo]
     traite = [res_cat[c]["traite"] for c in codes_dispo]
     precedent = [res_cat[c]["precedent"] if res_cat[c]["precedent"] is not None else res_cat[c]["actuel"] for c in codes_dispo]
@@ -646,18 +656,19 @@ def render_backlog_tab(dfp: pd.DataFrame, vp: list, df_toutes_dates: pd.DataFram
         else:
             st.markdown('<div style="padding:20px;color:#94a3b8;">Aucune donnée</div>', unsafe_allow_html=True)
 
-        # NOUVEAU (26/09) — placé directement sous le pie de cette catégorie
+        # NOUVEAU (26/09) — placé directement sous le pie de cette catégorie,
+        # chaque graphique séparé visuellement avec son propre titre
+        st.markdown('<hr style="margin:14px 0;border-color:#e2e8f0;">', unsafe_allow_html=True)
         st.markdown('<div class="stl s">📈 Taux de traitement — Préparation</div>', unsafe_allow_html=True)
-        st.caption(
-            "Référence = avant-dernière extraction enregistrée · État actuel = dernière extraction. "
-            "Se remplit à partir de la 2ᵉ extraction suivant l'activation de ce suivi."
-        )
         _bar_traitement_par_code(res_traitement.get("prep", {}), CRPR_KW,
                                   "Taux de traitement — Préparation", key="bar_traite_prep")
+        st.markdown(_legende_codes(CRPR_KW, DESC_PREP), unsafe_allow_html=True)
 
+        st.markdown('<hr style="margin:14px 0;border-color:#e2e8f0;">', unsafe_allow_html=True)
         st.markdown('<div class="stl s">🔵 Répartition LANC / CRÉÉ — Préparation</div>', unsafe_allow_html=True)
         _bar_lanc_cree_par_code(counts_lanc_cree_prep, CRPR_KW,
                                  "LANC / CRÉÉ par code — Préparation", key="bar_lanc_cree_prep")
+        st.markdown(_legende_codes(CRPR_KW, DESC_PREP), unsafe_allow_html=True)
 
     st.markdown('<div class="stl s">Types de caractérisation — Préparation</div>', unsafe_allow_html=True)
     h = '<table class="tw omt"><thead><tr><th>Type</th><th>Description</th><th>Nb OT</th><th>%</th></tr></thead><tbody>'
@@ -693,18 +704,19 @@ def render_backlog_tab(dfp: pd.DataFrame, vp: list, df_toutes_dates: pd.DataFram
         else:
             st.markdown('<div style="padding:20px;color:#94a3b8;">Aucune donnée</div>', unsafe_allow_html=True)
 
-        # NOUVEAU (26/09) — placé directement sous le pie de cette catégorie
+        # NOUVEAU (26/09) — placé directement sous le pie de cette catégorie,
+        # chaque graphique séparé visuellement avec son propre titre
+        st.markdown('<hr style="margin:14px 0;border-color:#e2e8f0;">', unsafe_allow_html=True)
         st.markdown('<div class="stl s">📈 Taux de traitement — Planification</div>', unsafe_allow_html=True)
-        st.caption(
-            "Référence = avant-dernière extraction enregistrée · État actuel = dernière extraction. "
-            "Se remplit à partir de la 2ᵉ extraction suivant l'activation de ce suivi."
-        )
         _bar_traitement_par_code(res_traitement.get("planif", {}), ATPL_KW,
                                   "Taux de traitement — Planification", key="bar_traite_planif")
+        st.markdown(_legende_codes(ATPL_KW, DESC_PLAN), unsafe_allow_html=True)
 
+        st.markdown('<hr style="margin:14px 0;border-color:#e2e8f0;">', unsafe_allow_html=True)
         st.markdown('<div class="stl s">🔵 Répartition LANC / CRÉÉ — Planification</div>', unsafe_allow_html=True)
         _bar_lanc_cree_par_code(counts_lanc_cree_plan, ATPL_KW,
                                  "LANC / CRÉÉ par code — Planification", key="bar_lanc_cree_planif")
+        st.markdown(_legende_codes(ATPL_KW, DESC_PLAN), unsafe_allow_html=True)
 
     st.markdown('<div class="stl s">Types de caractérisation — Planification</div>', unsafe_allow_html=True)
     h = '<table class="tw omt"><thead><tr><th>Type</th><th>Description</th><th>Nb OT</th><th>%</th></tr></thead><tbody>'
