@@ -1,90 +1,90 @@
 # -*- coding: utf-8 -*-
 """
-Génération d'une présentation PowerPoint dynamique selon le filtre
-Poste de travail (SF1 → Maroc Chimie, SF2 → FEEDS, mixte → OCP).
+Présentation PowerPoint KPI (16:9) — même contenu que le rapport PDF
+(core/generate_report_pdf.py), réparti sur plusieurs diapositives.
 
-Usage dans app.py :
-    from core.export_pptx import build_presentation
-    pptx_bytes = build_presentation(
-        vp, ckdf, ano_map, pa, qa, pscores, qscores, hist_df, fichier_date,
-        df_full=df_full, avf_full=av_full, now_ts=now_ts,
-    )
-    st.download_button("📊 Exporter PowerPoint", pptx_bytes,
-                       file_name="presentation_kpis.pptx")
+Périmètre = sélection « Poste de travail » de l'application :
+  SF1 → Maroc Chimie · SF2 → FEEDS · mixte → OCP · 1 seul poste → ce poste.
+Avec plusieurs postes, chaque indicateur est exprimé en % de postes
+conformes (même règle que les rapports de division SF01 / SF02).
 
-── NOUVEAU (amélioration demandée) ──────────────────────────────────────
-- Section « Suivi d'anomalies — semaine précédente vs semaine en cours »,
-  répartie sur 2 pages (Performance / Qualité), chacune avec un
-  graphique « papillon » (butterfly chart) + un tableau de synthèse
-  (S-1, S actuelle, écart, tendance).
-- Habillage visuel harmonisé sur toutes les pages : bandeau de titre
-  avec liseré, logo discret en coin, pied de page avec numérotation,
-  entité et date d'extraction.
-- df_full / avf_full / now_ts sont OPTIONNELS : si absents, les 2
-  nouvelles pages sont simplement omises (rétrocompatible avec l'appel
-  existant dans app.py).
+Diapositives :
+   1  Titre + scores
+   2  Indicateurs Performance & Qualité (tableaux)
+   3  Anomalies par indicateur
+   4  Postes impactants — anomalies critiques, % d'impact (plusieurs postes)
+   5  Évolution S-1 → S (tuiles + tendance des scores)
+   6  Comparaison S-1 vs S — Performance (butterfly)
+   7  Comparaison S-1 vs S — Qualité (butterfly)
+   8  Backlog caractérisation (camemberts + clé des codes)
+   9  Nombre total traité (si 2 extractions du backlog disponibles)
+  10+ Plan d'action (réparti sur plusieurs diapositives si nécessaire)
+
+Tous les graphiques sont des graphiques PowerPoint NATIFS (modifiables).
+Données : core/report_data.py (identiques au PDF).
+
+Usage dans app.py (inchangé) :
+    pptx_bytes = build_presentation(vp, ckdf, ano_map, pa, qa, pscores,
+                                    qscores, hist_df, fichier_date)
 """
 import io
-from datetime import datetime
+import os
 
-import numpy as np
 import pandas as pd
 from pptx import Presentation
-from pptx.util import Inches, Pt, Emu
+from pptx.chart.data import CategoryChartData
 from pptx.dml.color import RGBColor
-from pptx.enum.text import PP_ALIGN, MSO_ANCHOR
+from pptx.enum.chart import (XL_CHART_TYPE, XL_LABEL_POSITION, XL_LEGEND_POSITION,
+                             XL_MARKER_STYLE, XL_TICK_LABEL_POSITION, XL_TICK_MARK)
+from pptx.enum.dml import MSO_LINE_DASH_STYLE
+from pptx.enum.shapes import MSO_SHAPE
+from pptx.enum.text import MSO_ANCHOR, PP_ALIGN
+from pptx.oxml.ns import qn
+from pptx.util import Emu, Inches, Pt
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
+from core.constants import QK, PK, CIBLE, LOWER_BETTER
+from core import report_data as rd
 
-from core.constants import QK, PK, CIBLE, KPI_RESP_MAP
-
-try:
-    from core.calcul_kpi import calc_kpis
-except Exception:
-    calc_kpis = None
-try:
-    from core.anomalies import build_ano_map
-except Exception:
-    build_ano_map = None
-
-# ── Palette OCP ──────────────────────────────────────────────────────────
-GREEN_OCP  = RGBColor(0x2C, 0x5F, 0x2D)
-MOSS       = RGBColor(0x97, 0xBC, 0x62)
-WHITE      = RGBColor(0xFF, 0xFF, 0xFF)
-DARK       = RGBColor(0x1E, 0x29, 0x3B)
-GREY       = RGBColor(0x64, 0x74, 0x8B)
-RED        = RGBColor(0xEF, 0x44, 0x44)
-AMBER      = RGBColor(0xF5, 0x9E, 0x0B)
-GREEN      = RGBColor(0x10, 0xB9, 0x81)
-LIGHT_BG   = RGBColor(0xF5, 0xF5, 0xF5)
-BLUE       = RGBColor(0x25, 0x63, 0xEB)
-
-# Palette matplotlib (hex) — mêmes couleurs que la palette pptx ci-dessus,
-# pour une cohérence visuelle totale entre tableaux et graphiques.
-HEX_NAVY   = "#1E3A5F"
-HEX_GREEN_OCP = "#2C5F2D"
-HEX_GREEN  = "#10B981"
-HEX_RED    = "#EF4444"
-HEX_AMBER  = "#F59E0B"
-HEX_GREY   = "#94A3B8"
-HEX_BLUE   = "#2563EB"
-
-SW, SH = Inches(13.333), Inches(7.5)   # 16:9
-
-# LOWER_BETTER (import paresseux pour éviter les erreurs si absent)
-try:
-    from core.constants import LOWER_BETTER as _LOWER
-except Exception:
-    _LOWER = []
+# ── Jetons (identiques au rapport PDF) ───────────────────────────────────────
+def _rgb(h):
+    return RGBColor.from_string(h.lstrip("#").upper())
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# Utilitaires génériques
-# ═══════════════════════════════════════════════════════════════════════════
+NAVY, NAVY2 = _rgb("1E3A5F"), _rgb("2A4B74")
+ACCENT = _rgb("F59E0B")
+INK, INK2, MUTED = _rgb("0B0B0B"), _rgb("52514E"), _rgb("898781")
+GRID, AXIS = _rgb("E1E0D9"), _rgb("C3C2B7")
+CARD, ROW_ALT = _rgb("F4F6F9"), _rgb("F4F4F1")
+WHITE = _rgb("FFFFFF")
+PERF, PERF_PREC = _rgb("2A78D6"), _rgb("B7D2F2")
+QUAL, QUAL_PREC = _rgb("4A3AA7"), _rgb("C9C3EC")
+GOOD, WARN, SERIOUS, CRIT = _rgb("0CA30C"), _rgb("FAB219"), _rgb("EC835A"), _rgb("D03B3B")
+UP_TXT, DOWN_TXT = _rgb("006300"), _rgb("D03B3B")
+RESTANT = _rgb("D6D5CF")
+CODE_PALETTE = [_rgb(h) for h in ("2A78D6", "EB6834", "1BAF7A", "EDA100", "E87BA4")]
+
+FONT = "Calibri"
+SW, SH = Inches(13.333), Inches(7.5)
+MX = Inches(0.5)                     # marge latérale
+CW = SW - 2 * MX                     # largeur utile
+TOP = Inches(1.45)                   # début de la zone de contenu
+BOTTOM = Inches(6.85)                # fin de la zone de contenu
+SEUIL_CRITIQUE, SEUIL_MODERE = rd.SEUIL_CRITIQUE, rd.SEUIL_MODERE
+
+
+def _short_labels():
+    try:
+        from core.publish_reports import SHORT_LABELS
+        return SHORT_LABELS
+    except Exception:
+        return {}
+
+
 def _entity_name(vp):
-    """SF1 → Maroc Chimie, SF2 → FEEDS, mixte → OCP (SF1 & SF2)."""
+    """SF1 → Maroc Chimie, SF2 → FEEDS, mixte → OCP, 1 poste → ce poste."""
+    vp = list(vp or [])
+    if len(vp) == 1:
+        return str(vp[0])
     has_sf1 = any(str(p).startswith("SF1") for p in vp)
     has_sf2 = any(str(p).startswith("SF2") for p in vp)
     if has_sf1 and not has_sf2:
@@ -94,615 +94,787 @@ def _entity_name(vp):
     return "OCP — Maroc Chimie & FEEDS"
 
 
-def _score_color(v, s1=70, s2=90):
-    if v >= s2: return GREEN
-    if v >= s1: return AMBER
-    return RED
-
-
-def _short_kpi(kpi: str) -> str:
-    return (str(kpi).replace("OT ", "").replace("Performance ", "Perf ")
-            .replace("TAUX_REALISATION_CORRECTIF/PT", "Taux Réalis. Corr.")
-            .replace("Backlog ", "Bcklg ")
-            .replace("Taux d'approbation des Avis", "Taux Appro. Avis")
-            .replace("planification", "planif.")
-            .replace("préparation", "prépa.")
-            .replace("exécution", "exéc."))
-
-
-def _blank_slide(prs):
+# ── Primitives de mise en page ───────────────────────────────────────────────
+def _blank(prs):
     return prs.slides.add_slide(prs.slide_layouts[6])
 
 
-def _find_logo():
-    import os
-    for logo_path in ("logo.png", "assets/logo.png", "images/logo.png"):
-        if os.path.exists(logo_path):
-            return logo_path
-    return None
-
-
-def _add_title_bar(slide, text, subtitle=None, icon=""):
-    """Bandeau titre haut de slide, avec liseré vert/moss et logo discret."""
-    # Liseré fin en haut de page (accent visuel)
-    bar = slide.shapes.add_shape(1, 0, 0, SW, Inches(0.08))
-    bar.fill.solid(); bar.fill.fore_color.rgb = GREEN_OCP
-    bar.line.fill.background(); bar.shadow.inherit = False
-
-    box = slide.shapes.add_textbox(Inches(0.5), Inches(0.28), Inches(10.8), Inches(0.9))
-    tf = box.text_frame
+def _text(slide, x, y, w, h, runs, size=14, color=INK, bold=False, align=PP_ALIGN.LEFT,
+          anchor=MSO_ANCHOR.TOP, font=FONT):
+    """runs : str, ou liste de (texte, {size, color, bold, font}) ; "\\n" = nouveau paragraphe."""
+    tb = slide.shapes.add_textbox(x, y, w, h)
+    tf = tb.text_frame
     tf.word_wrap = True
+    tf.margin_left = tf.margin_right = tf.margin_top = tf.margin_bottom = 0
+    tf.vertical_anchor = anchor
+    if isinstance(runs, str):
+        runs = [(runs, {})]
     p = tf.paragraphs[0]
-    r = p.add_run(); r.text = f"{icon}  {text}".strip()
-    r.font.size = Pt(26); r.font.bold = True; r.font.color.rgb = GREEN_OCP
-    r.font.name = "Calibri"
-    if subtitle:
-        p2 = tf.add_paragraph()
-        r2 = p2.add_run(); r2.text = subtitle
-        r2.font.size = Pt(13); r2.font.color.rgb = GREY; r2.font.name = "Calibri"
-
-    # Liseré fin sous le titre
-    line = slide.shapes.add_shape(1, Inches(0.5), Inches(1.22), Inches(12.3), Pt(1.4))
-    line.fill.solid(); line.fill.fore_color.rgb = MOSS
-    line.line.fill.background(); line.shadow.inherit = False
-
-    logo = _find_logo()
-    if logo:
-        try:
-            slide.shapes.add_picture(logo, Inches(11.9), Inches(0.28), height=Inches(0.55))
-        except Exception:
-            pass
-
-
-def _add_footer(slide, page_num, total_pages, entity, fichier_date):
-    """Pied de page harmonisé : entité — date — n° de page."""
-    box = slide.shapes.add_textbox(Inches(0.5), Inches(7.14), Inches(12.3), Inches(0.3))
-    tf = box.text_frame
-    p = tf.paragraphs[0]
-    r = p.add_run()
-    r.text = f"{entity}   •   Données du {fichier_date}"
-    r.font.size = Pt(8.5); r.font.color.rgb = GREY; r.font.name = "Calibri"
-
-    box2 = slide.shapes.add_textbox(Inches(12.0), Inches(7.14), Inches(0.83), Inches(0.3))
-    tf2 = box2.text_frame
-    p2 = tf2.paragraphs[0]; p2.alignment = PP_ALIGN.RIGHT
-    r2 = p2.add_run()
-    r2.text = f"{page_num} / {total_pages}"
-    r2.font.size = Pt(8.5); r2.font.color.rgb = GREY; r2.font.name = "Calibri"
-
-
-def _carte_stat(slide, x, y, w, label, valeur, couleur, sous=""):
-    """Petite carte de synthèse (statistique) réutilisable dans les slides."""
-    box = slide.shapes.add_shape(1, x, y, w, Inches(1.05))
-    box.fill.solid(); box.fill.fore_color.rgb = RGBColor(0xF8, 0xFA, 0xFC)
-    box.line.color.rgb = couleur; box.line.width = Pt(1)
-    box.shadow.inherit = False
-
-    tf = box.text_frame
-    tf.word_wrap = True
-    tf.margin_left = Inches(0.08); tf.margin_right = Inches(0.08)
-    tf.margin_top = Inches(0.06); tf.margin_bottom = Inches(0.02)
-    p0 = tf.paragraphs[0]; p0.alignment = PP_ALIGN.CENTER
-    r0 = p0.add_run(); r0.text = label.upper()
-    r0.font.size = Pt(9); r0.font.bold = True; r0.font.color.rgb = GREY; r0.font.name = "Calibri"
-
-    p1 = tf.add_paragraph(); p1.alignment = PP_ALIGN.CENTER
-    r1 = p1.add_run(); r1.text = str(valeur)
-    r1.font.size = Pt(22); r1.font.bold = True; r1.font.color.rgb = couleur; r1.font.name = "Calibri"
-
-    if sous:
-        p2 = tf.add_paragraph(); p2.alignment = PP_ALIGN.CENTER
-        r2 = p2.add_run(); r2.text = sous
-        r2.font.size = Pt(9); r2.font.color.rgb = GREY; r2.font.name = "Calibri"
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# SLIDE 1 — Titre
-# ═══════════════════════════════════════════════════════════════════════════
-def _slide_title(prs, entity, fichier_date, vp=None):
-    slide = _blank_slide(prs)
-    bg = slide.shapes.add_shape(1, 0, 0, SW, SH)
-    bg.fill.solid(); bg.fill.fore_color.rgb = GREEN_OCP
-    bg.line.fill.background()
-    bg.shadow.inherit = False
-    slide.shapes._spTree.remove(bg._element)
-    slide.shapes._spTree.insert(2, bg._element)
-
-    band = slide.shapes.add_shape(1, 0, Inches(6.6), SW, Inches(0.9))
-    band.fill.solid(); band.fill.fore_color.rgb = MOSS
-    band.line.fill.background(); band.shadow.inherit = False
-
-    logo = _find_logo()
-    if logo:
-        try:
-            slide.shapes.add_picture(logo, Inches(0.5), Inches(0.4), height=Inches(1.1))
-        except Exception:
-            pass
-
-    box = slide.shapes.add_textbox(Inches(1.0), Inches(2.1), Inches(11.3), Inches(2.0))
-    tf = box.text_frame; tf.word_wrap = True
-    p = tf.paragraphs[0]; p.alignment = PP_ALIGN.CENTER
-    r = p.add_run(); r.text = "Présentation des KPIs"
-    r.font.size = Pt(48); r.font.bold = True; r.font.color.rgb = WHITE; r.font.name = "Calibri"
-    p2 = tf.add_paragraph(); p2.alignment = PP_ALIGN.CENTER
-    r2 = p2.add_run(); r2.text = "Maintenance SAP PM"
-    r2.font.size = Pt(30); r2.font.color.rgb = RGBColor(0xE7, 0xE8, 0xD1); r2.font.name = "Calibri"
-
-    box2 = slide.shapes.add_textbox(Inches(1.0), Inches(4.25), Inches(11.3), Inches(0.9))
-    tf2 = box2.text_frame; p3 = tf2.paragraphs[0]; p3.alignment = PP_ALIGN.CENTER
-    r3 = p3.add_run(); r3.text = entity
-    r3.font.size = Pt(32); r3.font.bold = True; r3.font.color.rgb = WHITE; r3.font.name = "Calibri"
-
-    if vp:
-        postes_txt = ", ".join(str(p) for p in vp)
-        if len(postes_txt) > 130:
-            postes_txt = postes_txt[:127] + "…"
-        box_p = slide.shapes.add_textbox(Inches(1.0), Inches(5.15), Inches(11.3), Inches(1.2))
-        tfp = box_p.text_frame; tfp.word_wrap = True
-        pp = tfp.paragraphs[0]; pp.alignment = PP_ALIGN.CENTER
-        lbl = pp.add_run(); lbl.text = f"Postes de travail ({len(vp)}) : "
-        lbl.font.size = Pt(13); lbl.font.bold = True
-        lbl.font.color.rgb = RGBColor(0xE7, 0xE8, 0xD1); lbl.font.name = "Calibri"
-        val = pp.add_run(); val.text = postes_txt
-        val.font.size = Pt(13); val.font.color.rgb = WHITE; val.font.name = "Calibri"
-
-    box3 = slide.shapes.add_textbox(Inches(1.0), Inches(6.75), Inches(11.3), Inches(0.55))
-    tf3 = box3.text_frame; p4 = tf3.paragraphs[0]; p4.alignment = PP_ALIGN.CENTER
-    r4 = p4.add_run(); r4.text = f"Données du {fichier_date}   •   Généré le {datetime.now().strftime('%d/%m/%Y')}"
-    r4.font.size = Pt(13); r4.font.color.rgb = DARK; r4.font.name = "Calibri"
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# Table helper
-# ═══════════════════════════════════════════════════════════════════════════
-def _add_table(slide, headers, rows, left, top, width, height,
-               col_widths=None, header_fill=GREEN_OCP, font_size=10,
-               color_col=None, cible_map=None, lower_set=None):
-    nrows, ncols = len(rows) + 1, len(headers)
-    tbl_shape = slide.shapes.add_table(nrows, ncols, left, top, width, height)
-    tbl = tbl_shape.table
-
-    if col_widths:
-        for i, w in enumerate(col_widths):
-            tbl.columns[i].width = w
-
-    for j, h in enumerate(headers):
-        c = tbl.cell(0, j)
-        c.fill.solid(); c.fill.fore_color.rgb = header_fill
-        c.vertical_anchor = MSO_ANCHOR.MIDDLE
-        tf = c.text_frame; tf.word_wrap = True
-        p = tf.paragraphs[0]; p.alignment = PP_ALIGN.CENTER
-        r = p.add_run(); r.text = str(h)
-        r.font.size = Pt(font_size); r.font.bold = True; r.font.color.rgb = WHITE
-        r.font.name = "Calibri"
-
-    for i, row in enumerate(rows, start=1):
-        for j, val in enumerate(row):
-            c = tbl.cell(i, j)
-            c.fill.solid()
-            c.fill.fore_color.rgb = WHITE if i % 2 else LIGHT_BG
-            c.vertical_anchor = MSO_ANCHOR.MIDDLE
-            tf = c.text_frame; tf.word_wrap = True
-            p = tf.paragraphs[0]
-            p.alignment = PP_ALIGN.LEFT if j == 0 else PP_ALIGN.CENTER
-            r = p.add_run(); r.text = str(val)
-            r.font.size = Pt(font_size); r.font.name = "Calibri"; r.font.color.rgb = DARK
-            if color_col is not None and j == color_col:
-                try:
-                    fv = float(str(val).replace('%', '').replace(',', '.'))
-                    kpi_name = str(row[0])
-                    tgt = (cible_map or {}).get(kpi_name, 100)
-                    lower = kpi_name in (lower_set or set())
-                    ok = (fv <= tgt) if lower else (fv >= tgt)
-                    r.font.color.rgb = GREEN if ok else RED
-                    r.font.bold = True
-                except (ValueError, TypeError):
-                    pass
-    return tbl_shape
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# SLIDE 2/3 — Scores globaux + Indicateurs Performance / Qualité (barres)
-# ═══════════════════════════════════════════════════════════════════════════
-def _bar_row(slide, label, value, y, x0=Inches(0.8), maxw=8.5,
-             s1=70, s2=90, label_w=3.2):
-    lb = slide.shapes.add_textbox(x0, y, Inches(label_w), Inches(0.32))
-    tf = lb.text_frame; tf.margin_left = 0; tf.margin_top = 0
-    p = tf.paragraphs[0]; r = p.add_run(); r.text = str(label)
-    r.font.size = Pt(11); r.font.color.rgb = DARK; r.font.name = "Calibri"
-    p.alignment = PP_ALIGN.RIGHT
-
-    bar_x = x0 + Inches(label_w + 0.15)
-    track = slide.shapes.add_shape(1, bar_x, y + Emu(20000),
-                                    Inches(maxw), Inches(0.20))
-    track.fill.solid(); track.fill.fore_color.rgb = RGBColor(0xE5, 0xE7, 0xEB)
-    track.line.fill.background(); track.shadow.inherit = False
-
-    w = max(0.02, maxw * min(value, 100) / 100.0)
-    bar = slide.shapes.add_shape(1, bar_x, y + Emu(20000),
-                                  Inches(w), Inches(0.20))
-    bar.fill.solid(); bar.fill.fore_color.rgb = _score_color(value, s1, s2)
-    bar.line.fill.background(); bar.shadow.inherit = False
-
-    vb = slide.shapes.add_textbox(bar_x + Inches(maxw + 0.1), y, Inches(0.9), Inches(0.32))
-    tf2 = vb.text_frame; tf2.margin_left = 0; tf2.margin_top = 0
-    p2 = tf2.paragraphs[0]; r2 = p2.add_run(); r2.text = f"{value:.0f}%"
-    r2.font.size = Pt(11); r2.font.bold = True; r2.font.color.rgb = DARK; r2.font.name = "Calibri"
-
-
-def _slide_scores_indicateurs(prs, entity, vp, scores, moyennes, kpi_list, kind):
-    slide = _blank_slide(prs)
-    icon = "📈" if kind == "Performance" else "✅"
-    _add_title_bar(slide, f"Scores globaux par poste — {kind}", icon=icon,
-                   subtitle=f"{entity} — score par poste et taux moyens par indicateur")
-
-    postes = [p for p in vp if p in scores][:9]
-    y = Inches(1.5)
-    for poste in postes:
-        _bar_row(slide, poste, scores.get(poste, 0), y,
-                 x0=Inches(0.4), maxw=4.2, label_w=1.9)
-        y += Inches(0.55)
-
-    hdr = slide.shapes.add_textbox(Inches(7.2), Inches(1.35), Inches(5.5), Inches(0.4))
-    p = hdr.text_frame.paragraphs[0]; r = p.add_run()
-    r.text = f"Taux moyens — {kind}"
-    r.font.size = Pt(15); r.font.bold = True; r.font.color.rgb = GREEN_OCP; r.font.name = "Calibri"
-
-    y2 = Inches(1.9)
-    for kpi in kpi_list[:9]:
-        if kpi in moyennes and pd.notna(moyennes[kpi]):
-            short = _short_kpi(kpi)[:24]
-            _bar_row(slide, short, moyennes[kpi], y2, x0=Inches(6.7), maxw=3.2, label_w=2.6)
-            y2 += Inches(0.52)
-    return slide
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# SLIDES 4/5 — Détail indicateurs + anomalies (Perf / Qualité)
-# ═══════════════════════════════════════════════════════════════════════════
-def _slide_detail(prs, entity, vp, ckdf, ano_map, kpi_list, kind):
-    slide = _blank_slide(prs)
-    icon = "📈" if kind == "Performance" else "✅"
-    _add_title_bar(slide, f"Détail des indicateurs de {kind}", icon=icon,
-                   subtitle=f"{entity} — valeurs et nombre d'anomalies par KPI")
-
-    postes = [p for p in vp if p in ckdf.index][:8]
-
-    headers = ["Indicateur", "Valeur moy.", "Cible", "Anomalies"]
-    rows = []
-    for kpi in kpi_list:
-        vals = [float(ckdf.loc[p, kpi]) for p in postes if kpi in ckdf.columns and p in ckdf.index]
-        vmoy = sum(vals) / len(vals) if vals else 0
-        tgt = CIBLE.get(kpi, 100)
-        nb = 0
-        if kpi in ano_map:
-            s = ano_map[kpi]
-            nb = int(sum(int(s.get(p, 0)) for p in postes))
-        rows.append([_short_kpi(kpi)[:38], f"{vmoy:.1f}%", f"{tgt}%", str(nb)])
-
-    _add_table(
-        slide, headers, rows,
-        Inches(0.5), Inches(1.5), Inches(12.3), Inches(5.3),
-        col_widths=[Inches(6.5), Inches(2.0), Inches(1.8), Inches(2.0)],
-        header_fill=GREEN_OCP, font_size=11,
-        color_col=1, cible_map=CIBLE,
-        lower_set=set(k for k in kpi_list if k in _LOWER),
-    )
-    return slide
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# NOUVEAU — Suivi d'anomalies : semaine précédente vs semaine en cours
-# ═══════════════════════════════════════════════════════════════════════════
-def _bounds_semaine(annee, semaine):
-    lundi = pd.Timestamp.fromisocalendar(int(annee), int(semaine), 1)
-    dimanche = lundi + pd.Timedelta(days=6, hours=23, minutes=59, seconds=59)
-    return lundi, dimanche
-
-
-def _semaine_precedente(annee, semaine):
-    lundi, _ = _bounds_semaine(annee, semaine)
-    lundi_prec = lundi - pd.Timedelta(days=7)
-    iso = lundi_prec.isocalendar()
-    return int(iso.year), int(iso.week)
-
-
-def _ano_totaux_semaine(df_full, avf_full, now_ts, vp, annee, semaine, kpi_list):
-    """Recalcule (via build_ano_map, la source unique de vérité des
-    anomalies) le total d'anomalies pour une semaine ISO donnée, restreint
-    aux postes vp et à une liste de KPI (QK ou PK)."""
-    if calc_kpis is None or build_ano_map is None or df_full is None or df_full.empty:
-        return 0, {}
-    lundi, dimanche = _bounds_semaine(annee, semaine)
-
-    df_sem = df_full[df_full["Date de début planifiée"].between(lundi, dimanche)].copy()
-    avf_sem = avf_full.copy() if avf_full is not None else pd.DataFrame()
-    if not avf_sem.empty and "Créé le" in avf_sem.columns:
-        avf_sem = avf_sem[avf_sem["Créé le"].between(lundi, dimanche)]
-
-    try:
-        res = calc_kpis(df_sem, avf_sem, now_ts, list(vp))
-        dfp_sem, avf_sem2 = res.get("dfp", df_sem), res.get("avf", avf_sem)
-        ano = build_ano_map(dfp_sem, avf_sem2, now_ts)
-    except Exception:
-        return 0, {}
-
-    detail = {}
-    total = 0
-    for kpi in kpi_list:
-        if kpi not in ano:
-            detail[kpi] = 0
-            continue
-        s = ano[kpi]
-        nb = int(sum(int(s.get(p, 0)) for p in vp))
-        detail[kpi] = nb
-        total += nb
-    return total, detail
-
-
-def _butterfly_image(labels, valeurs_prec, valeurs_act, titre,
-                      couleur_prec=HEX_GREY, figsize=(9.6, 4.6)):
-    """Graphique papillon (butterfly) : semaine précédente à gauche (barres
-    négatives, gris), semaine en cours à droite (barres positives, verte
-    si amélioration / rouge si dégradation / ambre si stable)."""
-    if not labels:
-        return None
-    fig, ax = plt.subplots(figsize=figsize, dpi=170)
-    y_pos = np.arange(len(labels))
-
-    ax.barh(y_pos, [-v for v in valeurs_prec], color=couleur_prec, height=0.62,
-            edgecolor="white", linewidth=0.8, label="Semaine précédente")
-
-    couleurs_act = []
-    for vp_, va in zip(valeurs_prec, valeurs_act):
-        if va > vp_:
-            couleurs_act.append(HEX_RED)
-        elif va < vp_:
-            couleurs_act.append(HEX_GREEN)
-        else:
-            couleurs_act.append(HEX_AMBER)
-    ax.barh(y_pos, valeurs_act, color=couleurs_act, height=0.62,
-            edgecolor="white", linewidth=0.8, label="Semaine en cours")
-
-    maxi = max(max(valeurs_prec, default=0), max(valeurs_act, default=0), 1)
-    for i, (vp_, va) in enumerate(zip(valeurs_prec, valeurs_act)):
-        if vp_ > 0:
-            ax.text(-vp_ - maxi * 0.02, i, f"{int(vp_)}", va="center", ha="right",
-                    fontsize=8.5, color=HEX_NAVY, fontweight="bold")
-        if va > 0:
-            ax.text(va + maxi * 0.02, i, f"{int(va)}", va="center", ha="left",
-                    fontsize=8.5, color=HEX_NAVY, fontweight="bold")
-
-    ax.set_yticks(y_pos)
-    ax.set_yticklabels(labels, fontsize=9.5)
-    ax.axvline(0, color="#CBD5E1", linewidth=1)
-    ax.set_xlim(-maxi * 1.25, maxi * 1.25)
-    xt = ax.get_xticks()
-    ax.set_xticks(xt)
-    ax.set_xticklabels([str(int(abs(t))) for t in xt], fontsize=8.5)
-    ax.set_title(titre, fontsize=13, fontweight="bold", color=HEX_NAVY, pad=12)
-    ax.spines[["top", "right"]].set_visible(False)
-    ax.grid(axis="x", color="#F1F5F9", linewidth=1)
-    ax.set_axisbelow(True)
-
-    from matplotlib.patches import Patch
-    handles = [Patch(color=couleur_prec, label="Semaine précédente"),
-               Patch(color=HEX_GREEN, label="Amélioration"),
-               Patch(color=HEX_RED, label="Dégradation"),
-               Patch(color=HEX_AMBER, label="Stable")]
-    ax.legend(handles=handles, loc="lower right", fontsize=8, frameon=False,
-              ncol=2, bbox_to_anchor=(1.0, -0.22))
-
-    plt.tight_layout()
-    buf = io.BytesIO()
-    plt.savefig(buf, format="png", dpi=170, bbox_inches="tight", facecolor="white")
-    plt.close(fig)
-    buf.seek(0)
-    return buf
-
-
-def _slide_suivi_semaine(prs, entity, vp, df_full, avf_full, now_ts, kpi_list, kind, accent):
-    """Une page (Performance OU Qualité) : suivi des anomalies de la
-    semaine précédente comparées à la semaine en cours, avec graphique
-    papillon + tableau de synthèse par indicateur."""
-    if now_ts is None:
-        return None
-    iso = pd.Timestamp(now_ts).isocalendar()
-    annee_act, sem_act = int(iso.year), int(iso.week)
-    annee_prec, sem_prec = _semaine_precedente(annee_act, sem_act)
-
-    tot_act, det_act = _ano_totaux_semaine(df_full, avf_full, now_ts, vp, annee_act, sem_act, kpi_list)
-    tot_prec, det_prec = _ano_totaux_semaine(df_full, avf_full, now_ts, vp, annee_prec, sem_prec, kpi_list)
-
-    slide = _blank_slide(prs)
-    icon = "📈" if kind == "Performance" else "✅"
-    _add_title_bar(
-        slide, f"Suivi d'anomalies — {kind}", icon=icon,
-        subtitle=f"{entity} — semaine S{sem_prec:02d}/{annee_prec} (précédente) vs "
-                 f"S{sem_act:02d}/{annee_act} (en cours)",
-    )
-
-    diff = tot_act - tot_prec
-    traite = max(0, tot_prec - tot_act) if tot_prec else 0
-    pct_traite = (traite / tot_prec * 100) if tot_prec else 0
-    tendance_couleur = GREEN if diff < 0 else (RED if diff > 0 else AMBER)
-
-    cx = Inches(0.5)
-    for label, val, couleur, sous in [
-        (f"Anomalies S{sem_prec:02d}", str(tot_prec), GREY, "semaine précédente"),
-        (f"Anomalies S{sem_act:02d}", str(tot_act), accent, "semaine en cours"),
-        ("Écart", f"{diff:+d}", tendance_couleur, "vs semaine précédente"),
-        ("Traitées", f"{traite}", GREEN, f"{pct_traite:.0f}% résorbées"),
-    ]:
-        _carte_stat(slide, cx, Inches(1.42), Inches(2.95), label, val, couleur, sous)
-        cx += Inches(3.08)
-
-    labels, v_prec, v_act = [], [], []
-    for kpi in kpi_list:
-        vp_ = det_prec.get(kpi, 0)
-        va = det_act.get(kpi, 0)
-        if vp_ == 0 and va == 0:
-            continue
-        labels.append(_short_kpi(kpi)[:26])
-        v_prec.append(vp_)
-        v_act.append(va)
-
-    img = _butterfly_image(
-        labels, v_prec, v_act,
-        f"Anomalies par indicateur — {kind} (◀ S{sem_prec:02d}  |  S{sem_act:02d} ▶)",
-    )
-    if img:
-        slide.shapes.add_picture(img, Inches(0.5), Inches(2.7), width=Inches(7.9))
-    else:
-        box = slide.shapes.add_textbox(Inches(0.5), Inches(3.2), Inches(7.9), Inches(1))
-        p = box.text_frame.paragraphs[0]; r = p.add_run()
-        r.text = "✅ Aucune anomalie sur ces 2 semaines — rien à afficher."
-        r.font.size = Pt(16); r.font.color.rgb = GREEN; r.font.name = "Calibri"
-
-    headers = ["Indicateur", f"S{sem_prec:02d}", f"S{sem_act:02d}", "Écart"]
-    rows = []
-    for kpi in kpi_list:
-        vp_ = det_prec.get(kpi, 0)
-        va = det_act.get(kpi, 0)
-        if vp_ == 0 and va == 0:
-            continue
-        rows.append([_short_kpi(kpi)[:28], str(vp_), str(va), f"{va - vp_:+d}"])
-    rows.sort(key=lambda r: -abs(int(r[3])))
-    rows = rows[:12]
-
-    if rows:
-        tbl = _add_table(
-            slide, headers, rows,
-            Inches(8.65), Inches(2.7), Inches(4.2), Inches(4.1),
-            col_widths=[Inches(2.0), Inches(0.75), Inches(0.75), Inches(0.7)],
-            header_fill=accent, font_size=9.5,
-        )
-        # Colorer la colonne Écart : rouge si dégradation, vert si amélioration
-        for i, row in enumerate(rows, start=1):
-            try:
-                d = int(row[3])
-                cell = tbl.table.cell(i, 3)
-                r = cell.text_frame.paragraphs[0].runs[0]
-                r.font.color.rgb = RED if d > 0 else (GREEN if d < 0 else GREY)
-                r.font.bold = True
-            except Exception:
-                pass
-    return slide
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# SLIDE — Sparklines (évolution par poste, version texte tendance)
-# ═══════════════════════════════════════════════════════════════════════════
-def _slide_sparklines(prs, entity, vp, hist_df, pscores, qscores):
-    slide = _blank_slide(prs)
-    _add_title_bar(slide, "Suivi Sparklines par Poste de Travail", icon="📊",
-                   subtitle=f"{entity} — évolution récente des scores")
-
-    postes = [p for p in vp if p in pscores or p in qscores][:10]
-    headers = ["Poste de travail", "Performance", "Qualité", "Tendance"]
-    rows = []
-    for poste in postes:
-        ps = pscores.get(poste, 0)
-        qs = qscores.get(poste, 0)
-        trend = "→"
-        if hist_df is not None and not hist_df.empty:
-            try:
-                h = hist_df[hist_df["Poste"] == poste].sort_values("Date")
-                if len(h) >= 2:
-                    d = h.iloc[-1]["Value"] - h.iloc[-2]["Value"]
-                    trend = "↑" if d > 1 else ("↓" if d < -1 else "→")
-            except Exception:
-                pass
-        rows.append([poste, f"{ps:.0f}%", f"{qs:.0f}%", trend])
-
-    _add_table(
-        slide, headers, rows,
-        Inches(1.2), Inches(1.6), Inches(10.9), Inches(5.0),
-        col_widths=[Inches(4.5), Inches(2.3), Inches(2.3), Inches(1.8)],
-        header_fill=GREEN_OCP, font_size=12,
-    )
-    return slide
-
-
-# ═══════════════════════════════════════════════════════════════════════════
-# SLIDE — Plan d'action
-# ═══════════════════════════════════════════════════════════════════════════
-def _slide_plan_action(prs, entity, vp, ckdf, ano_map):
-    slide = _blank_slide(prs)
-    _add_title_bar(slide, "Plan d'action", icon="🎯",
-                   subtitle=f"{entity} — KPIs nécessitant une action (anomalies > 0)")
-
-    postes = [p for p in vp if p in ckdf.index]
-    rows = []
-    for poste in postes:
-        for kpi in list(QK) + list(PK):
-            if kpi not in ano_map:
+    p.alignment = align
+    for txt, st in runs:
+        parts = txt.split("\n")
+        for i, part in enumerate(parts):
+            if i > 0:
+                p = tf.add_paragraph()
+                p.alignment = align
+            if not part:
                 continue
-            nb = int(ano_map[kpi].get(poste, 0))
-            if nb > 0:
-                resp = KPI_RESP_MAP.get(kpi, "Non assigné")
-                rows.append([poste, _short_kpi(kpi)[:30], str(nb), resp[:20]])
-    rows.sort(key=lambda r: -int(r[2]))
-    rows = rows[:12]
-
-    if not rows:
-        box = slide.shapes.add_textbox(Inches(1), Inches(3), Inches(11), Inches(1))
-        p = box.text_frame.paragraphs[0]; r = p.add_run()
-        r.text = "🎉 Aucune action requise — tous les indicateurs sont conformes."
-        r.font.size = Pt(20); r.font.color.rgb = GREEN; r.font.name = "Calibri"
-        return slide
-
-    headers = ["Poste", "Indicateur", "Anomalies", "Responsable"]
-    _add_table(
-        slide, headers, rows,
-        Inches(0.6), Inches(1.55), Inches(12.1), Inches(5.4),
-        col_widths=[Inches(2.4), Inches(5.0), Inches(1.9), Inches(2.8)],
-        header_fill=RED, font_size=11,
-    )
-    return slide
+            r = p.add_run()
+            r.text = part
+            f = r.font
+            f.name = st.get("font", font)
+            f.size = Pt(st.get("size", size))
+            f.bold = st.get("bold", bold)
+            f.color.rgb = st.get("color", color)
+    return tb
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# API publique
-# ═══════════════════════════════════════════════════════════════════════════
-def build_presentation(vp, ckdf, ano_map, pa, qa,
-                        pscores, qscores, hist_df=None, fichier_date="",
-                        df_full=None, avf_full=None, now_ts=None):
+def _box(slide, x, y, w, h, fill=CARD, radius=True):
+    shp = slide.shapes.add_shape(MSO_SHAPE.ROUNDED_RECTANGLE if radius else MSO_SHAPE.RECTANGLE,
+                                 x, y, w, h)
+    shp.fill.solid()
+    shp.fill.fore_color.rgb = fill
+    shp.line.fill.background()
+    shp.shadow.inherit = False
+    if radius:
+        shp.adjustments[0] = 0.08
+    return shp
+
+
+def _title(slide, titre, sous_titre=None):
+    _text(slide, MX, Inches(0.38), CW, Inches(0.6), titre, size=28, bold=True, color=NAVY)
+    if sous_titre:
+        _text(slide, MX, Inches(0.98), CW, Inches(0.35), sous_titre, size=13, color=INK2)
+
+
+def _delta_runs(prec, act, lower=False, unite=" pt", dec=1, size=12):
+    if prec is None or act is None:
+        return [("—", {"color": MUTED, "size": size})]
+    d = act - prec
+    if abs(d) < 0.05:
+        return [("= stable", {"color": MUTED, "size": size})]
+    better = (d < 0) if lower else (d > 0)
+    col = UP_TXT if better else DOWN_TXT
+    return [("▲ " if d > 0 else "▼ ", {"color": col, "size": size, "font": "Arial", "bold": True}),
+            (f"{d:+.{dec}f}{unite}", {"color": col, "size": size, "bold": True})]
+
+
+def _stat_card(slide, x, y, w, h, label, value, sub_runs=None, value_color=INK, fill=CARD,
+               label_color=INK2, value_size=30):
+    _box(slide, x, y, w, h, fill=fill)
+    pad = Inches(0.22)
+    _text(slide, x + pad, y + Inches(0.16), w - 2 * pad, Inches(0.3), label.upper(),
+          size=10.5, bold=True, color=label_color)
+    _text(slide, x + pad, y + Inches(0.44), w - 2 * pad, Inches(0.62), value,
+          size=value_size, bold=True, color=value_color)
+    if sub_runs:
+        _text(slide, x + pad, y + h - Inches(0.44), w - 2 * pad, Inches(0.32), sub_runs,
+              size=11.5, color=INK2)
+
+
+def _table(slide, x, y, w, headers, rows, col_w, font_size=11, row_h=Inches(0.31),
+           header_fill=NAVY, cell_fmt=None, align=None):
     """
-    df_full / avf_full / now_ts (optionnels) : données BRUTES non filtrées
-    par la période (mêmes objets que dans app.py — df_full/av_full/now_ts
-    issus de render_sidebar), nécessaires pour recalculer en direct les
-    anomalies de la semaine précédente et de la semaine en cours. Si
-    absents, les 2 pages « Suivi d'anomalies » sont simplement omises.
+    Tableau natif. cell_fmt(r, c) → dict optionnel {fill, color, bold} pour
+    la cellule de données (r, c). align : liste d'alignements par colonne.
     """
-    prs = Presentation()
-    prs.slide_width = SW
-    prs.slide_height = SH
+    n_r, n_c = len(rows) + 1, len(headers)
+    gf = slide.shapes.add_table(n_r, n_c, x, y, w, row_h * n_r)
+    tbl = gf.table
+    tbl.first_row = True
+    tbl.horz_banding = False
+    tot = sum(col_w)
+    for i, cw in enumerate(col_w):
+        tbl.columns[i].width = Emu(int(w * cw / tot))
+    for r in range(n_r):
+        tbl.rows[r].height = row_h
+        for c in range(n_c):
+            cell = tbl.cell(r, c)
+            cell.margin_left = cell.margin_right = Inches(0.07)
+            cell.margin_top = cell.margin_bottom = Inches(0.03)
+            cell.vertical_anchor = MSO_ANCHOR.MIDDLE
+            txt = headers[c] if r == 0 else rows[r - 1][c]
+            fmt = {} if r == 0 or cell_fmt is None else (cell_fmt(r - 1, c) or {})
+            cell.fill.solid()
+            if r == 0:
+                cell.fill.fore_color.rgb = header_fill
+            else:
+                cell.fill.fore_color.rgb = fmt.get("fill", WHITE if r % 2 else ROW_ALT)
+            tf = cell.text_frame
+            tf.word_wrap = True
+            p = tf.paragraphs[0]
+            p.alignment = (align[c] if align else PP_ALIGN.LEFT)
+            run = p.add_run()
+            run.text = str(txt)
+            f = run.font
+            f.name = FONT
+            f.size = Pt(font_size)
+            f.bold = True if r == 0 else fmt.get("bold", False)
+            f.color.rgb = WHITE if r == 0 else fmt.get("color", INK)
+    return gf
 
-    entity = _entity_name(vp)
 
+def _style_chart(chart, size=11):
+    chart.has_title = False
+    chart.font.name = FONT
+    chart.font.size = Pt(size)
+    chart.font.color.rgb = INK2
+
+
+def _no_axis_line(axis):
+    axis.format.line.fill.background()
+
+
+def _color_for(val, cible, lower, mode_conformite):
+    val = round(val)
+    if mode_conformite:
+        return GOOD if val >= 90 else (WARN if val >= 70 else CRIT)
+    if lower:
+        return GOOD if val <= cible else (WARN if val <= cible + 5 else CRIT)
+    return GOOD if val >= cible else (WARN if val >= cible - 5 else CRIT)
+
+
+def _sev_color(v, mx):
+    r = v / mx if mx else 0
+    return CRIT if r >= SEUIL_CRITIQUE else (SERIOUS if r >= SEUIL_MODERE else PERF)
+
+
+def _message(slide, x, y, w, h, texte):
+    _box(slide, x, y, w, h, fill=CARD)
+    _text(slide, x + Inches(0.3), y, w - Inches(0.6), h, texte, size=13, color=INK2,
+          anchor=MSO_ANCHOR.MIDDLE)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# DIAPOSITIVES
+# ═════════════════════════════════════════════════════════════════════════════
+def _slide_titre(prs, entity, date_str, syn):
+    s = _blank(prs)
+    bg = s.background.fill
+    bg.solid()
+    bg.fore_color.rgb = NAVY
+    logo = next((p for p in ("logo.png", "assets/logo.png", "images/logo.png") if os.path.exists(p)), None)
+    x_txt = MX
+    if logo:
+        s.shapes.add_picture(logo, MX, Inches(0.55), height=Inches(1.35))
+        x_txt = MX
+    _text(s, x_txt, Inches(2.35), Inches(7.2), Inches(0.4), "RAPPORT KPI · SAP PM",
+          size=14, bold=True, color=ACCENT)
+    _text(s, x_txt, Inches(2.8), Inches(7.4), Inches(1.9), entity, size=44, bold=True, color=WHITE)
+    n = len(syn["postes"])
+    detail = f"{n} postes de travail" if n > 1 else "Poste de travail"
+    _text(s, x_txt, Inches(4.75), Inches(7.2), Inches(0.9),
+          f"Indicateurs de Performance & Qualité\n{detail} · extraction du {date_str}",
+          size=16, color=_rgb("CBD5E1"))
+
+    cards = [
+        ("Score Performance", f"{syn['pscore']:.1f}%"),
+        ("Score Qualité", f"{syn['qscore']:.1f}%"),
+        ("Anomalies", f"{syn['total_anomalies']}"),
+    ]
+    cx, cw, ch, gap = Inches(8.55), Inches(4.28), Inches(1.45), Inches(0.28)
+    y0 = Inches(1.35)
+    for i, (lab, val) in enumerate(cards):
+        y = y0 + i * (ch + gap)
+        _box(s, cx, y, cw, ch, fill=NAVY2)
+        _text(s, cx + Inches(0.3), y + Inches(0.2), cw, Inches(0.3), lab.upper(),
+              size=11, bold=True, color=_rgb("CBD5E1"))
+        _text(s, cx + Inches(0.3), y + Inches(0.5), cw, Inches(0.8), val, size=40,
+              bold=True, color=WHITE)
+    return s
+
+
+def _slide_kpi(prs, entity, syn, sl):
+    s = _blank(prs)
+    mode = syn["mode_division"]
+    _title(s, "Indicateurs de Performance & Qualité",
+           f"{entity} — " + ("% de postes conformes par indicateur" if mode else "valeur de chaque indicateur"))
+    col2 = "% postes conf." if mode else "Valeur"
+    for (kpis, titre, head_fill, x, w) in (
+        (syn["kpi_perf"], "Performance", PERF, MX, Inches(6.05)),
+        (syn["kpi_qual"], "Qualité", QUAL, MX + Inches(6.3), Inches(6.03)),
+    ):
+        items = list(kpis.items())
+        rows = [[k, f"{v:.0f}%", f"{'≤' if k in LOWER_BETTER else '≥'}{CIBLE.get(k, 100):.0f}"]
+                for k, v in items]
+        cols = [_color_for(v, CIBLE.get(k, 100), k in LOWER_BETTER, mode) for k, v in items]
+
+        def fmt(r, c, cols=cols):
+            if c == 1:
+                return {"fill": cols[r], "color": INK if cols[r] == WARN else WHITE, "bold": True}
+            return None
+
+        _table(s, x, TOP, w, [f"Indicateurs de {titre.lower()}", col2, "Cible"], rows,
+               [3.9, 1.3, 0.85], font_size=11, row_h=Inches(0.345), header_fill=head_fill,
+               cell_fmt=fmt, align=[PP_ALIGN.LEFT, PP_ALIGN.CENTER, PP_ALIGN.CENTER])
+    # légende des couleurs, sous le tableau Qualité (plus court)
+    y_leg = TOP + Inches(0.345) * (len(syn["kpi_qual"]) + 1) + Inches(0.3)
+    x_leg = MX + Inches(6.3)
+    regle = ("≥ 90 % des postes conformes" if mode else "conforme à la cible",
+             "70–90 %" if mode else "dans la tolérance de 5 pts",
+             "< 70 %" if mode else "hors tolérance")
+    for i, (c, lab) in enumerate(zip((GOOD, WARN, CRIT), regle)):
+        yy = y_leg + i * Inches(0.36)
+        _box(s, x_leg, yy + Inches(0.04), Inches(0.22), Inches(0.22), fill=c, radius=False)
+        _text(s, x_leg + Inches(0.35), yy, Inches(5), Inches(0.3),
+              ["Vert — ", "Orange — ", "Rouge — "][i] + lab, size=12, color=INK2)
+    return s
+
+
+def _slide_anomalies(prs, entity, syn, sl):
+    s = _blank(prs)
+    _title(s, "Anomalies par indicateur",
+           f"{entity} — {syn['total_anomalies']} anomalies sur la période")
+    entries = sorted([(k, v) for k, v in syn["anomalies"].items() if v > 0], key=lambda x: -x[1])
+    if not entries:
+        _message(s, MX, TOP, CW, Inches(1.2), "Aucune anomalie détectée — tous les indicateurs sont conformes.")
+        return s
+    mx = entries[0][1]
+    cd = CategoryChartData()
+    cd.categories = [sl.get(k, k) for k, _ in entries]
+    cd.add_series("Anomalies", [v for _, v in entries])
+    ch_w = Inches(8.4)
+    gf = s.shapes.add_chart(XL_CHART_TYPE.BAR_CLUSTERED, MX, TOP, ch_w, BOTTOM - TOP - Inches(0.35), cd)
+    ch = gf.chart
+    _style_chart(ch, 12)
+    ch.has_legend = False
+    plot = ch.plots[0]
+    plot.gap_width = 45
+    ser = plot.series[0]
+    ser.invert_if_negative = False
+    for i, (_, v) in enumerate(entries):
+        pt = ser.points[i]
+        pt.format.fill.solid()
+        pt.format.fill.fore_color.rgb = _sev_color(v, mx)
+    plot.has_data_labels = True
+    dl = plot.data_labels
+    dl.position = XL_LABEL_POSITION.OUTSIDE_END
+    dl.font.size = Pt(12)
+    dl.font.bold = True
+    dl.font.color.rgb = INK
+    ca = ch.category_axis
+    ca.reverse_order = True
+    ca.major_tick_mark = XL_TICK_MARK.NONE
+    ca.tick_labels.font.size = Pt(12)
+    ca.tick_labels.font.color.rgb = INK
+    ca.format.line.color.rgb = AXIS
+    va = ch.value_axis
+    va.visible = False
+    va.has_major_gridlines = False
+    va.maximum_scale = mx * 1.15
+    va.minimum_scale = 0
+    # légende des sévérités (texte + pastille : la couleur n'est jamais seule)
+    y_leg = BOTTOM - Inches(0.3)
+    for i, (c, lab) in enumerate(((CRIT, "Critique (≥ 66 % du max)"), (SERIOUS, "Modéré (33–66 %)"),
+                                  (PERF, "Faible (< 33 %)"))):
+        xx = MX + Inches(0.2) + i * Inches(2.6)
+        _box(s, xx, y_leg + Inches(0.05), Inches(0.18), Inches(0.18), fill=c, radius=False)
+        _text(s, xx + Inches(0.28), y_leg, Inches(2.3), Inches(0.3), lab, size=11, color=INK2)
+    # tuiles de synthèse à droite
+    x_c, w_c, h_c = MX + ch_w + Inches(0.35), CW - ch_w - Inches(0.35), Inches(1.5)
+    top_k, top_v = entries[0]
+    n_crit = sum(1 for _, v in entries if v / mx >= SEUIL_CRITIQUE)
+    cartes = [
+        ("Total anomalies", f"{syn['total_anomalies']}",
+         [(f"sur {len(entries)} indicateur(s) en anomalie", {})]),
+        ("Indicateur le plus touché", sl.get(top_k, top_k),
+         [(f"{top_v} anomalies · {top_v / syn['total_anomalies'] * 100:.0f} % du total", {})]),
+        ("Indicateurs critiques", f"{n_crit}",
+         [("≥ 66 % du volume de l'indicateur le plus touché", {})]),
+    ]
+    for i, (lab, val, sub) in enumerate(cartes):
+        y = TOP + i * (h_c + Inches(0.25))
+        _stat_card(s, x_c, y, w_c, h_c, lab, val, sub,
+                   value_color=CRIT if i != 1 else INK, value_size=30 if i != 1 else 22)
+    return s
+
+
+def _slide_impact(prs, entity, impact, sl):
+    s = _blank(prs)
+    _title(s, "Postes de travail impactants — anomalies critiques",
+           f"{entity} — nombre d'anomalies et % d'impact de chaque poste sur l'indicateur")
+    n = min(3, len(impact))
+    gap = Inches(0.35)
+    w = int((CW - gap * (n - 1)) / n)          # les panneaux se partagent la largeur
+    for i, pan in enumerate(impact[:3]):
+        x = MX + i * (w + gap)
+        col = CRIT if pan["severite"] == "Critique" else SERIOUS
+        _box(s, x, TOP, w, BOTTOM - TOP, fill=CARD)
+        _text(s, x + Inches(0.25), TOP + Inches(0.18), w - Inches(0.5), Inches(0.35),
+              pan["severite"].upper(), size=11, bold=True, color=col)
+        _text(s, x + Inches(0.25), TOP + Inches(0.45), w - Inches(0.5), Inches(0.75),
+              [(sl.get(pan["kpi"], pan["kpi"]), {"size": 18, "bold": True, "color": INK}),
+               (f"\n{pan['total']} anomalies", {"size": 12, "color": INK2})], size=18)
+        rows = [(d["poste"], d["nb"], d["pct"]) for d in pan["postes"]]
+        if pan.get("autres_nb"):
+            rows.append((f"Autres ({pan['autres_postes']})", pan["autres_nb"], pan["autres_pct"]))
+        cd = CategoryChartData()
+        cd.categories = [r[0] for r in rows]
+        cd.add_series("Anomalies", [r[1] for r in rows])
+        gf = s.shapes.add_chart(XL_CHART_TYPE.BAR_CLUSTERED, x + Inches(0.1), TOP + Inches(1.3),
+                                w - Inches(0.2), BOTTOM - TOP - Inches(1.45), cd)
+        ch = gf.chart
+        _style_chart(ch, 11)
+        ch.has_legend = False
+        plot = ch.plots[0]
+        plot.gap_width = 45
+        ser = plot.series[0]
+        ser.invert_if_negative = False
+        vmax = max(r[1] for r in rows) or 1
+        for j, (nm, nb, pct) in enumerate(rows):
+            pt = ser.points[j]
+            pt.format.fill.solid()
+            pt.format.fill.fore_color.rgb = RESTANT if nm.startswith("Autres") else col
+            lab = pt.data_label
+            lab.position = XL_LABEL_POSITION.OUTSIDE_END
+            tf = lab.text_frame
+            r1 = tf.paragraphs[0].add_run()
+            r1.text = f"{nb} · {pct:.0f}%"
+            r1.font.size = Pt(11)
+            r1.font.bold = j == 0
+            r1.font.color.rgb = INK
+        ca = ch.category_axis
+        ca.reverse_order = True
+        ca.major_tick_mark = XL_TICK_MARK.NONE
+        ca.tick_labels.font.size = Pt(11)
+        ca.tick_labels.font.color.rgb = INK
+        ca.format.line.color.rgb = AXIS
+        va = ch.value_axis
+        va.visible = False
+        va.has_major_gridlines = False
+        va.minimum_scale = 0
+        va.maximum_scale = vmax * 1.55
+    return s
+
+
+def _slide_evolution(prs, entity, syn, comp, evol):
+    s = _blank(prs)
+    if not comp:
+        _title(s, "Évolution S-1 → S", entity)
+        _message(s, MX, TOP, CW, Inches(1.3),
+                 "Comparaison S-1 → S indisponible : l'historique ne contient pas encore deux "
+                 "extractions pour ce périmètre. Elle apparaîtra dès la prochaine extraction enregistrée.")
+        return s
+    lp, la = comp["label_prec"], comp["label_act"]
+    _title(s, f"Évolution {lp} → {la}", f"{entity} — scores, anomalies et tendance des dernières extractions")
+    sp, sq, an = comp["score_perf"], comp["score_qual"], comp["anomalies"]
+    n_ano = sum(1 for v in syn["anomalies"].values() if v > 0)
+    cards = [
+        ("Score Performance", f"{sp[1]:.1f}%" if sp[1] is not None else "—",
+         [(f"{lp} : {sp[0]:.1f}%   " if sp[0] is not None else f"{lp} : —   ", {})] + _delta_runs(*sp)),
+        ("Score Qualité", f"{sq[1]:.1f}%" if sq[1] is not None else "—",
+         [(f"{lp} : {sq[0]:.1f}%   " if sq[0] is not None else f"{lp} : —   ", {})] + _delta_runs(*sq)),
+        ("Total anomalies", f"{int(an[1])}",
+         [(f"{lp} : {int(an[0])}   ", {})] + _delta_runs(an[0], an[1], lower=True, unite="", dec=0)),
+        ("Indicateurs en anomalie", f"{n_ano}",
+         [(f"sur {len(syn['kpi_perf']) + len(syn['kpi_qual'])} suivis", {})]),
+    ]
+    cw, chh, g = Inches(2.85), Inches(1.95), Inches(0.25)
+    for i, (lab, val, sub) in enumerate(cards):
+        x = MX + (i % 2) * (cw + g)
+        y = TOP + (i // 2) * (chh + g)
+        _stat_card(s, x, y, cw, chh, lab, val, sub, value_size=30)
+    # tendance des scores
+    x_ch = MX + 2 * cw + g + Inches(0.45)
+    w_ch = SW - MX - x_ch
+    _text(s, x_ch, TOP, w_ch, Inches(0.35),
+          "Tendance des scores" + (" (conformité des postes)" if syn["mode_division"] else ""),
+          size=14, bold=True, color=INK)
+    if evol is None or len(evol) < 2:
+        _message(s, x_ch, TOP + Inches(0.5), w_ch, Inches(1.2), "Au moins 2 extractions nécessaires.")
+        return s
+    df = evol.reset_index(drop=True)
+    cd = CategoryChartData()
+    cd.categories = [f"S{pd.Timestamp(d).isocalendar().week} · {pd.Timestamp(d).strftime('%d/%m')}"
+                     for d in df["Date"]]
+    perf = [None if pd.isna(v) else float(v) for v in df["Perf"]]
+    qual = [None if pd.isna(v) else float(v) for v in df["Qual"]]
+    cd.add_series("Score Performance", perf)
+    cd.add_series("Score Qualité", qual)
+    cd.add_series("Seuil 90 %", [90.0] * len(df))
+    gf = s.shapes.add_chart(XL_CHART_TYPE.LINE_MARKERS, x_ch, TOP + Inches(0.4), w_ch,
+                            TOP + 2 * chh + g - (TOP + Inches(0.4)), cd)
+    ch = gf.chart
+    _style_chart(ch, 11)
+    ch.has_legend = True
+    ch.legend.position = XL_LEGEND_POSITION.BOTTOM
+    ch.legend.include_in_layout = False
+    ch.legend.font.size = Pt(11)
+    for ser, col, dash in zip(ch.plots[0].series, (PERF, QUAL, MUTED), (False, False, True)):
+        ser.smooth = False
+        ser.format.line.color.rgb = col
+        ser.format.line.width = Pt(1 if dash else 2.5)
+        if dash:
+            ser.format.line.dash_style = MSO_LINE_DASH_STYLE.DASH
+            ser.marker.style = XL_MARKER_STYLE.NONE
+        else:
+            ser.marker.style = XL_MARKER_STYLE.CIRCLE
+            ser.marker.size = 8
+            ser.marker.format.fill.solid()
+            ser.marker.format.fill.fore_color.rgb = WHITE
+            ser.marker.format.line.color.rgb = col
+            ser.marker.format.line.width = Pt(2)
+            last = max(i for i, v in enumerate(perf if col == PERF else qual) if v is not None)
+            dl = ser.points[last].data_label
+            dl.position = XL_LABEL_POSITION.RIGHT if last == len(df) - 1 else XL_LABEL_POSITION.ABOVE
+            r = dl.text_frame.paragraphs[0].add_run()
+            r.text = f"{(perf if col == PERF else qual)[last]:.1f}%"
+            r.font.size = Pt(12)
+            r.font.bold = True
+            r.font.color.rgb = INK
+    vals = [v for v in perf + qual if v is not None]
+    va = ch.value_axis
+    va.minimum_scale = max(0, (min(vals) - 6) // 10 * 10)
+    va.maximum_scale = 102
+    va.major_unit = 10 if va.minimum_scale >= 50 else 20
+    va.has_major_gridlines = True
+    va.major_gridlines.format.line.color.rgb = GRID
+    va.major_gridlines.format.line.width = Pt(0.75)
+    va.tick_labels.number_format = '0'
+    va.tick_labels.number_format_is_linked = False
+    va.tick_labels.font.size = Pt(10)
+    _no_axis_line(va)
+    va.major_tick_mark = XL_TICK_MARK.NONE
+    ca = ch.category_axis
+    ca.tick_labels.font.size = Pt(10.5)
+    ca.major_tick_mark = XL_TICK_MARK.NONE
+    ca.format.line.color.rgb = AXIS
+    return s
+
+
+def _slide_butterfly(prs, entity, comp, cle, titre, c_prec, c_act, sl, mode_division):
+    s = _blank(prs)
+    lp, la = comp["label_prec"], comp["label_act"]
+    rows = [r for r in comp[cle] if r.get("prec") is not None or r.get("act") is not None]
+    mesure = "% de postes conformes" if mode_division else "valeur de l'indicateur"
+    _title(s, f"Comparaison {lp} vs {la} — {titre}", f"{entity} — {mesure} par indicateur")
+    labels = []
+    for r in rows:
+        lab = sl.get(r["kpi"], r["kpi"])
+        if not mode_division:
+            lab += f"  ({'≤' if r['kpi'] in LOWER_BETTER else '≥'}{CIBLE.get(r['kpi'], 100):.0f})"
+        labels.append(lab)
+    cd = CategoryChartData()
+    cd.categories = labels
+    cd.add_series(lp, [-(r["prec"] or 0) for r in rows])
+    cd.add_series(la, [(r["act"] or 0) for r in rows])
+    h = min(BOTTOM - TOP - Inches(0.45), Inches(0.36) * len(rows) + Inches(0.9))
+    gf = s.shapes.add_chart(XL_CHART_TYPE.BAR_CLUSTERED, MX, TOP, CW, h, cd)
+    ch = gf.chart
+    _style_chart(ch, 12)
+    ch.has_legend = True
+    ch.legend.position = XL_LEGEND_POSITION.TOP
+    ch.legend.include_in_layout = False
+    ch.legend.font.size = Pt(12)
+    plot = ch.plots[0]
+    plot.gap_width = 35
+    plot.overlap = 100
+    s_prec, s_act = plot.series
+    for ser, col in ((s_prec, c_prec), (s_act, c_act)):
+        ser.invert_if_negative = False
+        ser.format.fill.solid()
+        ser.format.fill.fore_color.rgb = col
+    for i, r in enumerate(rows):
+        if r["prec"] is not None:
+            dl = s_prec.points[i].data_label
+            dl.position = XL_LABEL_POSITION.OUTSIDE_END
+            run = dl.text_frame.paragraphs[0].add_run()
+            run.text = f"{r['prec']:.0f}%"
+            run.font.size = Pt(11)
+            run.font.color.rgb = INK2
+        dl = s_act.points[i].data_label
+        dl.position = XL_LABEL_POSITION.OUTSIDE_END
+        p = dl.text_frame.paragraphs[0]
+        run = p.add_run()
+        run.text = "—" if r["act"] is None else f"{r['act']:.0f}%"
+        run.font.size = Pt(11)
+        run.font.bold = True
+        run.font.color.rgb = INK
+        if r["prec"] is not None and r["act"] is not None:
+            d = r["act"] - r["prec"]
+            if abs(d) >= 0.05:
+                better = (d < 0) if r.get("lower") else (d > 0)
+                col = UP_TXT if better else DOWN_TXT
+                for txt, font in (("   ▲ " if d > 0 else "   ▼ ", "Arial"), (f"{d:+.1f}", FONT)):
+                    rr = p.add_run()
+                    rr.text = txt
+                    rr.font.size = Pt(11)
+                    rr.font.bold = True
+                    rr.font.name = font
+                    rr.font.color.rgb = col
+    ca = ch.category_axis
+    ca.reverse_order = True
+    ca.tick_label_position = XL_TICK_LABEL_POSITION.LOW
+    ca.major_tick_mark = XL_TICK_MARK.NONE
+    ca.tick_labels.font.size = Pt(12)
+    ca.tick_labels.font.color.rgb = INK
+    ca.format.line.color.rgb = AXIS
+    va = ch.value_axis
+    vmax = max([100.0] + [v for r in rows for v in (r["prec"], r["act"]) if v is not None])
+    va.minimum_scale = -vmax * 1.2
+    va.maximum_scale = vmax * 1.45
+    va.visible = False
+    va.has_major_gridlines = False
+    note = ("Barre = % des postes conformes à l'indicateur (verdict vert ou orange). " if mode_division
+            else "Cible entre parenthèses ; pour les indicateurs « ≤ », une baisse est une amélioration. ")
+    _text(s, MX, TOP + h + Inches(0.12), CW, Inches(0.3),
+          [(note, {}), ("▲", {"font": "Arial", "color": UP_TXT}), (" amélioration   ", {}),
+           ("▼", {"font": "Arial", "color": DOWN_TXT}),
+           (f" dégradation.   S-1 = {lp}, S = {la} (dernière extraction).", {})],
+          size=11, color=INK2)
+    return s
+
+
+def _set_hole(chart, pct=58):
+    el = chart.plots[0]._element
+    hs = el.find(qn("c:holeSize"))
+    if hs is None:
+        hs = el.makeelement(qn("c:holeSize"), {})
+        el.append(hs)
+    hs.set("val", str(pct))
+
+
+def _slide_backlog(prs, entity, bc, traitement):
+    s = _blank(prs)
+    d = bc.get("date") if bc else None
+    _title(s, "Backlog caractérisation",
+           f"{entity} — OT en attente par code de caractérisation"
+           + (f" · extraction du {pd.Timestamp(d).strftime('%d/%m/%Y')}" if d is not None else ""))
+    if not bc:
+        _message(s, MX, TOP, CW, Inches(1.2), "Aucune donnée de backlog caractérisation pour ce périmètre.")
+        return s
+    half = int((CW - Inches(0.4)) / 2)
+    h_bloc = Inches(3.45)
+    for i, (cle, codes, desc, nom) in enumerate((("prep", rd.CRPR_KW, rd.DESC_PREP, "Préparation"),
+                                                 ("planif", rd.ATPL_KW, rd.DESC_PLAN, "Planification"))):
+        x = MX + i * (half + Inches(0.4))
+        counts = bc.get(cle) or {}
+        total = sum(int(counts.get(c, 0) or 0) for c in codes)
+        _box(s, x, TOP, half, h_bloc, fill=CARD)
+        _text(s, x + Inches(0.25), TOP + Inches(0.15), half, Inches(0.35), nom, size=16,
+              bold=True, color=INK)
+        d_sz = Inches(2.3)
+        y_ch = TOP + Inches(0.75)
+        if total:
+            cd = CategoryChartData()
+            cd.categories = list(codes)
+            cd.add_series("OT", [int(counts.get(c, 0) or 0) for c in codes])
+            gf = s.shapes.add_chart(XL_CHART_TYPE.DOUGHNUT, x + Inches(0.15), y_ch, d_sz, d_sz, cd)
+            ch = gf.chart
+            _style_chart(ch, 10)
+            ch.has_legend = False
+            _set_hole(ch, 58)
+            ser = ch.plots[0].series[0]
+            for j in range(len(codes)):
+                pt = ser.points[j]
+                pt.format.fill.solid()
+                pt.format.fill.fore_color.rgb = CODE_PALETTE[j % len(CODE_PALETTE)]
+                pt.format.line.color.rgb = CARD
+                pt.format.line.width = Pt(1.5)
+            _text(s, x + Inches(0.15), y_ch + d_sz / 2 - Inches(0.36), d_sz, Inches(0.5), f"{total}",
+                  size=26, bold=True, color=INK, align=PP_ALIGN.CENTER)
+            _text(s, x + Inches(0.15), y_ch + d_sz / 2 + Inches(0.1), d_sz, Inches(0.3), "OT",
+                  size=11, color=INK2, align=PP_ALIGN.CENTER)
+        else:
+            _text(s, x + Inches(0.25), y_ch + Inches(1.0), d_sz, Inches(0.4), "Aucun OT caractérisé.",
+                  size=12, color=INK2)
+        # clé des codes (tableau natif, pastille colorée en 1re colonne)
+        rows = [["", c, desc.get(c, ""), str(int(counts.get(c, 0) or 0)),
+                 f"{(int(counts.get(c, 0) or 0) / total * 100) if total else 0:.0f}%"] for c in codes]
+        rows.append(["", "Total", "", str(total), "100%" if total else "0%"])
+
+        def fmt(r, c, n=len(codes)):
+            if c == 0 and r < n:
+                return {"fill": CODE_PALETTE[r % len(CODE_PALETTE)]}
+            if r == n:
+                return {"bold": True, "fill": WHITE}
+            return {"fill": WHITE, "bold": c == 1}
+
+        x_t = x + d_sz + Inches(0.35)
+        _table(s, x_t, TOP + Inches(0.6), x + half - Inches(0.2) - x_t,
+               ["", "Code", "Signification", "Nb", "%"], rows,
+               [0.14, 0.58, 1.72, 0.5, 0.5], font_size=10, row_h=Inches(0.34), header_fill=INK2,
+               cell_fmt=fmt,
+               align=[PP_ALIGN.LEFT, PP_ALIGN.LEFT, PP_ALIGN.LEFT, PP_ALIGN.RIGHT, PP_ALIGN.RIGHT])
+    # synthèse sous les cartes
+    tot_p = sum(int((bc.get("prep") or {}).get(c, 0) or 0) for c in rd.CRPR_KW)
+    tot_l = sum(int((bc.get("planif") or {}).get(c, 0) or 0) for c in rd.ATPL_KW)
+    tot = tot_p + tot_l
+    y_s = TOP + h_bloc + Inches(0.3)
+    if traitement:
+        w3 = int((CW - Inches(0.5)) / 3)
+        cartes = [("Backlog caractérisé total", f"{tot} OT", "Préparation + Planification"),
+                  ("Préparation", f"{tot_p} OT", f"{(tot_p / tot * 100) if tot else 0:.0f} % du backlog caractérisé"),
+                  ("Planification", f"{tot_l} OT", f"{(tot_l / tot * 100) if tot else 0:.0f} % du backlog caractérisé")]
+        for i, (lab, val, sub) in enumerate(cartes):
+            _stat_card(s, MX + i * (w3 + Inches(0.25)), y_s, w3, BOTTOM - y_s, lab, val,
+                       [(sub, {})], value_size=24)
+    else:
+        _message(s, MX, y_s, CW, Inches(1.0),
+                 "Nombre total traité : il compare deux extractions enregistrées du backlog "
+                 "caractérisation ; une seule est disponible pour l'instant — il sera calculé "
+                 "automatiquement à la prochaine extraction.")
+    return s
+
+
+def _slide_traitement(prs, entity, tr):
+    s = _blank(prs)
+    dp, da = tr.get("date_prec"), tr.get("date_act")
+    per = f"{pd.Timestamp(dp).strftime('%d/%m')} → {pd.Timestamp(da).strftime('%d/%m')}"
+    _title(s, "Nombre total traité — backlog caractérisation",
+           f"{entity} — OT sortis du backlog entre les extractions du {per}")
+    tp, tpp = tr.get("total_traite", 0), tr.get("total_prec", 0)
+    w_c = Inches(3.6)
+    _box(s, MX, TOP, w_c, BOTTOM - TOP, fill=_rgb("EAF6EA"))
+    _text(s, MX + Inches(0.3), TOP + Inches(0.3), w_c - Inches(0.6), Inches(0.35),
+          "TOTAL TRAITÉ", size=12, bold=True, color=_rgb("006300"))
+    _text(s, MX + Inches(0.3), TOP + Inches(0.7), w_c - Inches(0.6), Inches(1.1), f"{tp}",
+          size=66, bold=True, color=INK)
+    _text(s, MX + Inches(0.3), TOP + Inches(1.8), w_c - Inches(0.6), Inches(0.9),
+          [(f"{(tp / tpp * 100) if tpp else 0:.0f} %", {"bold": True, "size": 20, "color": _rgb("006300")}),
+           (f" des {tpp} OT caractérisés au {pd.Timestamp(dp).strftime('%d/%m')}", {"size": 13})],
+          size=13, color=INK2)
+    for i, (cle, nom) in enumerate((("prep", "Préparation"), ("planif", "Planification"))):
+        t, p = tr.get(f"{cle}_total_traite", 0), tr.get(f"{cle}_total_prec", 0)
+        y = TOP + Inches(3.1) + i * Inches(1.05)
+        _text(s, MX + Inches(0.3), y, w_c - Inches(0.6), Inches(0.9),
+              [(nom.upper(), {"size": 11, "bold": True, "color": INK2}),
+               (f"\n{t}", {"size": 26, "bold": True, "color": INK}),
+               (f"  / {p}  ({(t / p * 100) if p else 0:.0f} %)", {"size": 13, "color": INK2})])
+    # un graphique empilé Traité / Restant par catégorie
+    x0 = MX + w_c + Inches(0.4)
+    w_all = SW - MX - x0
+    half = int((w_all - Inches(0.3)) / 2)
+    for i, (cle, codes, nom) in enumerate((("prep", rd.CRPR_KW, "Préparation"),
+                                           ("planif", rd.ATPL_KW, "Planification"))):
+        data = tr.get(cle) or {}
+        prec = [tr.get(f"{cle}_total_prec", 0)] + [(data.get(c) or {}).get("precedent", 0) or 0 for c in codes]
+        trt = [tr.get(f"{cle}_total_traite", 0)] + [(data.get(c) or {}).get("traite", 0) for c in codes]
+        cats = [f"{lab}  {t}/{p} ({(t / p * 100) if p else 0:.0f}%)"
+                for lab, t, p in zip(["TOTAL"] + list(codes), trt, prec)]
+        cd = CategoryChartData()
+        cd.categories = cats
+        cd.add_series("Traité", trt)
+        cd.add_series("Restant", [max(0, p - t) for p, t in zip(prec, trt)])
+        x = x0 + i * (half + Inches(0.3))
+        _text(s, x, TOP, half, Inches(0.35), nom, size=16, bold=True, color=INK)
+        gf = s.shapes.add_chart(XL_CHART_TYPE.BAR_STACKED, x, TOP + Inches(0.4), half,
+                                BOTTOM - TOP - Inches(0.4), cd)
+        ch = gf.chart
+        _style_chart(ch, 11)
+        ch.has_legend = True
+        ch.legend.position = XL_LEGEND_POSITION.BOTTOM
+        ch.legend.include_in_layout = False
+        ch.legend.font.size = Pt(11)
+        plot = ch.plots[0]
+        plot.gap_width = 45
+        plot.overlap = 100
+        for ser, col in zip(plot.series, (GOOD, RESTANT)):
+            ser.invert_if_negative = False
+            ser.format.fill.solid()
+            ser.format.fill.fore_color.rgb = col
+        ca = ch.category_axis
+        ca.reverse_order = True
+        ca.major_tick_mark = XL_TICK_MARK.NONE
+        ca.tick_labels.font.size = Pt(11)
+        ca.tick_labels.font.color.rgb = INK
+        ca.format.line.color.rgb = AXIS
+        va = ch.value_axis
+        va.visible = False
+        va.has_major_gridlines = False
+        va.minimum_scale = 0
+    return s
+
+
+def _slides_plan(prs, entity, syn, sl, par_slide=8):
+    plan = syn["plan_action"]
+    mode = syn["mode_division"]
+    if not plan:
+        s = _blank(prs)
+        _title(s, "Plan d'action", entity)
+        _message(s, MX, TOP, CW, Inches(1.2), "Aucune anomalie — tous les indicateurs sont conformes.")
+        return [s]
+    pages = [plan[i:i + par_slide] for i in range(0, len(plan), par_slide)]
     slides = []
-    slides.append(_slide_title(prs, entity, fichier_date, vp))
-    slides.append(_slide_scores_indicateurs(prs, entity, vp, pscores, pa, QK, "Performance"))
-    slides.append(_slide_scores_indicateurs(prs, entity, vp, qscores, qa, PK, "Qualité"))
-    slides.append(_slide_detail(prs, entity, vp, ckdf, ano_map, QK, "Performance"))
-    slides.append(_slide_detail(prs, entity, vp, ckdf, ano_map, PK, "Qualité"))
+    for n, lot in enumerate(pages, start=1):
+        s = _blank(prs)
+        suite = f" ({n}/{len(pages)})" if len(pages) > 1 else ""
+        _title(s, f"Plan d'action{suite}",
+               f"{entity} — {len(plan)} indicateur(s) en anomalie, triés par nombre d'anomalies")
+        rows = [[p["kpi"], f"{p['actual']:.0f}%", f"{p['target']:.0f}%", str(p["nb_anom"]),
+                 p["responsable"], p["action"]] for p in lot]
 
-    if df_full is not None and avf_full is not None and now_ts is not None:
-        s = _slide_suivi_semaine(prs, entity, vp, df_full, avf_full, now_ts, QK, "Performance", GREEN_OCP)
-        if s is not None:
-            slides.append(s)
-        s = _slide_suivi_semaine(prs, entity, vp, df_full, avf_full, now_ts, PK, "Qualité", BLUE)
-        if s is not None:
-            slides.append(s)
+        def fmt(r, c):
+            if c == 3:
+                return {"color": CRIT, "bold": True}
+            return None
 
-    slides.append(_slide_sparklines(prs, entity, vp, hist_df, pscores, qscores))
-    slides.append(_slide_plan_action(prs, entity, vp, ckdf, ano_map))
+        _table(s, MX, TOP, CW, ["Indicateur", "% conf." if mode else "Valeur", "Cible", "Anom.",
+                                "Responsable", "Action corrective"], rows,
+               [2.9, 0.95, 0.8, 0.8, 1.9, 5.0], font_size=11.5, row_h=Inches(0.55),
+               cell_fmt=fmt, align=[PP_ALIGN.LEFT, PP_ALIGN.CENTER, PP_ALIGN.CENTER,
+                                    PP_ALIGN.CENTER, PP_ALIGN.LEFT, PP_ALIGN.LEFT])
+        slides.append(s)
+    return slides
 
-    # Pied de page harmonisé sur toutes les slides sauf la page de titre
+
+def _footer(slide, n, total, entity, date_str):
+    y = Inches(7.08)
+    _text(slide, MX, y, Inches(9), Inches(0.25), f"OCP — Rapport KPI SAP PM · {entity} · {date_str}",
+          size=9.5, color=MUTED)
+    _text(slide, SW - MX - Inches(1.5), y, Inches(1.5), Inches(0.25), f"{n} / {total}",
+          size=9.5, color=MUTED, align=PP_ALIGN.RIGHT)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# API publique (signature inchangée)
+# ═════════════════════════════════════════════════════════════════════════════
+def build_presentation(vp, ckdf, ano_map, pa, qa,
+                       pscores, qscores, hist_df=None, fichier_date="",
+                       df_full=None, avf_full=None, now_ts=None):
+    """
+    Construit la présentation et retourne ses bytes (.pptx).
+    pa / qa / df_full / avf_full / now_ts sont conservés pour compatibilité
+    avec l'appel existant de app.py ; les moyennes et scores sont recalculés
+    avec les mêmes règles que les rapports PDF (core/report_data.py).
+    """
+    sl = _short_labels()
+    postes = [p for p in (vp or []) if ckdf is not None and p in ckdf.index]
+    entity = _entity_name(postes or vp)
+    syn = rd.synthese_perimetre(ckdf, pscores, qscores, ano_map, postes)
+    mode = syn["mode_division"]
+
+    def _safe(fn):
+        try:
+            return fn()
+        except Exception:
+            return None
+
+    comp = _safe(lambda: rd.comparaison_semaines(hist_df, postes, mode))
+    evol = _safe(lambda: rd.evolution_scores(hist_df, postes, mode))
+    bc = _safe(lambda: rd.backlog_caract_counts(hist_df, postes))
+    tr = _safe(lambda: rd.traitement_backlog(hist_df, postes))
+    impact = _safe(lambda: rd.impact_postes_critiques(ano_map, postes)) if mode else None
+
+    prs = Presentation()
+    prs.slide_width, prs.slide_height = SW, SH
+    slides = [_slide_titre(prs, entity, fichier_date, syn),
+              _slide_kpi(prs, entity, syn, sl),
+              _slide_anomalies(prs, entity, syn, sl)]
+    if impact:
+        slides.append(_slide_impact(prs, entity, impact, sl))
+    slides.append(_slide_evolution(prs, entity, syn, comp, evol))
+    if comp:
+        slides.append(_slide_butterfly(prs, entity, comp, "perf", "Performance", PERF_PREC, PERF, sl, mode))
+        slides.append(_slide_butterfly(prs, entity, comp, "qual", "Qualité", QUAL_PREC, QUAL, sl, mode))
+    slides.append(_slide_backlog(prs, entity, bc, tr))
+    if tr:
+        slides.append(_slide_traitement(prs, entity, tr))
+    slides += _slides_plan(prs, entity, syn, sl)
+
     total = len(slides)
-    for i, sl in enumerate(slides[1:], start=2):
-        _add_footer(sl, i, total, entity, fichier_date)
+    for i, s in enumerate(slides[1:], start=2):
+        _footer(s, i, total, entity, fichier_date)
 
     buf = io.BytesIO()
     prs.save(buf)
