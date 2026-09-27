@@ -52,6 +52,44 @@ from core.anomalies import build_anomaly_dfs
 from core.export_anomalies import build_anomalies_workbook
 from core.github_publish import upload_file, is_configured
 from core.constants import QK, PK, CIBLE, ACT_MAP, KPI_RESP_MAP
+from core import report_data as _rd
+
+
+def _donnees_rapport(hist_df, postes, mode_division, df_ot=None, messages=None):
+    """
+    Prépare les données des pages Évolution / Backlog / Tendance du PDF
+    (core/report_data.py). Toute erreur est isolée : le PDF est toujours
+    généré, la section concernée affichant alors un message.
+    """
+    kw = {"hist_df": hist_df, "vp": list(postes),
+          "codes_prep": _rd.CRPR_KW, "codes_plan": _rd.ATPL_KW,
+          "desc_prep": _rd.DESC_PREP, "desc_plan": _rd.DESC_PLAN}
+    for cle, fn in (
+        ("comparaison", lambda: _rd.comparaison_semaines(hist_df, postes, mode_division)),
+        ("evolution", lambda: _rd.evolution_scores(hist_df, postes, mode_division)),
+        ("backlog_counts", lambda: _rd.backlog_caract_counts(hist_df, postes, df_ot=df_ot)),
+        ("traitement", lambda: _rd.traitement_backlog(hist_df, postes)),
+    ):
+        try:
+            kw[cle] = fn()
+        except Exception as e:
+            kw[cle] = None
+            if messages is not None:
+                messages.append(f"Données '{cle}' indisponibles : {e}")
+    return kw
+
+
+def _impact_sur(ano_map, postes, messages=None):
+    try:
+        return _rd.impact_postes_critiques(ano_map, postes)
+    except Exception as e:
+        if messages is not None:
+            messages.append(f"Chart des postes impactants indisponible : {e}")
+        return None
+
+
+# Nom des divisions dans les titres des rapports de synthèse
+NOM_DIVISION = {"SF01": "Maroc Chimie", "SF02": "FEEDS"}
 
 
 def _sanitize_poste_name(poste: str) -> str:
@@ -63,6 +101,7 @@ def generate_and_publish_poste_report(
     poste: str, ckdf_row: pd.Series, pscore: float, qscore: float,
     ano_map: dict, dfp: pd.DataFrame, avf: pd.DataFrame, now_ts,
     date_str: str, dry_run: bool = False,
+    hist_df: pd.DataFrame = None, dfp_toutes_dates: pd.DataFrame = None,
 ):
     """
     Génère et publie (si dry_run=False) les fichiers pour UN poste.
@@ -108,6 +147,8 @@ def generate_and_publish_poste_report(
             anomalies=anomalies, total_anomalies=total_anomalies,
             plan_action=plan_action, date_str=date_str,
             short_labels=SHORT_LABELS,
+            **_donnees_rapport(hist_df, [poste], False,
+                               df_ot=dfp_toutes_dates, messages=status["messages"]),
         )
         status["pdf"] = True
     except Exception as e:
@@ -153,6 +194,7 @@ def generate_and_publish_division_report(
     division: str, postes_division: list, ckdf: pd.DataFrame,
     pscores: dict, qscores: dict, ano_map: dict, date_str: str,
     dry_run: bool = False,
+    hist_df: pd.DataFrame = None, dfp_toutes_dates: pd.DataFrame = None,
 ):
     """
     Génère et publie UN rapport consolidé pour une division entière
@@ -245,7 +287,7 @@ def generate_and_publish_division_report(
         })
     plan_action.sort(key=lambda x: -x["nb_anom"])
 
-    titre = f"{division} — Synthèse division ({len(postes_valides)} postes)"
+    titre = f"{division} {NOM_DIVISION.get(division, '')} — Synthèse division ({len(postes_valides)} postes)"
     try:
         pdf_bytes = build_poste_report_pdf(
             poste=titre, pscore=pscore_div, qscore=qscore_div,
@@ -253,6 +295,9 @@ def generate_and_publish_division_report(
             anomalies=anomalies, total_anomalies=total_anomalies,
             plan_action=plan_action, date_str=date_str,
             short_labels=SHORT_LABELS, mode_conformite=True,
+            impact_postes=_impact_sur(ano_map, postes_valides, status["messages"]),
+            **_donnees_rapport(hist_df, postes_valides, True,
+                               df_ot=dfp_toutes_dates, messages=status["messages"]),
         )
         status["pdf"] = True
     except Exception as e:
@@ -279,6 +324,7 @@ def generate_and_publish_all_postes(
     ckdf: pd.DataFrame, pscores: dict, qscores: dict, ano_map: dict,
     dfp: pd.DataFrame, avf: pd.DataFrame, now_ts, date_str: str,
     postes: list = None, dry_run: bool = False, progress_callback=None,
+    hist_df: pd.DataFrame = None, dfp_toutes_dates: pd.DataFrame = None,
 ):
     """
     Boucle sur tous les postes (ou la liste fournie) et publie leur
@@ -302,6 +348,7 @@ def generate_and_publish_all_postes(
             pscore=pscores.get(poste, 0), qscore=qscores.get(poste, 0),
             ano_map=ano_map, dfp=dfp, avf=avf, now_ts=now_ts,
             date_str=date_str, dry_run=dry_run,
+            hist_df=hist_df, dfp_toutes_dates=dfp_toutes_dates,
         )
         # CORRIGÉ : libération explicite de la mémoire après chaque poste.
         # Sur Streamlit Cloud (limite ~1 Go), générer PDF+Excel pour de
@@ -327,6 +374,7 @@ def generate_and_publish_all_postes(
             division=division, postes_division=postes_div, ckdf=ckdf,
             pscores=pscores, qscores=qscores, ano_map=ano_map,
             date_str=date_str, dry_run=dry_run,
+            hist_df=hist_df, dfp_toutes_dates=dfp_toutes_dates,
         )
         results.append(res)
 
