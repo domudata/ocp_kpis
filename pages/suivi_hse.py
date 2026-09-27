@@ -902,19 +902,13 @@ def render_suivi_hse_tab(dfp, avf, vp, date_str=""):
     sel_sem = f3.selectbox("Semaine", ["Toutes"] + list(semaines), key="hse_sem")
     sel_atelier = f4.selectbox("Atelier", ["Tous"] + tous_ateliers, key="hse_atelier")
 
-    # ── Filtre dynamique des sections a afficher (demande explicite) ──
-    # Par defaut, seules 2 sections sont affichees (au lieu des 7) pour
-    # alleger la page — l'utilisateur choisit celles qu'il veut voir.
+    # Toutes les sections sont affichées (le filtre « Sections à afficher »
+    # a été supprimé à la demande).
     TOUTES_SECTIONS = [
         "Avis Inspection", "Analyse des avis fuites", "Avis HSE",
         "OT Sécurité", "OMS Thermographie", "OMS Vibration", "Contrôle structure",
     ]
-    sections_actives = st.multiselect(
-        "🧭 Sections à afficher",
-        TOUTES_SECTIONS,
-        default=["Avis Inspection", "Avis HSE"],
-        key="hse_sections_actives",
-    )
+    sections_actives = list(TOUTES_SECTIONS)
 
     res = _calculer_sections_hse(dfp, avf, tuple(vp), date_str, sel_annee, sel_mois, sel_sem, sel_atelier)
     buffers = res["buffers"]
