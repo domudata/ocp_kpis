@@ -1961,6 +1961,7 @@ def main():
                 "🎯 Plan d'action",
                 "🦺 Suivi HSE",
                 "🔄 Fréquence Maintenance",
+                "🔮 Maintenance prédictive",
             ]
         )
 
@@ -2142,6 +2143,7 @@ def main():
                     qscores,
                     hist_df,
                     fichier_date,
+                    df_full=df_full,
                 )
 
 
@@ -2229,16 +2231,30 @@ def main():
                 )
 
 
-            if (
+            try:
+                from core.onedrive_publish import is_configured as _onedrive_configured
+            except Exception:
+                def _onedrive_configured():
+                    return False
+
+
+            if _publication_ok and _onedrive_configured():
+
+                st.caption(
+                    "☁️ Destination : votre OneDrive, dossier "
+                    "presentation/<poste>/ (enregistrement direct via Power Automate)."
+                )
+
+            elif (
                 _publication_ok
                 and
                 not _github_configured()
             ):
 
                 st.caption(
-                    "⚠️ Publication GitHub non configurée "
-                    "(GITHUB_TOKEN / GITHUB_REPO absents des secrets). "
-                    "Les rapports seront générés mais pas publiés."
+                    "⚠️ Aucune destination configurée (ONEDRIVE_FLOW_URL ou "
+                    "GITHUB_TOKEN / GITHUB_REPO absents des secrets). "
+                    "Les rapports seront générés mais pas enregistrés."
                 )
 
 
@@ -2320,6 +2336,10 @@ def main():
                         _kwargs_pub["dfp_toutes_dates"] = df_period
                     if "hist_df" in _sig.parameters:
                         _kwargs_pub["hist_df"] = hist_df
+                    # Backlog caractérisation : fichier OT COMPLET (toutes
+                    # dates), comme la page Backlog — pas le filtre Période.
+                    if "df_ot_complet" in _sig.parameters:
+                        _kwargs_pub["df_ot_complet"] = df_full
                 except Exception:
                     pass
 
@@ -2368,6 +2388,13 @@ def main():
                 )
 
 
+                _ok_od = sum(
+                    1
+                    for r in _results
+                    if r.get("onedrive_ok")
+                )
+
+
                 with _status_area.container():
 
                     if _launch_dry:
@@ -2376,6 +2403,17 @@ def main():
                             f"{_ok_pdf}/{len(_results)} PDF, "
                             f"{_ok_xlsx}/{len(_results)} Excel générés."
                         )
+                    elif _ok_od > 0:
+                        st.success(
+                            f"☁️ {_ok_od}/{len(_results)} rapports enregistrés "
+                            "dans votre OneDrive (presentation/<poste>/) — "
+                            f"{_ok_pdf} PDF, {_ok_xlsx} Excel."
+                        )
+                        if _ok_od < len(_results):
+                            st.warning(
+                                f"⚠️ {len(_results) - _ok_od} rapport(s) non enregistré(s) "
+                                "dans OneDrive — voir « Détail par poste » ci-dessous."
+                            )
                     elif _ok_pub > 0:
                         st.success(
                             f"✅ {_ok_pub}/{len(_results)} "
@@ -2795,6 +2833,36 @@ def main():
                         "Fréquence de maintenance indisponible : "
                         f"{_e}"
                     )
+
+
+        # ═══════════════════════════════════════════════════════════════════
+        # TAB 7 — MAINTENANCE PRÉDICTIVE
+        # Rien n'est calculé avant le clic « Lancer la prédictive ».
+        # Entraînement sur TOUS les OT / avis (df_full, avis_complet_full) ;
+        # le plan de contrôle est filtré sur les postes sélectionnés (vp).
+        # ═══════════════════════════════════════════════════════════════════
+
+        with tabs[7]:
+
+            try:
+
+                from pages.maintenance_predictive import (
+                    render_maintenance_predictive_tab
+                )
+
+                render_maintenance_predictive_tab(
+                    df_full,
+                    avis_complet_full,
+                    vp,
+                    fichier_date,
+                )
+
+            except Exception as _e_pred:
+
+                st.error(
+                    "Maintenance prédictive indisponible : "
+                    f"{_e_pred}"
+                )
 
 
     # ═══════════════════════════════════════════════════════════════════════
