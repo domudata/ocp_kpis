@@ -44,24 +44,142 @@ def _excel_plan(df, titre):
     return buf.getvalue()
 
 
-def _cycle(df_full, avis_complet, fichier_date):
-    """Exécute le cycle une fois par (extraction, jour) et le garde en session."""
+def _cycle(df_full, avis_complet, fichier_date, perimetre="general"):
+    """Exécute le cycle une fois par (périmètre, extraction, jour) et le garde en session."""
     aujourd_hui = pd.Timestamp.today().normalize()
     try:
         date_ext = pd.to_datetime(fichier_date, format="%d/%m/%Y")
     except Exception:
         date_ext = pd.to_datetime(fichier_date, dayfirst=True, errors="coerce")
-    cle = (str(fichier_date), str(aujourd_hui.date()))
-    cache = st.session_state.get("_pred_cache")
+    cle = (perimetre, str(fichier_date), str(aujourd_hui.date()))
+    caches = st.session_state.setdefault("_pred_cache_perim", {})
+    cache = caches.get(perimetre)
     if cache and cache["cle"] == cle:
         return cache
-    reg, source = pp.charger_registre()
-    res, modifie = pp.executer_cycle(df_full, avis_complet, aujourd_hui, date_ext, reg)
-    msg = pp.sauver_registre(reg) if modifie else ""
+    reg, source = pp.charger_registre(perimetre)
+    res, modifie = pp.executer_cycle(df_full, avis_complet, aujourd_hui, date_ext, reg, perimetre=perimetre)
+    msg = pp.sauver_registre(reg, perimetre) if modifie else ""
     cache = {"cle": cle, "res": res, "reg": reg, "source": source, "msg": msg,
              "aujourd_hui": aujourd_hui, "date_ext": date_ext}
-    st.session_state["_pred_cache"] = cache
+    caches[perimetre] = cache
     return cache
+
+
+def _journal_df(journal):
+    lignes = []
+    for cle in sorted(journal):
+        j = journal[cle]
+        pct = lambda v: (round(v * 100, 1) if v is not None else None)
+        lignes.append({
+            "Semaine S": cle,
+            "Enregistré le": str(j.get("enregistre_le", ""))[:16],
+            "Semaine évaluée": j.get("semaine_evaluee", ""),
+            "Source": ("Réel" if j.get("source") == "réel" else "Rétro-test")
+                      + ("" if j.get("statut") == "complet" else " (provisoire)"),
+            "Efficacité — précision (%)": pct(j.get("precision")),
+            "Pannes détectées (%)": pct(j.get("detection")),
+            "Moy. 4 sem. précision (%)": pct(j.get("precision_moy4")),
+            "Δ vs semaine préc. (pts)": pct(j.get("delta_vs_prec")),
+            "Δ vs 1er enregistrement (pts)": pct(j.get("delta_vs_debut")),
+            "Détectées / pannes réelles": (f"{j.get('detectees')} / {j.get('pannes_reelles')}"
+                                           if j.get("pannes_reelles") is not None else ""),
+        })
+    return pd.DataFrame(lignes)
+
+
+def _excel_simple(df, feuille, titre):
+    buf = io.BytesIO()
+    with pd.ExcelWriter(buf, engine="openpyxl") as xw:
+        df.to_excel(xw, index=False, sheet_name=feuille, startrow=2)
+        ws = xw.sheets[feuille]
+        ws["A1"] = titre
+        from openpyxl.styles import Font, PatternFill, Alignment
+        ws["A1"].font = Font(bold=True, size=13)
+        for c in ws[3]:
+            c.font = Font(bold=True, color="FFFFFF")
+            c.fill = PatternFill("solid", fgColor="1E3A5F")
+            c.alignment = Alignment(wrap_text=True, vertical="center")
+        for i in range(len(df.columns)):
+            ws.column_dimensions[chr(65 + i)].width = 18
+    buf.seek(0)
+    return buf.getvalue()
+
+
+def _section_efficacite(reg, evol, cle_S, lundi_S):
+    st.markdown("---")
+    st.markdown(f"#### 📊 Efficacité de la prédictive — enregistrée au début de chaque semaine")
+    journal = reg.get("journal_efficacite", {})
+    if not evol:
+        st.info("Pas encore de semaine évaluée : l'efficacité sera enregistrée dès la première évaluation.")
+        return
+
+    crit = st.radio("Mesure de l'efficacité", ["Précision du plan", "Pannes détectées"],
+                    horizontal=True, key="pred_crit_eff")
+    k = "precision" if crit == "Précision du plan" else "detection"
+
+    ent = journal.get(cle_S)
+    cles = sorted(journal)
+    ant = journal[cles[cles.index(cle_S) - 1]] if ent is not None and cles.index(cle_S) > 0 else None
+    vals = [e["modeles"]["M5"][k] * 100 for e in evol]
+    td = pp.tendance(vals)
+
+    e1, e2, e3, e4 = st.columns(4)
+    if ent is not None:
+        v = ent[k] * 100
+        d = (f"{(ent[k] - ant[k]) * 100:+.1f} pts vs {ant['semaine'].split('-')[1]}"
+             if ant is not None else "1er enregistrement")
+        e1.metric(f"Efficacité enregistrée — début {cle_S.split('-')[1]}", f"{v:.0f} %", d,
+                  delta_color="normal" if ant is not None else "off")
+        e1.caption(f"Plan de {ent['semaine_evaluee']} · "
+                   f"{'réel' if ent.get('source') == 'réel' else 'rétro-test'}"
+                   f"{'' if ent.get('statut') == 'complet' else ' · provisoire'}")
+    m4 = sum(vals[-4:]) / len(vals[-4:])
+    e2.metric("Moyenne des 4 dernières semaines", f"{m4:.0f} %")
+    if td:
+        e3.metric("Tendance", f"{td['pente']:+.1f} pts / semaine", td["sens"],
+                  delta_color="normal" if td["sens"] != "stable" else "off")
+        rel = f"{td['gain_rel']:+.0f} % relatif" if td["gain_rel"] is not None else ""
+        e4.metric(f"Amélioration ({td['n_bloc']} dern. sem. vs {td['n_bloc']} prem.)",
+                  f"{td['gain_pts']:+.1f} pts", rel)
+
+    try:
+        import plotly.graph_objects as go
+        x = [e["semaine"].split("-")[1] for e in evol]
+        reel = [e.get("type") == "réel" for e in evol]
+        fig = go.Figure()
+        fig.add_trace(go.Bar(
+            x=x, y=vals, name="Efficacité hebdomadaire (M5)",
+            marker_color=["#2a78d6" if r else "#b8cfee" for r in reel],
+            text=[f"{v:.0f}%" for v in vals], textposition="outside"))
+        mob = [sum(vals[max(0, i - 3):i + 1]) / len(vals[max(0, i - 3):i + 1]) for i in range(len(vals))]
+        fig.add_trace(go.Scatter(x=x, y=mob, name="Moyenne glissante 4 sem.", mode="lines",
+                                 line=dict(color="#0b0b0b", width=2)))
+        if td:
+            fig.add_trace(go.Scatter(
+                x=x, y=td["droite"], name=f"Tendance ({td['pente']:+.1f} pts/sem.)", mode="lines",
+                line=dict(color="#0ca30c" if td["pente"] >= 0 else "#d03b3b", width=2, dash="dash")))
+        fig.update_layout(height=360, yaxis_title=f"{crit} (%)", plot_bgcolor="white",
+                          yaxis=dict(range=[0, max(100, max(vals) + 10)], gridcolor="#eceae4"),
+                          margin=dict(l=10, r=10, t=30, b=10), legend=dict(orientation="h", y=-0.18),
+                          bargap=0.35)
+        st.plotly_chart(fig, use_container_width=True)
+    except Exception:
+        pass
+    st.caption("Barres claires : semaines rejouées (rétro-test) · barres foncées : plans réellement publiés "
+               "puis comparés aux pannes réelles. Précision = part des postes techniques du plan tombés en panne ; "
+               "pannes détectées = part des pannes réelles qui étaient dans le plan. "
+               "La tendance est la pente de la régression linéaire sur toutes les semaines évaluées.")
+
+    if journal:
+        st.markdown("**Journal d'efficacité** — une ligne figée par semaine S, au lundi de publication du plan")
+        jdf = _journal_df(journal)
+        st.dataframe(jdf, hide_index=True, use_container_width=True)
+        st.download_button(
+            "📥 Télécharger le journal d'efficacité (Excel)",
+            data=_excel_simple(jdf, "Journal efficacité", "Journal d'efficacité de la maintenance prédictive"),
+            file_name="Journal_efficacite_predictive.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            key="dl_journal_eff")
 
 
 def render_maintenance_predictive_tab(df_full, avis_complet, vp, fichier_date):
@@ -89,9 +207,17 @@ def render_maintenance_predictive_tab(df_full, avis_complet, vp, fichier_date):
         st.warning("Données OT / avis indisponibles.")
         return
 
-    with st.spinner("Entraînement des 5 modèles et calcul du plan de la semaine… (≈ 30 s la 1re fois par extraction)"):
+    perims = [k for k, v in pp.PERIMETRES.items() if not v.get("masque")]
+    perimetre = st.radio("Plan de prédictive", perims, horizontal=True, key="pred_perimetre",
+                         format_func=lambda k: pp.PERIMETRES[k]["label"])
+    pref = pp.PERIMETRES[perimetre]["prefixes"]
+    if pref:
+        st.caption(f"Pannes, historique et plan limités aux postes de travail {', '.join(pref)}… "
+                   "Chaque plan a ses propres modèles, son plan de contrôle et son journal d'efficacité.")
+
+    with st.spinner("Entraînement des 5 modèles et calcul du plan de la semaine… (≈ 1 min la 1re fois par extraction)"):
         try:
-            cache = _cycle(df_full, avis_complet, fichier_date)
+            cache = _cycle(df_full, avis_complet, fichier_date, perimetre)
         except Exception as e:
             st.error(f"❌ Échec du calcul prédictif : {e}")
             return
@@ -106,14 +232,16 @@ def render_maintenance_predictive_tab(df_full, avis_complet, vp, fichier_date):
 
     # ── Périmètre (postes de travail sélectionnés) ──
     postes = [str(p) for p in (vp or [])]
+    if pref:   # garder les postes sélectionnés qui font partie du plan, sinon tous
+        postes = [p for p in postes if p.strip().upper().startswith(pref)]
     info = D.info
     m5 = pd.Series(pred["scores"]["M5"])
     dans = [e for e in m5.index if str(info["poste_travail"].get(e, "")) in set(postes)] if postes else list(m5.index)
     m5_p = m5.reindex(dans).dropna()
 
     k1, k2, k3, k4 = st.columns(4)
-    k1.metric("Pannes probables cette semaine", f"{m5_p.sum():.0f}", "équipements (périmètre)", delta_color="off")
-    k2.metric("Équipements surveillés", f"{len(m5_p)}", f"{pred['univers']} au total", delta_color="off")
+    k1.metric("Pannes probables cette semaine", f"{m5_p.sum():.0f}", "postes techniques (périmètre)", delta_color="off")
+    k2.metric("Postes techniques surveillés", f"{len(m5_p)}", f"{pred['univers']} au total", delta_color="off")
     evol = res["evolution"]
     rec = evol[-8:]
     if rec:
@@ -124,13 +252,19 @@ def render_maintenance_predictive_tab(df_full, avis_complet, vp, fichier_date):
 
     # ══ 1. Plan de contrôle ══════════════════════════════════════════════
     st.markdown("---")
-    st.markdown(f"#### 🛠️ Plan de contrôle — {cle_S} · publié le {_fmt(lundi_S)}")
-    st.caption(f"Les {pp.TOP_N} équipements du périmètre au risque de panne le plus élevé. "
+    suffixe = (" · " + pp.PERIMETRES[perimetre]["court"]) if pp.PERIMETRES[perimetre].get("court") else ""
+    st.markdown(f"#### 🛠️ Plan de contrôle{suffixe} — {cle_S} · publié le {_fmt(lundi_S)}")
+    st.caption(f"Les {pp.TOP_N} postes techniques du périmètre au risque de panne le plus élevé. "
                f"Calculé avec les données jusqu'au {pd.Timestamp(pred['debut']).strftime('%d/%m/%Y')} (exclu), "
                f"puis figé : il ne change plus pendant la semaine.")
-    plan = pp.plan_controle(D, pred["scores"]["M5"], W_S, postes=postes or None)
+    fams = list(pp.CONTROLES.keys())
+    sel_fam = st.multiselect("Familles de défaillance", fams, default=fams, key="pred_familles",
+                             help="Mécanique, électrique et instrumentation — les fuites sont exclues. "
+                                  "Filtrer sur une famille donne son propre top 50.")
+    plan = pp.plan_controle(D, pred["scores"]["M5"], W_S, postes=postes or None,
+                            familles=(sel_fam if set(sel_fam) != set(fams) else None))
     if plan.empty:
-        st.info("Aucun équipement à risque dans le périmètre sélectionné.")
+        st.info("Aucun poste technique à risque dans le périmètre sélectionné.")
     else:
         st.dataframe(
             plan, use_container_width=True, hide_index=True, height=520,
@@ -141,8 +275,8 @@ def render_maintenance_predictive_tab(df_full, avis_complet, vp, fichier_date):
             })
         st.download_button(
             "📥 Télécharger le plan de contrôle (Excel)",
-            data=_excel_plan(plan, f"Plan de contrôle {cle_S} — publié le {lundi_S.strftime('%d/%m/%Y')}"),
-            file_name=f"Plan_controle_{cle_S}.xlsx",
+            data=_excel_plan(plan, f"Plan de contrôle{suffixe} {cle_S} — publié le {lundi_S.strftime('%d/%m/%Y')}"),
+            file_name=f"Plan_controle_{cle_S}{('_' + pp.PERIMETRES[perimetre]['fichier']) if pp.PERIMETRES[perimetre].get('fichier') else ''}.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             key="dl_plan_controle")
         try:
@@ -181,20 +315,23 @@ def render_maintenance_predictive_tab(df_full, avis_complet, vp, fichier_date):
         top = list(sc.sort_values(ascending=False).head(pp.TOP_N).index)
         hits = set(top) & reel
         r1, r2, r3, r4 = st.columns(4)
-        r1.metric("Pannes réelles", f"{len(reel)}", "équipements (périmètre)", delta_color="off")
+        r1.metric("Pannes réelles", f"{len(reel)}", "postes techniques (périmètre)", delta_color="off")
         r2.metric("Pannes prévues", f"{sc.sum():.0f}", "somme des probabilités", delta_color="off")
         r3.metric("Précision du plan", f"{len(hits) / max(len(top), 1) * 100:.0f} %",
-                  f"{len(hits)} / {len(top)} équipements du plan en panne", delta_color="off")
+                  f"{len(hits)} / {len(top)} postes du plan en panne", delta_color="off")
         r4.metric("Pannes détectées", f"{len(hits) / max(len(reel), 1) * 100:.0f} %",
                   f"{len(hits)} / {len(reel)} pannes étaient dans le plan", delta_color="off")
         with st.expander("Détail : pannes détectées et pannes non prévues"):
-            det = pd.DataFrame({"Équipement": sorted(hits)})
-            det["Désignation"] = det["Équipement"].map(lambda e: info["designation"].get(e, ""))
-            manq = pd.DataFrame({"Équipement": sorted(reel - set(top))})
-            manq["Désignation"] = manq["Équipement"].map(lambda e: info["designation"].get(e, ""))
+            det = pd.DataFrame({"Poste technique": sorted(hits)})
+            det["Désignation"] = det["Poste technique"].map(lambda e: info["designation"].get(e, ""))
+            manq = pd.DataFrame({"Poste technique": sorted(reel - set(top))})
+            manq["Désignation"] = manq["Poste technique"].map(lambda e: info["designation"].get(e, ""))
             a, b = st.columns(2)
             a.markdown("**Détectées par le plan**"); a.dataframe(det, hide_index=True, use_container_width=True)
             b.markdown("**Non prévues**"); b.dataframe(manq, hide_index=True, use_container_width=True)
+
+    # ══ 2 bis. Efficacité enregistrée chaque début de semaine + tendance ══
+    _section_efficacite(reg, evol, cle_S, lundi_S)
 
     # ══ 3. Évolution des 5 modèles ════════════════════════════════════════
     st.markdown("---")
@@ -240,17 +377,19 @@ def render_maintenance_predictive_tab(df_full, avis_complet, vp, fichier_date):
     n_pos = f"{pred['entrainement'].get('pos_train', 0):,}".replace(",", " ")
     with st.expander("⚙️ Méthode et calculs"):
         st.markdown(f"""
-**Panne** : sur un équipement (poste technique à 5 niveaux), au moins un avis **ZC** (hors échafaudage,
-peinture, calorifugeage, étalonnage, tests) ou un OT **ZCOR sans avis** correspondant à une vraie réparation
-(changement, réparation, remise en état, étanchement, soudure, révision…).
+**Panne** : sur le **poste technique exact** saisi dans SAP (4 à 7 niveaux), un OT **ZCOR** de l'atelier
+(avec ou sans avis) ou un avis **ZC** non rattaché à un de ces OT, décrivant un problème **mécanique, électrique ou d'instrumentation** : roulements,
+alignement, accouplement, courroies / transmission, machines tournantes, moteur et alimentation,
+capteurs et étalonnage, vannes, remise en état. **Exclus** : fuites et étanchéité, chaudronnerie
+(soudure, tôle), tuyauterie, génie civil, bouchage et travaux annexes (échafaudage, peinture, nettoyage…).
 
 **Variables** : pannes des 1, 2, 4, 8, 13, 26 et 52 dernières semaines, temps depuis la dernière panne,
-intervalle moyen entre pannes (MTBF), préventif (OT ZPRV), correctif et inspections (avis ZO / ZI) récents, division.
+intervalle moyen entre pannes (MTBF), pannes du poste technique parent, niveau du poste technique, préventif (OT ZPRV), correctif et inspections (avis ZO / ZI) récents, division.
 
 **Modèles** (ré-entraînés chaque semaine sur tout l'historique) : M1 historique, M2 régression logistique,
 M3 Random Forest, M4 Gradient Boosting, M5 ensemble adaptatif.
 
 **Entraînement de cette semaine** : {n_tr} exemples
-({n_pos} semaines-équipement en panne) · plan généré le
+({n_pos} semaines-poste technique en panne) · plan généré le
 {pred['genere_le']} · registre : {cache['source']}{(' · ' + cache['msg']) if cache['msg'] else ''}.
 """)
