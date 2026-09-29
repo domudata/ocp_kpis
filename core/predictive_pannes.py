@@ -3,16 +3,20 @@
 Maintenance prédictive — probabilité de panne par équipement pour la
 semaine S, plan de contrôle (top N), et suivi de l'efficacité réelle.
 
-PANNE (définition validée) : un équipement est « en panne » une semaine
-s'il reçoit au moins :
-  · un avis ZC (avis correctif) qui n'est pas un simple travail annexe
-    (échafaudage, peinture, calorifugeage, étalonnage, test…), ou
-  · un OT ZCOR SANS avis correspondant à une vraie réparation
-    (changement, réparation, remise en état, étanchement de fuite,
-    soudure, révision, déblocage…).
+PANNE (définition validée) : un poste technique est « en panne » une semaine
+s'il reçoit un avis ZC ou un OT ZCOR sans avis décrivant un problème
+MÉCANIQUE, ÉLECTRIQUE ou d'INSTRUMENTATION : roulements, alignement,
+accouplement, courroies / transmission, machines tournantes, moteur et
+alimentation, capteurs, étalonnage, vannes, remise en état…
+Sont exclus : les fuites et travaux d'étanchéité, la chaudronnerie /
+tuyauterie / génie civil, le bouchage, et les travaux annexes
+(échafaudage, peinture, calorifugeage, nettoyage…).
 
-ÉQUIPEMENT : poste technique tronqué à 5 niveaux
-(SF01-PS-PS04-XXXX-YYYY) — les niveaux plus fins sont regroupés.
+POSTE TECHNIQUE EXACT : la prédiction est faite sur le poste technique tel
+qu'il est saisi dans SAP (4 à 7 niveaux, ex. SF01-PE-00LN-REACTI-0HB137-GMOT).
+Les niveaux trop hauts (division, atelier, zone : < 4 niveaux) sont exclus.
+Le poste technique parent (un niveau au-dessus) sert de variable : un moteur
+dont l'équipement porteur tombe souvent en panne est plus à risque.
 
 CALENDRIER :
   · le plan de la semaine S est calculé avec les données ANTÉRIEURES au
@@ -42,38 +46,108 @@ MODELES = {
 }
 TOP_N = 50
 LOOKBACK_MIN = 26          # semaines d'historique minimum avant la 1re semaine d'entraînement
-NIVEAU_EQUIPEMENT = 5
+NIVEAU_EQUIPEMENT = 5      # ancien mode (registres antérieurs)
+MODE_CLE = "pt_exact_meca_elec_instr"   # clé (poste technique exact) + définition de la panne
 
-_EXCLURE = re.compile(
-    r"[ée]chaf|peintur|sablage|calorif|[ée]talonn|\btest\b|nettoy|ouverture et fermeture|"
-    r"branchement|d[ée]branchement|pr[ée]paration|massif|confection|consignation|"
-    r"inventaire|formation|essai", re.I)
-_REPARATION = re.compile(
-    r"chang|remplac|r[ée]par|remise en [ée]tat|remettre en [ée]tat|[ée]tanch|fuite|soud|"
-    r"r[ée]vis|rebobin|d[ée]blo|d[ée]coin|cass|rupt|d[ée]bouch|bouch|colmat|d[ée]faut|panne|"
-    r"gripp|usure|us[ée]e?\b|fissur|perc[ée]|r[ée]fection|rafistol|vibr|[ée]chauff|d[ée]clench|"
-    r"arrach|d[ée]form|coinc|bloqu|brul|br[uû]l", re.I)
+# Classement des pannes par famille (méca / élec / instrumentation)
+_I = re.I
+# 1. Travaux annexes (jamais une panne)
+_ANNEXE = re.compile(
+    r"[ée]cha?f+au|peintur|sablage|calorif|nettoy|massif|confection|consignation|inventaire|formation|"
+    r"essai|\btest\b|ouverture et fermeture|branchement|pr[ée]paration|g[ée]nie civil|ma[çc]onn|b[ée]ton|"
+    r"am[ée]nagement|manutention|d[ée]placement|installation (?:d'?un )?nouve|achèvement|achevement", _I)
+# 2. Fuites / étanchéité (exclues à la demande)
+_FUITE = re.compile(r"fuite|fuit\b|[ée]tanch|\bjoints?\b|\bj\.?p\b|\bbrides?\b|garniture|presse.?[ée]toupe|"
+                   r"suintement|goutte", _I)
+# 2 bis. Chaudronnerie (soudure, tôle…) : exclue même sur une machine
+_CHAUDRON = re.compile(r"\bsoud|fissur|corros|\bt[ôo]le|perc[ée]|d[ée]coup|rechargement", _I)
+# 3. Hors périmètre méca / élec / instrumentation (chaudronnerie, tuyauterie, génie civil, process)
+_HORS = re.compile(
+    r"d[ée]bouch|bouch|colmat|obstru|encrass|\bsoud|fissur|corros|\bt[ôo]le|perc[ée]|chemis|blindage|"
+    r"charpente|caillebotis|garde.?corps|toiture|escalier|passerelle|bardage|chamotte|r[ée]fractaire|"
+    r"tuyaut|conduite|circuit|manchette|compensateur|flexible|filtre|grille|porte|trappe|[ée]clairage|"
+    r"climatis|sanitaire|plomberie|bac\b|cuve|tr[ée]mie|goulotte|virole|chambre", _I)
+_TAG = r"\b[PTFLAHZSDKWXU][ISTCVEYQAHLDZ]{1,4}\s?-?\d{3,5}[A-Z]?\b"
+_INSTR_RE = re.compile(
+    r"[ée]talonn|calibr|capteur|sonde|transmetteur|thermocouple|thermom|manom[èe]tre|pressostat|thermostat|"
+    r"d[ée]bitm|analyseur|ph.?m[èe]tre|conductivim|positionneur|fin de course|d[ée]tecteur|instrument|"
+    r"[ée]lectrovanne|servomoteur|r[ée]gulat|alarme|boucle|signal|4.?20|radar|jauge|contr[ôo]leur de|"
+    r"(?:indicateur|transmetteur|contr[ôo]le|mesure) de niveau|niveau radar|" + _TAG, _I)
+_VANNE = re.compile(r"vanne|robinet|clapet", _I)
+_MECA_ROT = re.compile(r"roulement|palier|vibr|balourd|alignement|align|accoupl|\barbre|clavette|\bjeu\b|bruit", _I)
+_MECA_TR = re.compile(r"courroie|cha[iî]ne|\bbande\b|rouleau|tambour|r[ée]ducteur|engrenage|poulie|pignon|godet|"
+                     r"[ée]l[ée]vateur|r[ée]dler|convoy|transmission|motor[ée]ducteur|moyeu|tendeur|racleur|galet", _I)
+_MECA_MT = re.compile(r"pompe|\bppe\b|ventilat|compresseur|agitat|broyeur|crible|turbine|soufflante|malaxeur|"
+                     r"doseur|dosom|\bvis\b|extracteur|surpresseur|impulseur|\broue\b|v[ée]rin|hydraul|lubrif|"
+                     r"frein|embrayage|ressort|\baxe\b|bague|came", _I)
+_ELEC_RE = re.compile(r"moteur|[ée]lectri|c[âa]ble|d[ée]clench|disjonct|variateur|contacteur|bobin|alimentation|"
+                  r"armoire|coffret|relais|fusible|court.?circuit|isolement|d[ée]marreur|onduleur|\bmt\b|\bbt\b", _I)
+_REPAR = re.compile(r"chang|remplac|r[ée]par|remise en [ée]tat|remettre en [ée]tat|r[ée]vis|rebobin|d[ée]blo|"
+                   r"d[ée]coin|cass|rupt|d[ée]faut|panne|gripp|usure|us[ée]e?\b|coinc|bloqu|arrach|d[ée]form|"
+                   r"r[ée]fection|contr[ôo]le|v[ée]rif|r[ée]glage|serrage|resserr|remontage|d[ée]montage|entretien", _I)
+_PT_ELEC = re.compile(r"-(GMOT|MOTEUR|MOT\w*|ELEC\w*|ARMOIR\w*)(-|$)", _I)
+_PT_MECA = re.compile(r"-(REDUCT\w*|ACCOUP\w*|PALIER\w*|TRANSM\w*|GENT)(-|$)", _I)
+_PT_INSTR = re.compile(r"-(CSUR|INSTR\w*|ACCINSTR)(-|$)|-[PTFLAHZSDKWXU][ISTCVEYQAHLDZ]{1,4}\d{3,5}[A-Z]?$", _I)
 
-# Familles de défaillance → contrôle recommandé (plan de contrôle)
-FAMILLES = [
-    ("Fuite / étanchéité", r"fuite|[ée]tanch|joint|bride|garniture|presse.?[ée]toupe",
-     "Contrôle d'étanchéité : joints, brides, garnitures, circuits"),
-    ("Roulements / vibrations", r"roulement|palier|vibr|balourd|jeu|alignement|accoupl",
-     "Analyse vibratoire et contrôle des paliers / roulements"),
-    ("Électrique / moteur", r"moteur|[ée]lectri|c[âa]ble|d[ée]clench|disjonct|variateur|contacteur|bobin",
-     "Thermographie et contrôle électrique (moteur, connexions)"),
-    ("Transmission / manutention", r"bande|courroie|cha[iî]ne|[ée]l[ée]vateur|godet|rouleau|tambour|r[ée]dler|convoy",
-     "Inspection transmission : bande, courroies, chaîne, rouleaux"),
-    ("Pompe", r"pompe|ppe\b|aspiration|refoulement|impulseur|turbine",
-     "Contrôle pompe : garniture, paliers, pression / débit"),
-    ("Structure / usure", r"soud|fissur|corros|perc|t[ôo]le|usure|us[ée]|bavette|chemise|blindage|charpente",
-     "Contrôle structure : épaisseur, corrosion, soudures, usure"),
-    ("Bouchage / colmatage", r"bouch|colmat|obstru|encrass|filtre|cyclone",
-     "Nettoyage / débouchage préventif et contrôle des filtres"),
-    ("Instrumentation", r"capteur|sonde|transmetteur|instrument|vanne|r[ée]gul|analyseur|d[ée]bitm",
-     "Contrôle instrumentation et vannes (réglage, fonctionnement)"),
-]
-_FAM_RE = [(n, re.compile(p, re.I), a) for n, p, a in FAMILLES]
+CONTROLES = {
+    "Instrumentation": "Étalonnage et contrôle fonctionnel : capteur, boucle, signal, vanne automatique",
+    "Roulements / alignement": "Analyse vibratoire, contrôle roulements, alignement et accouplement",
+    "Transmission": "Inspection transmission : courroies, chaîne, bande, rouleaux, réducteur",
+    "Machine tournante": "Contrôle machine tournante : paliers, jeu, lubrification, performance",
+    "Électrique / moteur": "Thermographie, mesure d'isolement et contrôle des connexions moteur",
+    "Vannes / robinetterie": "Contrôle manœuvre et étanchéité interne des vannes, clapets",
+}
+
+def classer_panne(texte, pt="", atelier=None):
+    """Famille de défaillance méca / élec / instrumentation, ou None (hors périmètre).
+    atelier « E » (électrique) ou « R » (régulation) : une remise en état générique
+    faite par cet atelier est classée électrique / instrumentation."""
+    t = str(texte or ""); p = str(pt or "")
+    if not t or t.lower() == "nan" or _ANNEXE.search(t) or _FUITE.search(t) or _CHAUDRON.search(t):
+        return None
+    if _MECA_ROT.search(t): return "Roulements / alignement"
+    if _MECA_TR.search(t): return "Transmission"
+    if _ELEC_RE.search(t): return "Électrique / moteur"
+    if _INSTR_RE.search(t): return "Instrumentation"
+    if _VANNE.search(t): return "Vannes / robinetterie"
+    if _MECA_MT.search(t): return "Machine tournante"
+    if _HORS.search(t): return None
+    if _REPAR.search(t):
+        if _PT_ELEC.search(p): return "Électrique / moteur"
+        if _PT_MECA.search(p): return "Transmission"
+        if _PT_INSTR.search(p): return "Instrumentation"
+        if atelier == "E": return "Électrique / moteur"
+        if atelier == "R": return "Instrumentation"
+    return None
+
+
+# Périmètres de prédiction (chacun a ses modèles, son plan et son registre)
+PERIMETRES = {
+    "meca": {"label": "Mécanique (SF1-M, SF2-M)", "court": "Mécanique", "fichier": "Meca",
+             "prefixes": ("SF1-M", "SF2-M"),
+             "registre": "predictif/registre_predictions_meca.json"},
+    "elec_regul": {"label": "Électrique & Régulation (SF1-E, SF1-R, SF2-E, SF2-R)",
+                   "court": "Électrique & Régulation", "fichier": "Elec_Regul",
+                   "prefixes": ("SF1-E", "SF1-R", "SF2-E", "SF2-R"),
+                   "registre": "predictif/registre_predictions_elec_regul.json"},
+    # ancien périmètre global (tous ateliers) — conservé, non affiché
+    "general": {"label": "Toute la maintenance", "court": "", "fichier": "", "prefixes": None,
+                "registre": "predictif/registre_predictions.json", "masque": True},
+}
+
+
+def _atelier(poste):
+    """« E » ou « R » pour SF1-EPP1, SF2-RMCP… sinon None."""
+    s = str(poste or "").strip().upper()
+    return s[4] if len(s) > 4 and s[:4] in ("SF1-", "SF2-") and s[4] in "ER" else None
+
+
+def filtrer_perimetre(df, perimetre):
+    """Ne garde que les lignes dont le poste de travail commence par un préfixe du périmètre."""
+    pref = PERIMETRES.get(perimetre, {}).get("prefixes")
+    if df is None or df.empty or not pref or "Poste travail princ." not in df.columns:
+        return df
+    return df[df["Poste travail princ."].astype(str).str.strip().str.upper().str.startswith(pref)]
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -89,7 +163,19 @@ def cle_equipement(pt):
     seg = s.split("-")
     if len(seg) < NIVEAU_MIN:
         return None
-    return "-".join(seg[:NIVEAU_EQUIPEMENT])
+    return s
+
+
+def cle_ancienne(pt):
+    """Clé de l'ancien mode (poste technique tronqué à 5 niveaux)."""
+    s = str(pt).strip()
+    return "-".join(s.split("-")[:NIVEAU_EQUIPEMENT])
+
+
+def cle_parent(e):
+    """Poste technique parent (un niveau au-dessus, jamais au-dessus du niveau 4)."""
+    seg = str(e).split("-")
+    return "-".join(seg[:max(NIVEAU_MIN, len(seg) - 1)])
 
 
 def lundi(ts):
@@ -97,14 +183,26 @@ def lundi(ts):
     return ts - pd.Timedelta(days=ts.weekday())
 
 
-def extraire_pannes(df_ot, avis):
-    """Événements de panne : colonnes [equip, date, source, texte, poste_travail]."""
+def extraire_pannes(df_ot, avis, avec_atelier=False):
+    """Pannes méca / élec / instrumentation : [famille, equip, date, source, texte, poste_travail].
+    avec_atelier (périmètre Électrique & Régulation) : tous les OT ZCOR de l'atelier comptent,
+    avec ou sans avis (l'avis est souvent saisi par un autre atelier) ; les avis ZC déjà
+    rattachés à un de ces OT ne sont pas comptés deux fois."""
     out = []
+    deja = set()
+    if avec_atelier and df_ot is not None and not df_ot.empty and "Avis" in df_ot.columns:
+        z = df_ot[df_ot["Type d'ordre"].astype(str).str.strip() == "ZCOR"]
+        deja = set(z["Avis"].dropna().astype("int64").astype(str)) if len(z) else set()
     if avis is not None and not avis.empty and "Type d'avis" in avis.columns:
         a = avis[avis["Type d'avis"].astype(str).str.strip().str.upper() == "ZC"].copy()
+        if deja and "Avis" in a.columns:
+            a = a[~a["Avis"].astype(str).str.replace(r"\.0$", "", regex=True).isin(deja)]
         txt = a.get("Description", pd.Series("", index=a.index)).fillna("").astype(str)
-        a = a[~txt.str.contains(_EXCLURE)]
+        pt_a = a.get("Poste travail princ.", pd.Series("", index=a.index))
+        a["famille"] = [classer_panne(t, p, _atelier(w) if avec_atelier else None) for t, p, w in zip(txt, a["Poste technique"], pt_a)]
+        a = a[a["famille"].notna()]
         out.append(pd.DataFrame({
+            "famille": a["famille"],
             "equip": a["Poste technique"].map(cle_equipement),
             "date": pd.to_datetime(a["Créé le"], errors="coerce"),
             "source": "Avis ZC",
@@ -112,10 +210,14 @@ def extraire_pannes(df_ot, avis):
             "poste_travail": a.get("Poste travail princ.", pd.Series("", index=a.index)),
         }))
     if df_ot is not None and not df_ot.empty and "Type d'ordre" in df_ot.columns:
-        o = df_ot[(df_ot["Type d'ordre"].astype(str).str.strip() == "ZCOR") & df_ot["Avis"].isna()].copy()
+        zcor = df_ot["Type d'ordre"].astype(str).str.strip() == "ZCOR"
+        o = df_ot[zcor if avec_atelier else (zcor & df_ot["Avis"].isna())].copy()
         txt = o.get("Désignation", pd.Series("", index=o.index)).fillna("").astype(str)
-        o = o[txt.str.contains(_REPARATION) & ~txt.str.contains(_EXCLURE)]
+        pt_o = o.get("Poste travail princ.", pd.Series("", index=o.index))
+        o["famille"] = [classer_panne(t, p, _atelier(w) if avec_atelier else None) for t, p, w in zip(txt, o["Poste technique"], pt_o)]
+        o = o[o["famille"].notna()]
         out.append(pd.DataFrame({
+            "famille": o["famille"],
             "equip": o["Poste technique"].map(cle_equipement),
             "date": pd.to_datetime(o["Créé le"], errors="coerce"),
             "source": "OT ZCOR",
@@ -123,23 +225,23 @@ def extraire_pannes(df_ot, avis):
             "poste_travail": o.get("Poste travail princ.", pd.Series("", index=o.index)),
         }))
     if not out:
-        return pd.DataFrame(columns=["equip", "date", "source", "texte", "poste_travail"])
+        return pd.DataFrame(columns=["famille", "equip", "date", "source", "texte", "poste_travail"])
     ev = pd.concat(out, ignore_index=True).dropna(subset=["equip", "date"])
     return ev
 
 
-def _activite(df_ot, avis):
-    """Événements d'activité (préventif, correctif total, avis ZO/ZI)."""
+def _activite(df_ot, avis, prev_types=("ZPRV",), insp_types=("ZO", "ZI")):
+    """Événements d'activité (préventif, correctif total, avis d'inspection)."""
     parts = []
     if df_ot is not None and not df_ot.empty:
         o = df_ot[["Poste technique", "Type d'ordre", "Créé le"]].copy()
         o["equip"] = o["Poste technique"].map(cle_equipement)
         o["date"] = pd.to_datetime(o["Créé le"], errors="coerce")
-        o["kind"] = np.where(o["Type d'ordre"].astype(str).str.strip() == "ZPRV", "prev",
+        o["kind"] = np.where(o["Type d'ordre"].astype(str).str.strip().isin(prev_types), "prev",
                              np.where(o["Type d'ordre"].astype(str).str.strip() == "ZCOR", "cor", None))
         parts.append(o.dropna(subset=["equip", "date", "kind"])[["equip", "date", "kind"]])
     if avis is not None and not avis.empty:
-        a = avis[avis["Type d'avis"].astype(str).str.strip().str.upper().isin(["ZO", "ZI"])].copy()
+        a = avis[avis["Type d'avis"].astype(str).str.strip().str.upper().isin(list(insp_types))].copy()
         a["equip"] = a["Poste technique"].map(cle_equipement)
         a["date"] = pd.to_datetime(a["Créé le"], errors="coerce")
         a["kind"] = "insp"
@@ -175,9 +277,14 @@ def infos_equipements(df_ot, avis, ev):
 class Donnees:
     """Prépare une fois les matrices équipement × semaine."""
 
-    def __init__(self, df_ot, avis):
-        self.ev = extraire_pannes(df_ot, avis)
-        act = _activite(df_ot, avis)
+    def __init__(self, df_ot, avis, perimetre="general"):
+        self.perimetre = perimetre
+        if PERIMETRES.get(perimetre, {}).get("prefixes"):
+            df_ot, avis = filtrer_perimetre(df_ot, perimetre), filtrer_perimetre(avis, perimetre)
+            act = _activite(df_ot, avis, prev_types=("ZPRV", "ZREV"), insp_types=("ZO", "ZI", "ZP", "ZR"))
+        else:
+            act = _activite(df_ot, avis)
+        self.ev = extraire_pannes(df_ot, avis, avec_atelier=bool(PERIMETRES.get(perimetre, {}).get("prefixes")))
         dates = pd.concat([self.ev["date"], act["date"]]).dropna()
         self.origine = lundi(dates.min()) if len(dates) else lundi(pd.Timestamp.today())
         self.equips = sorted(set(self.ev["equip"]) | set(act["equip"]))
@@ -191,6 +298,11 @@ class Donnees:
         for kind in ("prev", "cor", "insp"):
             self._fill(getattr(self, kind), act[act["kind"] == kind])
         self.panne_bin = (self.panne > 0).astype(np.int8)
+        parents = [cle_parent(e) for e in self.equips]
+        p_idx = {p: i for i, p in enumerate(sorted(set(parents)))}
+        self.parent_idx = np.array([p_idx[p] for p in parents], dtype=int)
+        self.n_parents = len(p_idx)
+        self.niveau = np.array([str(e).count("-") + 1 for e in self.equips])
         self.info = infos_equipements(df_ot, avis, self.ev)
 
     def semaine(self, ts):
@@ -227,6 +339,10 @@ class Donnees:
             M = getattr(self, kind)[:, :W]
             f[f"{lab}_4s"] = cs(M, 4)
             f[f"{lab}_13s"] = cs(M, 13)
+        for k in (13, 52):   # pannes du poste technique parent (et de ses sous-postes)
+            par = np.bincount(self.parent_idx, weights=f[f"pannes_{k}s"], minlength=self.n_parents)
+            f[f"parent_pannes_{k}s"] = par[self.parent_idx] - f[f"pannes_{k}s"]
+        f["niveau_pt"] = self.niveau
         f["sf02"] = np.array([1 if str(e).startswith("SF02") else 0 for e in self.equips])
         X = pd.DataFrame(f, index=self.equips)
         univers = (cs(P, 52) > 0) | (cs(self.cor[:, :W], 13) > 0) | (cs(self.insp[:, :W], 13) > 0)
@@ -385,28 +501,36 @@ def semaine_label(ts):
 # ═══════════════════════════════════════════════════════════════════════════
 # 5. Plan de contrôle
 # ═══════════════════════════════════════════════════════════════════════════
-def famille_et_controle(textes):
-    comptes = {}
-    for t in textes:
-        for nom, rx, action in _FAM_RE:
-            if rx.search(str(t)):
-                comptes[nom] = comptes.get(nom, 0) + 1
-    if not comptes:
-        return "Non classé", "Inspection visuelle générale de l'équipement", ""
-    top = sorted(comptes.items(), key=lambda x: -x[1])
-    nom = top[0][0]
-    action = next(a for n, _, a in _FAM_RE if n == nom)
-    motif = ", ".join(f"{n.lower()} ({c})" for n, c in top[:2])
-    return nom, action, motif
+def famille_et_controle(familles):
+    """Défaillance dominante sur 52 semaines → contrôle recommandé."""
+    comptes = pd.Series([f for f in familles if f], dtype=object).value_counts()
+    if comptes.empty:
+        return "Non classé", "Inspection mécanique, électrique et instrumentation de l'équipement", ""
+    nom = comptes.index[0]
+    motif = ", ".join(f"{n.lower()} ({c})" for n, c in comptes.head(2).items())
+    return nom, CONTROLES.get(nom, ""), motif
 
 
-def plan_controle(D, scores_m5, W, postes=None, top_n=TOP_N):
-    """Top N équipements de la semaine W avec contrôle recommandé."""
+def familles_dominantes(D, W):
+    """Défaillance dominante (52 semaines avant W) de chaque poste technique."""
+    debut = D.date_semaine(W)
+    ev = D.ev[(D.ev["date"] < debut) & (D.ev["date"] >= debut - pd.Timedelta(weeks=52))]
+    if ev.empty:
+        return pd.Series(dtype=object)
+    return ev.groupby("equip")["famille"].agg(lambda x: x.value_counts().index[0])
+
+
+def plan_controle(D, scores_m5, W, postes=None, top_n=TOP_N, familles=None):
+    """Top N postes techniques de la semaine W avec contrôle recommandé.
+    familles : restreint le plan aux défaillances dominantes choisies."""
     s = pd.Series(scores_m5)
     info = D.info
     if postes is not None:
         ok = [e for e in s.index if str(info["poste_travail"].get(e, "")) in set(postes)]
         s = s.reindex(ok)
+    if familles:
+        dom = familles_dominantes(D, W)
+        s = s.reindex([e for e in s.index if dom.get(e) in set(familles)])
     s = s.dropna().sort_values(ascending=False).head(top_n)
     X, _ = D.features(W)
     debut = D.date_semaine(W)
@@ -414,11 +538,11 @@ def plan_controle(D, scores_m5, W, postes=None, top_n=TOP_N):
     lignes = []
     for rang, (e, p) in enumerate(s.items(), 1):
         hist = ev[ev["equip"] == e]
-        fam, action, motif = famille_et_controle(hist["texte"].tolist())
+        fam, action, motif = famille_et_controle(hist["famille"].tolist())
         derniere = hist["date"].max()
         niveau = "Très élevé" if p >= 0.5 else ("Élevé" if p >= 0.3 else ("Moyen" if p >= 0.15 else "Modéré"))
         lignes.append({
-            "Rang": rang, "Équipement": e,
+            "Rang": rang, "Poste technique": e,
             "Désignation": str(info["designation"].get(e, "") or ""),
             "Poste de travail": str(info["poste_travail"].get(e, "") or ""),
             "Probabilité de panne": round(float(p) * 100, 1), "Risque": niveau,
@@ -438,8 +562,13 @@ import json, os
 CHEMIN_REGISTRE = "predictif/registre_predictions.json"
 
 
-def charger_registre():
+def _chemin(perimetre):
+    return PERIMETRES.get(perimetre, PERIMETRES["general"])["registre"]
+
+
+def charger_registre(perimetre="general"):
     """GitHub si configuré (source de vérité), sinon fichier local."""
+    CHEMIN_REGISTRE = _chemin(perimetre)
     try:
         from core.github_publish import download_file, is_configured
         if is_configured():
@@ -457,7 +586,8 @@ def charger_registre():
     return {"version": 1, "predictions": {}, "evaluations": {}, "retro_test": []}, "nouveau"
 
 
-def sauver_registre(reg):
+def sauver_registre(reg, perimetre="general"):
+    CHEMIN_REGISTRE = _chemin(perimetre)
     data = json.dumps(reg, ensure_ascii=False, indent=1, default=float).encode("utf-8")
     msg = []
     try:
@@ -470,7 +600,7 @@ def sauver_registre(reg):
     try:
         from core.github_publish import upload_file, is_configured
         if is_configured():
-            ok, m = upload_file(CHEMIN_REGISTRE, data, "Registre maintenance prédictive")
+            ok, m = upload_file(CHEMIN_REGISTRE, data, f"Registre maintenance prédictive ({perimetre})")
             msg.append("GitHub OK" if ok else f"GitHub : {m}")
     except Exception as e:
         msg.append(f"GitHub : {e}")
@@ -483,7 +613,7 @@ def _evals_chrono(reg):
     return retro + live
 
 
-def executer_cycle(df_ot, avis, aujourd_hui, date_extraction, reg, n_retro=12):
+def executer_cycle(df_ot, avis, aujourd_hui, date_extraction, reg, n_retro=12, perimetre="general"):
     """
     Cycle complet, idempotent :
       1. plan de la semaine S (semaine d'aujourd'hui) : calculé une seule
@@ -493,7 +623,7 @@ def executer_cycle(df_ot, avis, aujourd_hui, date_extraction, reg, n_retro=12):
       3. rétro-test des dernières semaines (une fois par extraction).
     Retourne (resultat, registre_modifie).
     """
-    D = Donnees(df_ot, avis)
+    D = Donnees(df_ot, avis, perimetre)
     aujourd_hui = pd.Timestamp(aujourd_hui).normalize()
     date_extraction = pd.Timestamp(date_extraction).normalize()
     lundi_S = lundi(aujourd_hui)
@@ -502,20 +632,28 @@ def executer_cycle(df_ot, avis, aujourd_hui, date_extraction, reg, n_retro=12):
     modifie = False
 
     # 3. rétro-test (avant tout : il alimente les poids de M5)
-    if reg.get("retro_extraction") != str(date_extraction.date()) or not reg.get("retro_test"):
-        W_fin = min(W_S, D.semaine(date_extraction))   # semaines complètes seulement
+    if (reg.get("retro_extraction") != str(date_extraction.date()) or not reg.get("retro_test")
+            or reg.get("retro_mode") != MODE_CLE):
+        # semaines complètes seulement (une extraction du dimanche couvre sa semaine)
+        W_fin = min(W_S, D.semaine(date_extraction + pd.Timedelta(days=1)))
         reg["retro_test"] = retro_test(D, W_fin, n_semaines=n_retro)
         reg["retro_extraction"] = str(date_extraction.date())
+        reg["retro_mode"] = MODE_CLE
         modifie = True
 
-    # 1. plan de la semaine S, figé
-    if cle_S not in reg["predictions"]:
+    # 1. plan de la semaine S, figé (recalculé une seule fois s'il avait été
+    #    fait avec l'ancien mode « équipement 5 niveaux » et n'est pas évalué)
+    ancien = reg["predictions"].get(cle_S)
+    a_refaire = ancien is not None and ancien.get("mode_cle") != MODE_CLE and cle_S not in reg["evaluations"]
+    if ancien is None or a_refaire:
         poids = poids_depuis_historique(_evals_chrono(reg))
         scores, info = entrainer_et_predire(D, W_S, poids)
         reg["predictions"][cle_S] = {
             "debut": str(lundi_S.date()),
             "genere_le": str(pd.Timestamp.now().round("s")),
             "donnees_jusqu_au": str(date_extraction.date()),
+            "mode_cle": MODE_CLE,
+            "recalcule": bool(a_refaire),
             "poids_M5": {m: round(v, 3) for m, v in poids.items()},
             "pannes_prevues": round(float(scores["M5"].sum()), 1),
             "univers": int(len(scores["M5"])),
@@ -535,6 +673,8 @@ def executer_cycle(df_ot, avis, aujourd_hui, date_extraction, reg, n_retro=12):
         if aujourd_hui >= debut + pd.Timedelta(days=7) and date_extraction >= fin:
             W = D.semaine(debut)
             reel = pannes_semaine(D, W)
+            if pred.get("mode_cle") is None:          # plan de l'ancien mode (5 niveaux)
+                reel = {cle_ancienne(e) for e in reel}
             reg["evaluations"][cle] = {
                 "semaine": cle, "debut": pred["debut"], "type": "réel",
                 "modeles": evaluer(pred["scores"], reel),
@@ -542,5 +682,89 @@ def executer_cycle(df_ot, avis, aujourd_hui, date_extraction, reg, n_retro=12):
             }
             modifie = True
 
+    # 4. journal d'efficacité : enregistré au début de la semaine S
+    if enregistrer_efficacite(reg, cle_S, lundi_S):
+        modifie = True
+
     return {"D": D, "W_S": W_S, "cle_S": cle_S, "lundi_S": lundi_S,
             "evolution": _evals_chrono(reg)}, modifie
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# 7. Journal d'efficacité (un enregistrement par semaine S) et tendance
+# ═══════════════════════════════════════════════════════════════════════════
+def _moyenne(vals):
+    vals = [v for v in vals if v is not None]
+    return round(float(np.mean(vals)), 4) if vals else None
+
+
+def enregistrer_efficacite(reg, cle_S, lundi_S):
+    """
+    Au début de la semaine S, fige l'efficacité de la prédictive :
+    résultat réel de S-1 s'il est disponible, sinon la dernière semaine
+    évaluée (enregistrement « provisoire », complété dès que S-1 est
+    évaluée). Un enregistrement complet n'est plus jamais modifié.
+    Retourne True si le journal a changé.
+    """
+    journal = reg.setdefault("journal_efficacite", {})
+    ent = journal.get(cle_S)
+    if ent is not None and ent.get("statut") == "complet":
+        return False
+    cle_prec = semaine_label(pd.Timestamp(lundi_S) - pd.Timedelta(days=7))
+    evol = _evals_chrono(reg)
+    ev_prec = reg.get("evaluations", {}).get(cle_prec)
+    if ev_prec is not None:
+        base, statut = ev_prec, "complet"
+    elif not evol:
+        return False
+    else:
+        base = evol[-1]
+        # S-1 n'avait pas de plan publié : le rétro-test est définitif
+        statut = "provisoire" if cle_prec in reg.get("predictions", {}) else "complet"
+        if ent is not None and ent.get("semaine_evaluee") == base["semaine"]:
+            return False
+    jusqua = [e for e in evol if e["debut"] <= base["debut"]]
+    m5 = base["modeles"]["M5"]
+    precedents = [journal[k] for k in sorted(journal) if k < cle_S]
+    prec_ant = precedents[-1]["precision"] if precedents else None
+    premier = precedents[0]["precision"] if precedents else None
+    journal[cle_S] = {
+        "semaine": cle_S,
+        "debut": str(pd.Timestamp(lundi_S).date()),
+        "enregistre_le": str(pd.Timestamp.now().round("s")),
+        "statut": statut,
+        "semaine_evaluee": base["semaine"],
+        "source": base.get("type", "réel"),
+        "precision": m5["precision"], "detection": m5["detection"],
+        "detectees": m5.get("detectees"), "pannes_reelles": m5.get("pannes_reelles"),
+        "precision_moy4": _moyenne([e["modeles"]["M5"]["precision"] for e in jusqua[-4:]]),
+        "detection_moy4": _moyenne([e["modeles"]["M5"]["detection"] for e in jusqua[-4:]]),
+        "delta_vs_prec": (round(m5["precision"] - prec_ant, 4) if prec_ant is not None else None),
+        "delta_vs_debut": (round(m5["precision"] - premier, 4) if premier is not None else None),
+        "modeles": {m: {"precision": v["precision"], "detection": v["detection"]}
+                    for m, v in base["modeles"].items()},
+    }
+    return True
+
+
+def tendance(valeurs, n_bloc=4):
+    """
+    valeurs : série chronologique en %.
+    Retourne pente (points / semaine, régression linéaire), droite
+    ajustée, écart moyen « récent vs début » en points et en % relatif.
+    """
+    v = [float(x) for x in valeurs if x is not None]
+    if len(v) < 2:
+        return None
+    x = np.arange(len(v))
+    pente, ordo = np.polyfit(x, v, 1)
+    k = max(1, min(n_bloc, len(v) // 2))
+    debut, recent = float(np.mean(v[:k])), float(np.mean(v[-k:]))
+    return {
+        "pente": float(pente),
+        "droite": [float(ordo + pente * i) for i in x],
+        "debut": debut, "recent": recent, "n_bloc": k,
+        "gain_pts": recent - debut,
+        "gain_rel": ((recent - debut) / debut * 100) if debut else None,
+        "sens": "amélioration" if pente > 0.25 else ("dégradation" if pente < -0.25 else "stable"),
+    }
