@@ -41,6 +41,12 @@ DICT_STATUTS_AVIS = {
     "TAMO": "TRAITEMENT COMPLÉMENTAIRE", "MARC": "MARQUÉ POUR SUPPRESSION",
 }
 
+# Mots-clés, insensibles à la casse et aux accents usuels :
+#   thermographie / THERMOGRAPHIE / Termographie / TERMOGRAPHIE…
+MOTIF_THERMO = r"th?ermo\s*-?\s*graph"
+#   fuite / fuites / fuit / FUITE… et étanchement / Etanchement / ètanchement / ÉTANCHEMENT…
+MOTIF_FUITE = r"\bfuit|[eéèêëÉÈÊË]tanchement"
+
 NATURES_FUITES_PATTERNS = [
     ("PRODUIT CHIMIQUE", r"\bproduits?\s+chimiques?\b|\bchimiques?\b"),
     ("AMMONIAQUE", r"\b(ammoniaque|ammoniac|nh3)\b"),
@@ -212,12 +218,15 @@ def _pie(donnees, titre, palette=None, seuil=7):
     return buf
 
 
-def _bar(pivot, titre, palette=None, xlabel="Nombre", max_postes=12):
+def _bar(pivot, titre, palette=None, xlabel="Nombre", max_postes=None):
     if pivot is None or pivot.empty:
         return None
     totaux = pivot.sum(axis=1).sort_values()
+    totaux = totaux[totaux > 0]          # tous les postes qui ont des valeurs
+    if totaux.empty:
+        return None
     n_total = len(totaux)
-    if n_total > max_postes:
+    if max_postes and n_total > max_postes:
         totaux = totaux.tail(max_postes)
         titre = f"{titre} (top {max_postes} sur {n_total})"
     pivot = pivot.loc[totaux.index]
@@ -256,12 +265,15 @@ def _bar(pivot, titre, palette=None, xlabel="Nombre", max_postes=12):
     return buf
 
 
-def _bar_statuts_avec_pct(pivot, titre, palette=None, xlabel="Nombre d'avis", max_postes=25):
+def _bar_statuts_avec_pct(pivot, titre, palette=None, xlabel="Nombre d'avis", max_postes=None):
     if pivot is None or pivot.empty:
         return None
     totaux = pivot.sum(axis=1).sort_values()
+    totaux = totaux[totaux > 0]
+    if totaux.empty:
+        return None
     n_total = len(totaux)
-    if n_total > max_postes:
+    if max_postes and n_total > max_postes:
         totaux = totaux.tail(max_postes)
         titre = f"{titre} (top {max_postes} sur {n_total})"
     pivot = pivot.loc[totaux.index]
@@ -304,12 +316,15 @@ def _bar_statuts_avec_pct(pivot, titre, palette=None, xlabel="Nombre d'avis", ma
     return buf
 
 
-def _bar_fuites_par_type(pivot, titre="Ventilation des avis fuites par type (Clôturé / En cours / %)", palette=None, max_types=18):
+def _bar_fuites_par_type(pivot, titre="Ventilation des avis fuites par type (Clôturé / En cours / %)", palette=None, max_types=None):
     if pivot is None or pivot.empty:
         return None
     totaux = pivot.sum(axis=1).sort_values()
+    totaux = totaux[totaux > 0]
+    if totaux.empty:
+        return None
     n_total = len(totaux)
-    if n_total > max_types:
+    if max_types and n_total > max_types:
         totaux = totaux.tail(max_types)
         titre = f"{titre} (top {max_types} sur {n_total})"
     pivot = pivot.loc[totaux.index]
@@ -379,7 +394,7 @@ def _calculer_sections_hse(_dfp, _avf, vp_tuple, date_str, sel_annee, sel_mois, 
         avis_gen["_Approbation"] = _approbation(avis_gen)
 
     ot_securite = ot_gen[ot_gen["_tw"] == TYPE_TRAVAIL_SECURITE]
-    masque_therm = desig.str.contains("thermograph", case=False, na=False)
+    masque_therm = desig.str.contains(MOTIF_THERMO, case=False, na=False, regex=True)
     masque_vib = desig.str.contains("vibration|vibratoire", case=False, na=False)
     ot_oms_therm = ot_gen[masque_therm]
     ot_oms_vib = ot_gen[masque_vib & ~masque_therm]
@@ -401,7 +416,7 @@ def _calculer_sections_hse(_dfp, _avf, vp_tuple, date_str, sel_annee, sel_mois, 
     if not avis_fuites_source.empty:
         if col_d_av and col_d_av in avis_fuites_source.columns:
             desig_av = avis_fuites_source[col_d_av].fillna("").astype(str)
-            masque_fuite = desig_av.str.contains(r"\bfuites?\b", case=False, na=False, regex=True)
+            masque_fuite = desig_av.str.contains(MOTIF_FUITE, case=False, na=False, regex=True)
             avis_fuites_source["_EstFuite"] = masque_fuite
             avis_fuites_source["_NatureFuite"] = "FUITE NON DÉFINIE"
             if masque_fuite.any():
@@ -450,7 +465,7 @@ def _calculer_sections_hse(_dfp, _avf, vp_tuple, date_str, sel_annee, sel_mois, 
 
         if "_Atelier" in df_fuites.columns:
             piv_fuites = df_fuites.groupby("_Atelier").size().to_frame(name="Avis Fuites")
-            b2 = _bar(piv_fuites, "Nombre d'avis fuites par Atelier", {"Avis Fuites": "#D97706"}, xlabel="Nombre d'avis fuites", max_postes=25)
+            b2 = _bar(piv_fuites, "Nombre d'avis fuites par Atelier", {"Avis Fuites": "#D97706"}, xlabel="Nombre d'avis fuites")
             if b2:
                 buffers["bar_fuites_atelier"] = b2
 
@@ -462,7 +477,7 @@ def _calculer_sections_hse(_dfp, _avf, vp_tuple, date_str, sel_annee, sel_mois, 
 
         if "_Atelier" in df_fuites.columns:
             piv_statuts_at = pd.crosstab(df_fuites["_Atelier"], df_fuites["_StatutCat"])
-            b4 = _bar_statuts_avec_pct(piv_statuts_at, "Statuts des avis fuites par Atelier (avec % en cours)", PALETTE_STATUT_UNIFIE, xlabel="Nombre d'avis fuites", max_postes=25)
+            b4 = _bar_statuts_avec_pct(piv_statuts_at, "Statuts des avis fuites par Atelier (avec % en cours)", PALETTE_STATUT_UNIFIE, xlabel="Nombre d'avis fuites")
             if b4:
                 buffers["bar_statuts_fuites_atelier"] = b4
 
