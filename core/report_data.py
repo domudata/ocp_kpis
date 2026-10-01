@@ -365,7 +365,7 @@ def synthese_perimetre(ckdf, pscores, qscores, ano_map, postes):
     Retourne {"mode_division", "postes", "kpi_perf", "kpi_qual", "pscore",
     "qscore", "anomalies", "total_anomalies", "plan_action"}.
     """
-    from core.constants import ACT_MAP, KPI_RESP_MAP
+    from core.constants import ACT_MAP, KPI_RESP_MAP, AGE_KPI, kpi_conforme
     postes = [p for p in postes if ckdf is not None and p in ckdf.index]
     mode_division = len(postes) > 1
     kpi_perf, kpi_qual = {}, {}
@@ -401,10 +401,18 @@ def synthese_perimetre(ckdf, pscores, qscores, ano_map, postes):
     plan = []
     for k in list(QK) + list(PK):
         nb = anomalies.get(k, 0)
-        if nb <= 0:
-            continue
         cible = CIBLE.get(k, 100)
         actual = kpi_perf.get(k, kpi_qual.get(k, 0)) or 0
+        if k in AGE_KPI:
+            # pas d'action sur un KPI d'âge conforme (postes non conformes seulement)
+            serie = (ano_map or {}).get(k)
+            if mode_division:
+                nb = sum(int((serie.get(p, 0) if serie is not None else 0) or 0) for p in postes
+                         if not kpi_conforme(k, ckdf.loc[p].get(k)))
+            elif kpi_conforme(k, actual):
+                nb = 0
+        if nb <= 0:
+            continue
         if mode_division:
             ecart = actual - 100
         else:
