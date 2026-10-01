@@ -177,15 +177,18 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     la["OT LANC ESTIME"] = ckpi(la["OUI"], la["Total"])
 
     # ── Backlog préparation caractérisé — spec §3 ──
-    # Périmètre : ZCOR + Statut système == CRÉÉ + Date planifiée ≤ NOW_TS.
+    # Périmètre : TOUS types d'ordre + Statut système == CRÉÉ + Date planifiée ≤ NOW_TS.
     # Population SÉPARÉE de celle utilisée pour les KPI d'âge (voir ci-dessous).
     _zcor_all = df_all[df_all["Type d'ordre"] == "ZCOR"].copy()
     _cree_base = _zcor_all[
         _zcor_all["Statut système"].fillna("").astype(str).str.strip().str.split().str[0].isin(["CRÉÉ", "CREE"])
     ]
     # _zcor_cree_backlog : filtre date planifiée ≤ NOW_TS — dénominateur du Backlog carac.
-    _zcor_cree_backlog = _cree_base[
-        _cree_base["Date de début planifiée"] <= now_ts
+    # Backlog caractérisé : TOUS les types d'ordre (les KPI d'âge restent ZCOR)
+    _premier_all = df_all["Statut système"].fillna("").astype(str).str.strip().str.split().str[0]
+    _cree_tous = df_all[_premier_all.isin(["CRÉÉ", "CREE"])]
+    _zcor_cree_backlog = _cree_tous[
+        _cree_tous["Date de début planifiée"] <= now_ts
     ].copy()
     # _zcor_cree_age : SANS filtre date planifiée — population pour les KPI d'âge.
     # (L'âge "ap" est calculé depuis "Créé le", pas depuis "Date planifiée".
@@ -207,15 +210,16 @@ def calc_kpis(df_i: pd.DataFrame, av_i: pd.DataFrame, now_ts, posts: list,
     pc["Backlog préparation caractérisé"] = ckpi(pc["CARACTERISE"], pc["Total"])
 
     # ── Backlog planification caractérisé — spec §4 ──
-    # Périmètre : ZCOR + LANC + SOPL==0 + Date planifiée ≤ NOW_TS.
+    # Périmètre : TOUS types d'ordre + LANC + SOPL==0 + Date planifiée ≤ NOW_TS.
     # Population SÉPARÉE de celle des KPI d'âge planification.
     _lanc_base = _zcor_all[
         (_zcor_all["Statut système"].fillna("").astype(str).str.strip().str.split().str[0] == "LANC")
         & (_zcor_all["Contient SOPL"] == 0)
     ]
     # _zcor_lanc_backlog : filtre date planifiée ≤ NOW_TS — dénominateur du Backlog carac.
-    _zcor_lanc_backlog = _lanc_base[
-        _lanc_base["Date de début planifiée"] <= now_ts
+    _lanc_tous = df_all[(_premier_all == "LANC") & (df_all["Contient SOPL"] == 0)]
+    _zcor_lanc_backlog = _lanc_tous[
+        _lanc_tous["Date de début planifiée"] <= now_ts
     ].copy()
     # _zcor_lanc_age : population pour les KPI d'âge planification (ZCOR + LANC + SOPL==0)
     # sans filtre date planifiée (comme pour la préparation), afin que les OT planifiés
