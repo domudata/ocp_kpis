@@ -128,3 +128,31 @@ ALL_CARAC_EXACT = CODES_PREP_EXACT | CODES_PLAN_EXACT
 
 CONSIGNES_HSE = ["Port obligatoire des EPI avant toute intervention."]
 
+
+
+# ──────────────────────────────────────────────
+# Plan d'action : pas d'action sur un KPI d'âge déjà conforme à sa cible
+# (ex. « OT planification <1 mois » = 80 % pour une cible de 80 %).
+# ──────────────────────────────────────────────
+AGE_KPI = [k for k in QK if "mois" in k]
+
+
+def kpi_conforme(kpi, valeur):
+    """Valeur conforme à la cible (sans tolérance) ; None si inconnue."""
+    try:
+        v = float(valeur)
+    except (TypeError, ValueError):
+        return None
+    if v != v:
+        return None
+    cible = CIBLE.get(kpi, 100)
+    return v <= cible if kpi in LOWER_BETTER else v >= cible
+
+
+def action_requise(kpi, valeur, nb_anom):
+    """True si le KPI doit figurer au plan d'action."""
+    if not nb_anom or nb_anom <= 0:
+        return False
+    if kpi in AGE_KPI and kpi_conforme(kpi, valeur):
+        return False
+    return True
