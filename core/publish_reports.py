@@ -51,7 +51,7 @@ from core.generate_report_pdf import build_poste_report_pdf
 from core.anomalies import build_anomaly_dfs
 from core.export_anomalies import build_anomalies_workbook
 from core.github_publish import upload_file, is_configured
-from core.constants import QK, PK, CIBLE, ACT_MAP, KPI_RESP_MAP
+from core.constants import QK, PK, CIBLE, ACT_MAP, KPI_RESP_MAP, AGE_KPI, kpi_conforme, action_requise
 from core import report_data as _rd
 
 
@@ -125,9 +125,9 @@ def generate_and_publish_poste_report(
     plan_action = []
     for kpi in list(QK) + list(PK):
         nb_anom = anomalies.get(kpi, 0)
-        if nb_anom <= 0:
-            continue
         actual = float(ckdf_row.get(kpi, 100))
+        if not action_requise(kpi, actual, nb_anom):
+            continue
         target = CIBLE.get(kpi, 100)
         from core.calcul_kpi import is_lb
         lower = is_lb(kpi)
@@ -272,6 +272,11 @@ def generate_and_publish_division_report(
     plan_action = []
     for kpi in list(QK) + list(PK):
         nb_anom = anomalies.get(kpi, 0)
+        if kpi in AGE_KPI:
+            # KPI d'âge : seules comptent les anomalies des postes NON conformes
+            serie = ano_map.get(kpi, pd.Series(dtype=float))
+            nb_anom = sum(int(serie.get(p, 0)) for p in postes_valides
+                          if not kpi_conforme(kpi, ckdf.loc[p].get(kpi)))
         if nb_anom <= 0:
             continue
         from core.calcul_kpi import is_lb
