@@ -20,18 +20,23 @@ def _backlogs_non_caracterises(dfp_all: pd.DataFrame, now_ts=None):
         seuls les OT dont la date est passée ont un retard calculable).
     """
     zcor = dfp_all[dfp_all["Type d'ordre"] == "ZCOR"].copy()
+    # Backlog caractérisé : TOUS les types d'ordre (ZCOR, ZPRV, ZEST, ZREV…).
+    # Les KPI d'âge restent sur les ZCOR.
+    tous = dfp_all.copy()
+    _premier_tous = tous["Statut système"].fillna("").astype(str).str.strip().str.split().str[0]
 
     # ── Préparation base (CRÉÉ) ──
     _cree_base_filt = (
         zcor["Statut système"].fillna("").astype(str).str.strip().str.split().str[0] == "CRÉÉ"
     )
     _cree_base = zcor[_cree_base_filt]
+    _cree_tous = tous[_premier_tous.isin(["CRÉÉ", "CREE"])]
 
     # Backlog prep caractérisé : + filtre date planifiée
     if now_ts is not None:
-        _zcor_cree_backlog = _cree_base[_cree_base["Date de début planifiée"] <= now_ts]
+        _zcor_cree_backlog = _cree_tous[_cree_tous["Date de début planifiée"] <= now_ts]
     else:
-        _zcor_cree_backlog = _cree_base
+        _zcor_cree_backlog = _cree_tous
 
     if _zcor_cree_backlog.empty:
         non_prep = _zcor_cree_backlog
@@ -49,12 +54,13 @@ def _backlogs_non_caracterises(dfp_all: pd.DataFrame, now_ts=None):
         & (zcor["Contient SOPL"] == 0)
     )
     _lanc_base = zcor[_lanc_filt]
+    _lanc_tous = tous[(_premier_tous == "LANC") & (tous["Contient SOPL"] == 0)]
 
     # Backlog plan caractérisé ET KPI âge plan : + filtre date planifiée
     if now_ts is not None:
-        _zcor_lanc_filt = _lanc_base[_lanc_base["Date de début planifiée"] <= now_ts]
+        _zcor_lanc_filt = _lanc_tous[_lanc_tous["Date de début planifiée"] <= now_ts]
     else:
-        _zcor_lanc_filt = _lanc_base
+        _zcor_lanc_filt = _lanc_tous
 
     if _zcor_lanc_filt.empty:
         non_plan = _zcor_lanc_filt
