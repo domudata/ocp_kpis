@@ -1745,7 +1745,8 @@ def main():
                     status = "oui_rouge"
 
 
-                if nb_anom > 0:
+                from core.constants import action_requise as _action_requise
+                if _action_requise(kpi, actual, nb_anom):
 
                     plan_actions_rows.append(
                         {
