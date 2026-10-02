@@ -1165,7 +1165,7 @@ def main():
                             "application/vnd.openxmlformats-"
                             "officedocument.spreadsheetml.sheet"
                         ),
-                        use_container_width=True,
+                        width="stretch",
                     )
 
 
@@ -2093,7 +2093,7 @@ def main():
                                 "application/vnd.openxmlformats-"
                                 "officedocument.spreadsheetml.sheet"
                             ),
-                            use_container_width=True,
+                            width="stretch",
                             key="dl_hist_complet_tab3",
                         )
 
@@ -2177,7 +2177,7 @@ def main():
                         "application/vnd.openxmlformats-"
                         "officedocument.presentationml.presentation"
                     ),
-                    use_container_width=True,
+                    width="stretch",
                 )
 
 
@@ -2282,7 +2282,7 @@ def main():
                     _launch_publish = st.button(
                         f"🚀 Générer et publier les rapports "
                         f"({len(vp)} poste(s))",
-                        use_container_width=True,
+                        width="stretch",
                         type="primary",
                         key="btn_publish_all",
                     )
@@ -2293,7 +2293,7 @@ def main():
                     _launch_dry = st.button(
                         "🧪 Générer seulement "
                         "(test, sans publier)",
-                        use_container_width=True,
+                        width="stretch",
                         key="btn_dry_all",
                     )
 
@@ -2704,7 +2704,7 @@ def main():
                 if st.button(
                     "▶️ Afficher le Suivi HSE",
                     type="primary",
-                    use_container_width=True,
+                    width="stretch",
                     key="btn_charger_hse",
                 ):
 
@@ -2731,7 +2731,7 @@ def main():
 
                     if st.button(
                         "⏹ Masquer",
-                        use_container_width=True,
+                        width="stretch",
                         key="btn_masquer_hse",
                     ):
 
@@ -2785,7 +2785,7 @@ def main():
                 if st.button(
                     "▶️ Afficher la Fréquence Maintenance",
                     type="primary",
-                    use_container_width=True,
+                    width="stretch",
                     key="btn_charger_frequence",
                 ):
 
@@ -2812,7 +2812,7 @@ def main():
 
                     if st.button(
                         "⏹ Masquer",
-                        use_container_width=True,
+                        width="stretch",
                         key="btn_masquer_frequence",
                     ):
 
