@@ -639,92 +639,6 @@ def _section_ot(df, titre, icone, couleur_principale, buffers, cle, date_str="")
                 st.image(buffers[k], use_container_width=True)
 
     _bouton_excel_section(df, cle, titre, date_str)
-    _section_documents_joints(df, titre, couleur_principale, cle, date_str)
-
-
-# ── Documents joints (fichier « fichiers originaux ») ────────────────────────
-def _bar_documents(synth, titre, couleur):
-    """Barres par poste : total OT (fond) et OT avec document joint, avec %."""
-    t = synth[synth["Poste de travail"] != "TOTAL"].sort_values("Total OT")
-    if t.empty:
-        return None
-    hauteur = max(2.8, 0.42 * len(t) + 1.2)
-    fig, ax = plt.subplots(figsize=(9, hauteur), dpi=170)
-    y = np.arange(len(t))
-    ax.barh(y, t["Total OT"], height=0.62, color="#E2E8F0", label="OT de la catégorie")
-    ax.barh(y, t["Avec document"], height=0.62, color=couleur, label="OT avec document joint")
-    maxi = float(t["Total OT"].max()) or 1
-    for i, (_, r) in enumerate(t.iterrows()):
-        ax.text(r["Total OT"] + maxi * 0.012, i,
-                f"{int(r['Avec document'])} / {int(r['Total OT'])}  ({r['% avec document']:.0f}%)",
-                va="center", fontsize=8.5, fontweight="bold", color=DARK)
-    ax.set_yticks(y); ax.set_yticklabels(t["Poste de travail"].astype(str))
-    ax.set_title(titre, fontsize=11.5, fontweight="bold", color=NAVY, loc="left", pad=24)
-    ax.legend(fontsize=8.5, frameon=False, ncol=2, loc="lower left", bbox_to_anchor=(0, 1.005))
-    ax.set_xlabel("Nombre d'OT", fontsize=9)
-    ax.grid(axis="x", color="#F1F5F9", linewidth=1); ax.set_axisbelow(True)
-    ax.spines[["top", "right"]].set_visible(False); ax.tick_params(labelsize=9)
-    ax.set_xlim(0, maxi * 1.32)
-    plt.tight_layout()
-    buf = io.BytesIO()
-    plt.savefig(buf, format="png", dpi=170, bbox_inches="tight", facecolor="white")
-    plt.close(fig); buf.seek(0)
-    return buf
-
-
-def _excel_documents(synth, detail, titre):
-    buf = io.BytesIO()
-    with pd.ExcelWriter(buf, engine="openpyxl") as xw:
-        synth.to_excel(xw, sheet_name="Synthèse par poste", index=False)
-        detail.to_excel(xw, sheet_name="Détail des OT", index=False)
-        from openpyxl.styles import Font, PatternFill
-        for ws in xw.sheets.values():
-            for c in ws[1]:
-                c.font = Font(bold=True, color="FFFFFF"); c.fill = PatternFill("solid", fgColor="1E3A5F")
-            for col in ws.columns:
-                ws.column_dimensions[col[0].column_letter].width = max(12, min(48, max(len(str(c.value or "")) for c in col) + 2))
-        ws = xw.sheets["Synthèse par poste"]
-        for c in ws[ws.max_row]:
-            c.font = Font(bold=True)
-    buf.seek(0)
-    return buf.getvalue()
-
-
-def _section_documents_joints(df, titre, couleur, cle, date_str=""):
-    from core import documents_joints as dj
-    st.markdown(f"#### 📎 Documents joints — {titre}")
-    ots, source, err = dj.charger_ot_avec_document()
-    if source is None:
-        st.info("Fichier « Ordres de travail.xlsx » introuvable à la racine de l'application "
-                "(colonnes Ordre et Fichiers originaux).")
-        return
-    if err:
-        st.warning(f"Documents joints ({source}) : {err}")
-        return
-    d = dj.marquer(df, ots)
-    synth = dj.synthese_par_poste(d)
-    if synth.empty:
-        st.info("Aucun OT à analyser.")
-        return
-    tot = synth.iloc[-1]
-    c1, c2, c3 = st.columns(3)
-    _carte(c1, "OT de la catégorie", f"{int(tot['Total OT'])}", couleur, "sur le périmètre")
-    _carte(c2, "Avec document joint", f"{int(tot['Avec document'])}", GREEN, f"{tot['% avec document']:.0f}% des OT")
-    _carte(c3, "Sans document joint", f"{int(tot['Sans document'])}", GREY, f"{100 - tot['% avec document']:.0f}% des OT")
-    img = _bar_documents(synth, f"{titre} — OT avec document joint par poste de travail", couleur)
-    if img:
-        st.image(img, use_container_width=True)
-    cols_detail = [c for c in ["Ordre", "Poste travail princ.", "Désignation", "Poste technique",
-                               "Statut système", "Créé le", "Document joint"] if c in d.columns]
-    detail = d[cols_detail].sort_values(["Document joint", "Poste travail princ."] if "Poste travail princ." in d.columns else ["Document joint"])
-    st.download_button(
-        f"⬇️ Exporter les documents joints (Excel) — {titre}",
-        data=_excel_documents(synth, detail, titre),
-        file_name=f"documents_joints_{cle}_{str(date_str).replace('/', '-')}.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True, key=f"dl_docs_{cle}")
-    st.caption(f"Source : {source}. Un OT présent dans le fichier avec « Fichiers originaux » "
-               "différent de 0 compte comme 1 OT avec document joint.")
 
 
 def _tableau_avis_fuites_par_atelier_et_type(df_fuites):
@@ -1038,25 +952,24 @@ def render_suivi_hse_tab(dfp, avf, vp, date_str=""):
 
     st.markdown("---")
     st.markdown("### 📎 Documents joints par poste de travail")
-    from core import documents_joints as _dj
-    tab_docs, src_docs, err_docs = _dj.total_par_poste([p for p in vp])
-    if src_docs is None:
-        st.warning("⚠️ Fichier « Ordres de travail.xlsx » introuvable à la racine de l'application.")
-    elif err_docs:
-        st.warning(f"⚠️ {src_docs} : {err_docs}")
+    tab_docs, msg_docs = _charger_documents_joints(tuple(vp))
+    if tab_docs is None:
+        st.warning(
+            f"⚠️ {msg_docs}\n\nLe fichier doit contenir une colonne de postes "
+            f"(« Poste travail princ. ») et une colonne de comptage "
+            f"(« Nombre documents joints »), et être committé sur GitHub."
+        )
+    elif tab_docs.empty:
+        st.warning(f"⚠️ {msg_docs}")
     else:
-        tab_aff = tab_docs[tab_docs["Nombre documents joints"] > 0]
-        total = int(tab_aff["Nombre documents joints"].sum())
-        tab_aff = pd.concat([tab_aff, pd.DataFrame([{"Poste de travail": "TOTAL",
-                                                     "Nombre documents joints": total}])], ignore_index=True)
-        st.caption(f"Source : `{src_docs}` — nombre d'OT (tous types) ayant au moins un document joint, "
-                   f"par poste de travail. Total : {total} OT.")
-        st.dataframe(tab_aff, use_container_width=True, hide_index=True,
-                     height=min(38 * (len(tab_aff) + 1), 720))
-        st.download_button("⬇️ Exporter le tableau (Excel)", data=_export_excel_bytes(tab_aff, "Documents joints"),
-                           file_name=f"documents_joints_par_poste_{str(date_str).replace('/', '-')}.xlsx",
-                           mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                           use_container_width=True, key="dl_docs_total")
+        renseignes = int(tab_docs["Nombre documents joints"].notna().sum())
+        st.caption(
+            f"Source : `documents_joints.xlsx` — {msg_docs} "
+            f"{renseignes} poste(s) avec un nombre renseigné. "
+            f"Complétez la colonne dans le fichier Excel puis committez-le : "
+            f"le tableau se mettra à jour automatiquement."
+        )
+        st.dataframe(tab_docs, use_container_width=True, hide_index=True, height=320)
 
     st.markdown("---")
     st.markdown("#### 📄 Rapport de synthèse")
