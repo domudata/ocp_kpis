@@ -928,7 +928,7 @@ def _dessiner_barre_empilee_reference(res: dict, label_periode: str, key_prefix:
         st.caption("👆 Cliquez sur une barre pour voir le détail par KPI.")
 
 
-@st.cache_data(show_spinner="Calcul des anomalies de la semaine...", max_entries=16)
+@st.cache_data(show_spinner="Calcul des anomalies de la semaine...", max_entries=4)
 def _calc_semaine_live(_df_full, _avf_full, now_ts, apm_tuple, annee: int, numero_semaine: int,
                         qk_tuple, pk_tuple):
     """Calcul EN DIRECT (pas de dépendance à un fichier historique),
