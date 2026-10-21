@@ -37,7 +37,7 @@ def _carte_kpi(col, label, valeur, couleur, sous_texte=""):
     )
 
 
-@st.cache_data(show_spinner="Analyse de la fréquence de maintenance en cours...")
+@st.cache_data(show_spinner="Analyse de la fréquence de maintenance en cours...", max_entries=1)
 def _calculer_pipeline_complet(df_ot, chemin_plan, chemin_freq):
     plans_actifs, type_travail_map = charger_reference_plans_actifs(chemin_plan)
     freq_officielle_map = charger_reference_frequence_officielle(chemin_freq)
