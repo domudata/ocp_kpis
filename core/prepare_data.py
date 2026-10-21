@@ -90,7 +90,6 @@ def excr(df: pd.DataFrame) -> pd.DataFrame:
 # Lecture Excel robuste
 # ──────────────────────────────────────────────
 
-@st.cache_data(show_spinner=False)
 def read_excel_safe(bytes_data: bytes) -> pd.DataFrame:
     """Lit un fichier Excel en détectant automatiquement le vrai format."""
     bio = io.BytesIO(bytes_data)
@@ -129,7 +128,7 @@ def read_excel_safe(bytes_data: bytes) -> pd.DataFrame:
 # Préparation des données
 # ──────────────────────────────────────────────
 
-@st.cache_data(show_spinner=False)
+@st.cache_data(show_spinner=False, max_entries=1)
 def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
     raw_ot = read_excel_safe(ot_bytes)
     raw_av = read_excel_safe(av_bytes)
