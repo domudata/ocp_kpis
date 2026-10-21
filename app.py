@@ -164,7 +164,9 @@ CALC_VERSION, _CALC_SIG_OK = _calc_signature()
 # ═══════════════════════════════════════════════════════════════════════════
 
 @st.cache_data(
-    show_spinner="Calcul des KPIs en cours..."
+    show_spinner="Calcul des KPIs en cours...",
+    max_entries=3,
+    ttl=3600,
 )
 def calc_kpis_cached(
     df_period,
