@@ -369,7 +369,7 @@ def _bar_fuites_par_type(pivot, titre="Ventilation des avis fuites par type (Cl�
     return buf
 
 
-@st.cache_data(show_spinner="Analyse HSE en cours...", max_entries=8)
+@st.cache_data(show_spinner="Analyse HSE en cours...", max_entries=2)
 def _calculer_sections_hse(_dfp, _avf, vp_tuple, date_str, sel_annee, sel_mois, sel_sem, sel_atelier="Tous"):
     ot = _ajouter_periode(_dfp.copy(), "Créé le")
     avis = _ajouter_periode(_avf.copy(), "Créé le") if _avf is not None and not _avf.empty else pd.DataFrame()
