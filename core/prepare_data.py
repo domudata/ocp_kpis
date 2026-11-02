@@ -128,12 +128,23 @@ def read_excel_safe(bytes_data: bytes) -> pd.DataFrame:
 # Préparation des données
 # ──────────────────────────────────────────────
 
-@st.cache_data(show_spinner=False, max_entries=1)
+# Colonnes jamais utilisées par l'application : supprimées dès la lecture
+# pour limiter la mémoire (limite d'environ 1 Go sur Streamlit Cloud).
+COLONNES_INUTILES_OT = ["Centre de coûts", "Centre de profit", "Élément d'OTP", "Révision", "Poste d'entretien"]
+COLONNES_INUTILES_AVIS = ["Créé à", "Date de l'avis", "Heure de l'avis", "Modifié par", "Date de modification",
+                          "Heure modification", "Heure début souhaitée", "Heure de clôture", "Centre de coûts"]
+
+
+# cache_resource : les tableaux sont gardés UNE seule fois en mémoire et
+# partagés, sans copie à chaque affichage (cache_data recopiait ~500 Mo).
+@st.cache_resource(show_spinner=False, max_entries=1)
 def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
     raw_ot = read_excel_safe(ot_bytes)
     raw_av = read_excel_safe(av_bytes)
     raw_ot = excr(raw_ot)
     raw_av = excr(raw_av)
+    raw_ot = raw_ot.drop(columns=[c for c in COLONNES_INUTILES_OT if c in raw_ot.columns])
+    raw_av = raw_av.drop(columns=[c for c in COLONNES_INUTILES_AVIS if c in raw_av.columns])
 
     for c in ["Créé le", "Date de début planifiée", "Date de clôture", "Début réel", "Fin réelle"]:
         if c in raw_ot.columns:
@@ -161,7 +172,8 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
     # dans app.py, uniquement sur la copie destinée aux autres KPI).
     # app.py réutilise directement ce "df" (sous le nom df_full) comme
     # df_toutes_dates lors de l'appel à calc_kpis().
-    df = raw_ot.copy()
+    df = raw_ot
+    del raw_ot
 
     df["Backlog preparation"] = np.where(
         df["Statut utilisateur"].apply(lambda x: contient_mot(x, MP_KW)),
@@ -242,6 +254,6 @@ def prepare_data(ot_bytes: bytes, av_bytes: bytes, date_str: str):
     # aux usages autres que le Taux d'approbation des Avis — notamment le
     # suivi HSE, qui a besoin des types ZI (Inspection) et ZH (HSE),
     # structurellement absents de "avf" ci-dessus.
-    avis_complet = raw_av.copy()
+    avis_complet = raw_av
 
     return df, avf, apm, now_ts, avis_complet, avf_approve
