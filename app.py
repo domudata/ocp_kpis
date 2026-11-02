@@ -163,9 +163,9 @@ CALC_VERSION, _CALC_SIG_OK = _calc_signature()
 # CACHE CALCUL KPI
 # ═══════════════════════════════════════════════════════════════════════════
 
-@st.cache_data(
+@st.cache_resource(
     show_spinner="Calcul des KPIs en cours...",
-    max_entries=3,
+    max_entries=2,
     ttl=3600,
 )
 def calc_kpis_cached(
